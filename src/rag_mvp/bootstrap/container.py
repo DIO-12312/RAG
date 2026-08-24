@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from types import FrameType
 
 from rag_mvp.config import Settings
+from rag_mvp.rpc.rag_service import RagService
 
 
 @dataclass(slots=True)
@@ -19,6 +20,7 @@ class Container:
     """
 
     settings: Settings
+    rag_service: RagService | None = None
     _closed: bool = field(default=False, init=False)
     _close_count: int = field(default=0, init=False)
 

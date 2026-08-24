@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+
+from rag_mvp.domain.enums import JobStatus, JobType, TaskStatus
+from rag_mvp.domain.errors import DomainFailure
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +41,7 @@ class SubmitDocumentCommand:
     parser_version: str
     chunk_size: int
     chunk_overlap: int
-    embedding_model: str
+    embedding_model: str | None
     now: datetime
 
 
@@ -46,3 +50,34 @@ class SubmitDocumentResult:
     document_id: str
     job_id: str
     reused: bool
+
+
+@dataclass(frozen=True, slots=True)
+class GetJobQuery:
+    request_id: str
+    job_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class JobView:
+    job_id: str
+    document_id: str
+    type: JobType
+    status: JobStatus
+    progress: float
+    failure: DomainFailure | None
+    retryable: bool
+    retry_count: int
+    cancel_requested: bool
+    task_status: TaskStatus
+
+
+@dataclass(frozen=True, slots=True)
+class RetrieveQuery:
+    request_id: str
+    dataset_id: str
+    query: str
+    top_k: int
+    filters: Mapping[str, str]
+    max_context_tokens: int
+    enable_rerank: bool = False

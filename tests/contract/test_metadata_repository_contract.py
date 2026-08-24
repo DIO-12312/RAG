@@ -113,6 +113,9 @@ async def test_finalizer_transition_and_task_claim_are_conditional() -> None:
     assert await repository.get_document(submitted.document_id) is not None
     assert await repository.get_job(submitted.job_id) is not None
     assert await repository.get_task(submitted.task_id) is not None
+    task_for_job = await repository.get_task_for_job(submitted.job_id)
+    assert task_for_job is not None and task_for_job.id == submitted.task_id
+    assert await repository.get_task_for_job("missing") is None
 
 
 @pytest.mark.asyncio

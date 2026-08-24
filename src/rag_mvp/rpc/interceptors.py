@@ -1,6 +1,13 @@
-"""gRPC interceptor boundary.
+"""Transport-level business error conversion helpers."""
 
-Request IDs, deadlines, default-tenant injection, and exception mapping are
-implemented alongside the first application RPCs in Milestone B. Keeping this
-module transport-only prevents import-time adapter construction.
-"""
+from rag_mvp.domain.errors import DomainFailure
+from rag_mvp.rpc.generated import rag_service_pb2
+
+
+def business_error(failure: DomainFailure, request_id: str) -> rag_service_pb2.BusinessError:
+    return rag_service_pb2.BusinessError(
+        code=failure.code,
+        message=failure.message,
+        retryable=failure.retryable,
+        request_id=request_id,
+    )

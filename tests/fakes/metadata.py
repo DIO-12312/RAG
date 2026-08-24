@@ -176,6 +176,9 @@ class FakeMetadataRepository:
     async def get_task(self, task_id: str) -> Task | None:
         return self.tasks.get(task_id)
 
+    async def get_task_for_job(self, job_id: str) -> Task | None:
+        return next((task for task in self.tasks.values() if task.job_id == job_id), None)
+
     async def get_document(self, document_id: str) -> Document | None:
         return self.documents.get(document_id)
 

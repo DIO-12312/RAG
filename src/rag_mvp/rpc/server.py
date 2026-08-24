@@ -24,10 +24,9 @@ async def serve(
 ) -> None:
     """Start the private gRPC server and stop it gracefully."""
 
-    del container
     server = grpc.aio.server()
     rag_service_pb2_grpc.add_RagServiceServicer_to_server(  # type: ignore[no-untyped-call]
-        RagService(), server
+        container.rag_service or RagService(), server
     )
 
     if settings.grpc_reflection:

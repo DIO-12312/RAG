@@ -33,6 +33,19 @@ class DocumentService:
         self._max_upload_bytes = max_upload_bytes
 
     async def create_dataset(self, command: CreateDatasetCommand) -> CreateDatasetResult:
+        if not command.idempotency_key:
+            raise DomainError(
+                DomainFailure("IDEMPOTENCY_KEY_REQUIRED", "idempotency key is required")
+            )
+        if not command.name.strip():
+            raise DomainError(DomainFailure("DATASET_NAME_REQUIRED", "dataset name is required"))
+        if not command.embedding_model.strip() or command.embedding_dimension < 1:
+            raise DomainError(
+                DomainFailure(
+                    "INVALID_EMBEDDING_CONFIG",
+                    "embedding model and positive dimension are required",
+                )
+            )
         dataset_id = command.dataset_id or str(
             uuid.uuid5(uuid.NAMESPACE_URL, f"rag-dataset:{command.idempotency_key}")
         )
@@ -63,6 +76,19 @@ class DocumentService:
 
     async def submit_document(self, command: SubmitDocumentCommand) -> SubmitDocumentResult:
         self._validate_upload(command)
+        dataset = await self._metadata.get_dataset(command.dataset_id)
+        if dataset is None:
+            raise DomainError(DomainFailure("DATASET_NOT_FOUND", "dataset does not exist"))
+        if (
+            command.embedding_model is not None
+            and command.embedding_model != dataset.embedding_model
+        ):
+            raise DomainError(
+                DomainFailure(
+                    "EMBEDDING_MODEL_MISMATCH",
+                    "document embedding model must match its dataset",
+                )
+            )
         actual_sha256 = file_sha256(command.content)
         if command.expected_sha256 is not None and command.expected_sha256 != actual_sha256:
             raise DomainError(
@@ -90,7 +116,7 @@ class DocumentService:
                     "chunk_size": command.chunk_size,
                     "overlap": command.chunk_overlap,
                 },
-                "embedding_model": command.embedding_model,
+                "embedding_model": dataset.embedding_model,
             }
         )
         try:
