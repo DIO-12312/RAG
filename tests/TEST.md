@@ -57,7 +57,8 @@ tests/
 │  ├─ test_mysql_lifecycle.py
 │  ├─ test_mysql_migrations.py
 │  ├─ test_mysql_outbox_worker.py
-│  └─ test_mysql_submission.py
+│  ├─ test_mysql_submission.py
+│  └─ test_real_embedding_model.py
 ├─ resilience/                              # 故障、竞态、重投与恢复矩阵
 │  ├─ test_cancel_races.py
 │  ├─ test_concurrent_uniqueness.py
@@ -67,7 +68,8 @@ tests/
 │  └─ test_spec_invariant_matrix.py
 └─ unit/                                    # 领域纯规则和单组件行为
    ├─ adapters/
-   │  └─ test_mysql_schema.py
+   │  ├─ test_mysql_schema.py
+   │  └─ test_openai_compatible_model.py
    ├─ application/
    │  ├─ test_document_service.py
    │  ├─ test_job_service.py
@@ -118,6 +120,13 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_schema_declares_business_uniqueness_constraints` | Fingerprint、版本、幂等记录、manifest 和 Outbox 具有业务唯一约束。 |
 | 同上 | `test_schema_declares_aggregate_foreign_keys` | Dataset、Document、Job、Task、Outbox 和 manifest 的聚合外键完整。 |
 | 同上 | `test_schema_uses_precise_json_time_and_digest_columns_without_vectors` | JSON、DATETIME(6) 与 64 位摘要字段类型正确，manifest 不保存向量。 |
+| `adapters/test_openai_compatible_model.py` | `test_embed_normalizes_url_preserves_batch_order_and_bearer_header` | 规范 endpoint、仅以 Bearer header 鉴权，并对分批乱序响应恢复全局输入顺序。 |
+| 同上 | `test_embed_empty_input_does_not_call_provider` | 空输入直接返回空向量集合，不产生外部请求。 |
+| 同上 | `test_embed_rejects_invalid_schema_count_dimension_and_numbers` | 参数化拒绝错误 object/data、数量、重复 index、维度和非有限数值。 |
+| 同上 | `test_auth_failure_is_non_retryable_and_redacts_provider_body` | 401/403 不重试，映射稳定鉴权错误且不泄漏供应商正文或密钥。 |
+| 同上 | `test_embed_does_not_duplicate_existing_embeddings_suffix` | 已带 `/embeddings` 的 endpoint 不被重复拼接。 |
+| 同上 | `test_transient_statuses_retry_with_a_bound_and_recover` | 429/5xx 按有上限的指数退避重试，并在后续成功时恢复。 |
+| 同上 | `test_timeout_exhaustion_maps_to_retryable_unavailable` | 网络超时耗尽重试后映射为可重试 `EMBEDDING_UNAVAILABLE`。 |
 | `application/test_document_service.py` | `test_create_dataset_rejects_runtime_embedding_mismatch` | Dataset 声明的 Embedding 模型或维度与运行配置不一致时返回稳定错误。 |
 | 同上 | `test_submit_writes_staging_and_atomically_creates_waiting_work` | 上传先写 staging，再原子创建 Document、Job、Task 和 WAITING Outbox。 |
 | 同上 | `test_same_file_different_key_reuses_canonical_job_and_cleans_loser_staging` | 相同内容不同幂等键复用 canonical Job，并删除未被引用的 staging。 |
@@ -204,6 +213,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_finalizer_transition_and_task_claim_are_conditional` | Finalizer/Relay 转换为条件更新；Task 按 delivery sequence 去重并允许更高序号重投。 |
 | 同上 | `test_complete_and_fail_are_conditional_and_visibility_uses_active_version` | 完成/失败为条件更新，检索可见性复核 active version。 |
 | `test_model_gateway_contract.py` | `test_fake_model_is_deterministic_and_dimensionally_stable` | Fake Model 的 embedding 确定且维度稳定。 |
+| 同上 | `test_unconfigured_rerank_is_explicitly_retryable_unavailable` | 未配置真实 Rerank endpoint 时返回可降级、可重试的稳定错误，不伪造分数。 |
 | `test_object_storage_contract.py` | `test_object_storage_write_promote_read_and_delete_are_idempotent` | ObjectStorage 的写、提升、读、删具备幂等语义。 |
 | 同上 | `test_local_object_storage_has_the_same_semantics` | LocalObjectStorage 与端口契约语义一致。 |
 | 同上 | `test_local_object_storage_rejects_path_traversal` | LocalObjectStorage 拒绝路径穿越。 |
@@ -242,6 +252,8 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | `test_mysql_submission.py` | `test_concurrent_same_fingerprint_creates_one_canonical_task_and_outbox` | 并发同内容上传只保留一个 canonical Document/Job/Task/Outbox，并记录两个幂等结果。 |
 | 同上 | `test_exception_before_commit_rolls_back_all_submission_rows` | Outbox INSERT 前异常使 Document/Fingerprint/Job/Task/Outbox/IndexBuild/幂等记录全部回滚。 |
 | 同上 | `test_same_idempotency_key_replays_result_and_rejects_changed_command` | 同 key 同命令回放首次结果，同 key 不同命令返回稳定冲突且不产生额外状态。 |
+| `test_real_embedding_model.py` | `test_real_embedding_returns_finite_declared_dimension_and_stable_duplicates` | 真实 API 分批返回声明维度的有限向量，相同中文文本向量保持高度一致。 |
+| 同上 | `test_real_embedding_ranks_related_chinese_text_above_unrelated_text` | 真实模型对中文相关语句的余弦相似度高于无关语句。 |
 
 ## Functional 测试函数
 

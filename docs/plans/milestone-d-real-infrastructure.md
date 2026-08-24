@@ -530,7 +530,7 @@ git commit -m "feat(mysql): 实现文档生命周期与并发栅栏"
 - Implements: `rerank(...)` as retryable `RERANK_UNAVAILABLE` until a real rerank endpoint is configured
 - Produces: `close() -> None`
 
-- [ ] **Step 1: Write failing MockTransport unit tests**
+- [x] **Step 1: Write failing MockTransport unit tests**
 
 Cover URL normalization, Bearer header without logging, response index reordering, batch splitting, NaN rejection, count/dimension mismatch, 401 non-retryable, 429/5xx bounded retry and timeout mapping.
 
@@ -540,19 +540,19 @@ assert vectors == [vector_for_a, vector_for_b, vector_for_c]
 assert all(len(vector) == 1024 for vector in vectors)
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest tests/unit/adapters/test_openai_compatible_model.py -q`
 
-- [ ] **Step 3: Implement minimal async adapter**
+- [x] **Step 3: Implement minimal async adapter**
 
 Use `httpx.AsyncClient`, chunked batches and `asyncio.sleep` backoff. Never include provider response body in `DomainFailure.message`; only stable status/error classification.
 
-- [ ] **Step 4: Verify unit GREEN**
+- [x] **Step 4: Verify unit GREEN**
 
 Run: `uv run pytest tests/unit/adapters/test_openai_compatible_model.py tests/contract/test_model_gateway_contract.py -q`
 
-- [ ] **Step 5: Run mandatory real model tests on host**
+- [x] **Step 5: Run mandatory real model tests on host**
 
 Ensure local `.env` contains the previously measured non-secret declaration `EMBEDDING_MODEL_DIMENSION=1024`, without printing the file.
 
@@ -564,7 +564,7 @@ uv run pytest -m model_integration tests/integration/test_real_embedding_model.p
 
 Expected: single, batch, finite 1024-dimension and Chinese relative-similarity tests pass; missing configuration is FAIL, not SKIP.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/rag_mvp/adapters/model/openai_compatible.py tests/unit/adapters/test_openai_compatible_model.py tests/integration/test_real_embedding_model.py tests/contract/test_model_gateway_contract.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
