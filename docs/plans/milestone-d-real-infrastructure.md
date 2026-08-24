@@ -358,7 +358,7 @@ git commit -m "feat(mysql): 建立核心 schema 与迁移"
 - Produces: `MySQLMetadataRepository(session_factory, default_tenant_id)`
 - Implements: `create_dataset`, `get_dataset`, `submit_ingestion`, `get_job`, `get_task`, `get_task_for_job`, `get_document`
 
-- [ ] **Step 1: Parameterize repository contract and write real concurrency tests**
+- [x] **Step 1: Parameterize repository contract and write real concurrency tests**
 
 The real suite must assert:
 
@@ -375,17 +375,17 @@ assert await count_rows("outbox_events") == 1
 
 Also inject an exception before commit and assert zero partial Document/Job/Task/Outbox rows.
 
-- [ ] **Step 2: Verify RED against MySQL fixture**
+- [x] **Step 2: Verify RED against MySQL fixture**
 
 Run: `uv run pytest -m integration tests/integration/test_mysql_submission.py -q`
 
 Expected: `MySQLMetadataRepository` import/implementation failure.
 
-- [ ] **Step 3: Implement transaction and mapper methods**
+- [x] **Step 3: Implement transaction and mapper methods**
 
-`submit_ingestion` must use one `async with session.begin()` and lock/create fingerprint before Document/Job/Task/Outbox/IndexBuild. Duplicate idempotency returns the recorded result; fingerprint loser returns canonical Job and `staging_referenced=False`.
+`submit_ingestion` must use one `async with session.begin()`. Existing fingerprint rows are read with `FOR UPDATE`; for a missing fingerprint, Document/Job are flushed only as foreign-key prerequisites, then the unique fingerprint is inserted and flushed before Task/Outbox/IndexBuild. A unique-key loser rolls back those prerequisite rows, reads the committed canonical fingerprint in a new transaction, and returns `staging_referenced=False`. Duplicate idempotency returns the recorded result.
 
-- [ ] **Step 4: Verify GREEN and Task/Outbox atomicity**
+- [x] **Step 4: Verify GREEN and Task/Outbox atomicity**
 
 ```powershell
 uv run pytest -m integration tests/integration/test_mysql_submission.py -q
@@ -394,7 +394,7 @@ uv run ruff check src/rag_mvp/adapters/metadata tests/integration/test_mysql_sub
 uv run mypy src
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/rag_mvp/adapters/metadata/mysql.py src/rag_mvp/adapters/metadata/mappers.py tests/integration/test_mysql_submission.py tests/contract/test_metadata_repository_contract.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md

@@ -53,7 +53,8 @@ tests/
 │  └─ test_mock_upload_ingest_retrieve.py
 ├─ integration/                             # 依赖真实 Docker 基础设施的 adapter 验证
 │  ├─ conftest.py                            # host/container MySQL 测试 DSN
-│  └─ test_mysql_migrations.py
+│  ├─ test_mysql_migrations.py
+│  └─ test_mysql_submission.py
 ├─ resilience/                              # 故障、竞态、重投与恢复矩阵
 │  ├─ test_cancel_races.py
 │  ├─ test_concurrent_uniqueness.py
@@ -195,7 +196,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_rpc_maps_domain_failures_and_keeps_future_methods_closed` | 领域错误映射正确，未来方法保持关闭。 |
 | 同上 | `test_submit_document_rejects_data_before_header` | 上传流首帧必须为 header。 |
 | 同上 | `test_open_methods_work_through_generated_grpc_transport` | 已开放方法可经生成的 gRPC transport 调用。 |
-| `test_metadata_repository_contract.py` | `test_submit_atomically_creates_task_and_waiting_outbox_and_deduplicates` | 提交原子创建 Task/WAITING Outbox，并执行去重。 |
+| `test_metadata_repository_contract.py` | `test_submit_atomically_creates_task_and_waiting_outbox_and_deduplicates` | 提交原子创建 Task/WAITING Outbox，并分别验证同 key 与同 fingerprint 去重。 |
 | 同上 | `test_submit_failure_does_not_leave_partial_metadata` | 提交失败不留下部分元数据。 |
 | 同上 | `test_finalizer_transition_and_task_claim_are_conditional` | Finalizer 转换和 Task 认领必须为条件更新。 |
 | 同上 | `test_complete_and_fail_are_conditional_and_visibility_uses_active_version` | 完成/失败为条件更新，检索可见性复核 active version。 |
@@ -224,6 +225,9 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
 | `test_mysql_migrations.py` | `test_upgrade_head_is_idempotent_and_creates_innodb_schema` | 对真实 MySQL 连续升级两次，验证 revision、默认租户、InnoDB 表和关键唯一约束。 |
+| `test_mysql_submission.py` | `test_concurrent_same_fingerprint_creates_one_canonical_task_and_outbox` | 并发同内容上传只保留一个 canonical Document/Job/Task/Outbox，并记录两个幂等结果。 |
+| 同上 | `test_exception_before_commit_rolls_back_all_submission_rows` | Outbox INSERT 前异常使 Document/Fingerprint/Job/Task/Outbox/IndexBuild/幂等记录全部回滚。 |
+| 同上 | `test_same_idempotency_key_replays_result_and_rejects_changed_command` | 同 key 同命令回放首次结果，同 key 不同命令返回稳定冲突且不产生额外状态。 |
 
 ## Functional 测试函数
 

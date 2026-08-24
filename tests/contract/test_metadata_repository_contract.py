@@ -34,7 +34,10 @@ def _submission(*, idempotency_key: str, staging_key: str, now: datetime) -> Sub
 
 
 @pytest.mark.asyncio
-async def test_submit_atomically_creates_task_and_waiting_outbox_and_deduplicates() -> None:
+@pytest.mark.parametrize("second_idempotency_key", ("request-a", "request-b"))
+async def test_submit_atomically_creates_task_and_waiting_outbox_and_deduplicates(
+    second_idempotency_key: str,
+) -> None:
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     await repository.create_dataset(_dataset(now))
@@ -43,7 +46,7 @@ async def test_submit_atomically_creates_task_and_waiting_outbox_and_deduplicate
         _submission(idempotency_key="request-a", staging_key="staging/a", now=now)
     )
     duplicate = await repository.submit_ingestion(
-        _submission(idempotency_key="request-b", staging_key="staging/b", now=now)
+        _submission(idempotency_key=second_idempotency_key, staging_key="staging/b", now=now)
     )
 
     assert first.reused is False
