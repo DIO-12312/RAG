@@ -189,7 +189,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 | 依赖管理 | `uv` + `pyproject.toml` | 锁定依赖并快速创建可复现环境。 |
 | 代码质量 | Ruff + mypy | Ruff 统一 lint/format；mypy 对端口和 DTO 做静态校验。 |
 | 测试 | pytest + pytest-asyncio + pytest-cov | 支持同步/异步单测、覆盖率与 fixture。 |
-| 容器编排 | Docker Compose | 一条命令启动 gRPC Server、Worker、Outbox Relay、MySQL、Elasticsearch、NATS；本地 MVP 不引入 Kubernetes。 |
+| 容器编排 | Docker Compose | 多阶段 `runtime/test` 镜像；Migration 成功后启动 gRPC Server、Worker、Outbox、MySQL、Elasticsearch、NATS；本地 MVP 不引入 Kubernetes。 |
 | Chunk ID | `xxhash` | 使用 RAGFlow 同款 xxHash64(`content_with_weight + document_id`) 生成可重放的索引主键。 |
 
 ### 3.2 数据与基础设施
@@ -655,7 +655,7 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 
 ### 5.7 配置与可观测性
 
-`Settings` 只从环境变量/`.env` 读取：MySQL DSN、对象目录、Elasticsearch URL/索引名、NATS URL/stream/consumer、模型 URL/名称/API Key/声明维度、parser 版本、chunk 大小/重叠、上传上限、`ack_wait`、`max_deliver`、Worker 空闲等待、Outbox 轮询/批量/Finalizer 尝试上限、staging sweep 间隔/TTL、重试退避和日志级别。RPC 上传计算 `config_digest` 与 Worker Pipeline 必须使用同一份 parser/chunk/model Settings，禁止入口使用硬编码配置造成去重摘要与真实执行参数不一致。所有循环在超时轮询期间仍必须能被 stop event 立即唤醒。生产容器要求 `EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_MODEL_API_KEY` 与 `EMBEDDING_MODEL_DIMENSION`；维度不得在代码中按供应商写死。API Key 只存在环境变量或密钥管理系统，禁止写入 Dataset、Job、日志、trace、镜像或测试 artifact。
+`Settings` 只从环境变量/`.env` 读取：MySQL DSN、Alembic migration root、对象目录、Elasticsearch URL/索引名、NATS URL/stream/consumer、模型 URL/名称/API Key/声明维度、parser 版本、chunk 大小/重叠、上传上限、`ack_wait`、`max_deliver`、Worker 空闲等待、Outbox 轮询/批量/Finalizer 尝试上限、staging sweep 间隔/TTL、重试退避和日志级别。容器镜像必须复制 Alembic 配置与版本脚本，并由 `rag-migrate` 显式设置 migration root 后执行 `upgrade head`；应用角色只能在迁移成功后启动。RPC 上传计算 `config_digest` 与 Worker Pipeline 必须使用同一份 parser/chunk/model Settings，禁止入口使用硬编码配置造成去重摘要与真实执行参数不一致。所有循环在超时轮询期间仍必须能被 stop event 立即唤醒。生产容器要求 `EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_MODEL_API_KEY` 与 `EMBEDDING_MODEL_DIMENSION`；维度不得在代码中按供应商写死。API Key 只存在环境变量或密钥管理系统，禁止写入 Dataset、Job、日志、trace、镜像或测试 artifact。
 
 真实模型 integration 和 Docker E2E 被显式选择时，缺少模型配置必须使门禁失败，不得静默 skip 或回退 Fake。Unit、快速 Contract 与 pre-commit 继续使用确定性 Fake，避免将外部网络抖动和费用引入每次提交；Fake 结果仍不能替代真实发布验收。
 

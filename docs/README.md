@@ -2,13 +2,13 @@
 
 可靠、可恢复的 Python RAG 计算服务。Python 只通过版本化 gRPC 提供文档摄取、检索与 evidence 能力；未来的公网 API、鉴权、会话、Chat Model、Agent Harness 和 SSE 由 Go 控制面负责。
 
-当前已完成 Milestone D 的 Mock Reliability 闭环：四类文件摄取、Dense + BM25 + RRF、可选 Rerank、ContextPlan、RetryJob、CancelJob、DeleteDocument、Finalizer 终态、staging sweeper 与 generation fence 均可通过真实 gRPC/application/Outbox/Worker/pipeline 调用链运行。MySQL、Elasticsearch、NATS JetStream 的真实 adapter 与 Compose/Docker KILL 验收仍未完成，因此当前状态不是可发布基线。
+当前已完成 MySQL、Elasticsearch、NATS JetStream、OpenAI-compatible Embedding 的真实 adapter，以及分离的 gRPC Server、Worker、Outbox、Migration 与测试镜像拓扑。Mock Functional/Resilience 和真实基础设施 integration 已有自动化证据；四格式 Docker gRPC E2E 与进程 `KILL` 恢复仍属于后续验收，因此当前状态还不是最终发布基线。
 
 ## 环境要求
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
-- Docker Compose（仅在运行真实 MySQL、Elasticsearch 与 NATS JetStream 集成测试时需要）
+- Docker Compose（运行真实基础设施 integration、完整服务或 E2E 时需要）
 
 ## 安装
 
@@ -54,17 +54,44 @@ uv run pytest --cov=rag_mvp.domain --cov=rag_mvp.application --cov=rag_mvp.inges
 git config core.hooksPath .githooks
 ```
 
-## 本地依赖
+## 完整 Docker 服务
 
-Mock Functional 开发和快速门禁不需要启动以下服务。真实基础设施 integration/E2E 验收才使用：
+先在未提交的 `.env` 中配置真实 Embedding provider。只使用 `--quiet` 校验 Compose，避免渲染后的配置把 Secret 输出到终端：
 
 ```powershell
-docker compose up -d mysql elasticsearch nats
-docker compose ps
+docker compose config --quiet
+docker compose build rag-server rag-worker rag-outbox
+docker compose up -d rag-server rag-worker rag-outbox
+uv run python scripts/docker_healthcheck.py
+```
+
+`rag-migrate` 会先执行 `upgrade head`，只有成功后应用进程才启动。需要单独验证迁移幂等性时可运行：
+
+```powershell
+docker compose run --rm rag-migrate
+```
+
+真实 adapter integration 使用宿主机映射端口：
+
+```powershell
+uv run pytest -m "integration and not model_integration" tests/integration
+uv run pytest -m model_integration tests/integration/test_real_embedding_model.py
+```
+
+测试镜像不内置测试源码，而是通过只读 mount 使用当前工作区：
+
+```powershell
+docker compose --profile test build rag-test
+docker compose --profile test run --rm rag-test uv run pytest tests/contract/test_container_artifacts.py
+```
+
+关闭服务但保留持久数据：
+
+```powershell
 docker compose down
 ```
 
-不要使用 `docker compose down -v` 做恢复测试，否则会删除需要验证的持久数据。
+不要使用 `docker compose down -v` 做恢复测试，否则会删除 MySQL、ES、NATS 与对象卷中需要验证的状态。
 
 ## 进程入口
 
@@ -75,7 +102,7 @@ uv run rag-outbox
 uv run rag-dev --help
 ```
 
-本地手工调试必须使用 generated gRPC client、`grpcurl`、`grpcui` 或 `rag-dev`，不得新增 HTTP/FastAPI adapter。
+`rag-dev` 已覆盖 Dataset 创建、流式上传、Job 查询/重试/取消、检索和删除。本地手工调试必须使用 generated gRPC client、`grpcurl`、`grpcui` 或 `rag-dev`，不得新增 HTTP/FastAPI adapter。
 
 ## 设计文档
 

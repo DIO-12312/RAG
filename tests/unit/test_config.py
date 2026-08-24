@@ -53,6 +53,7 @@ def test_settings_can_be_constructed_explicitly_for_tests(tmp_path: Path) -> Non
 
     assert settings.environment is Environment.TEST
     assert settings.object_root == tmp_path
+    assert settings.migrations_root == Path(".")
     assert settings.grpc_address == "127.0.0.1:50052"
 
 

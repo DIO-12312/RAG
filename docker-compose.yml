@@ -1,5 +1,13 @@
 name: rag-mvp
 
+x-rag-environment: &rag-environment
+  RAG_ENVIRONMENT: development
+  RAG_GRPC_REFLECTION: "true"
+  RAG_MYSQL_DSN: mysql+asyncmy://rag:rag@mysql:3306/rag
+  RAG_ELASTICSEARCH_URL: http://elasticsearch:9200
+  RAG_NATS_URL: nats://nats:4222
+  RAG_OBJECT_ROOT: /app/data/objects
+
 services:
   mysql:
     image: mysql:8.4.6
@@ -54,56 +62,136 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  rag-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    command: ["rag-migrate", "upgrade", "head"]
+    environment:
+      RAG_ENVIRONMENT: development
+      RAG_GRPC_REFLECTION: "false"
+      RAG_MYSQL_DSN: mysql+asyncmy://rag:rag@mysql:3306/rag
+      RAG_MIGRATIONS_ROOT: /app
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+
   rag-server:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime
     command: ["rag-server"]
-    environment: &rag-environment
-      RAG_ENVIRONMENT: development
-      RAG_GRPC_REFLECTION: "true"
-      RAG_MYSQL_DSN: mysql+asyncmy://rag:rag@mysql:3306/rag
-      RAG_ELASTICSEARCH_URL: http://elasticsearch:9200
-      RAG_NATS_URL: nats://nats:4222
-      RAG_OBJECT_ROOT: /app/data/objects
+    environment:
+      <<: *rag-environment
+      EMBEDDING_MODEL_URL: ${EMBEDDING_MODEL_URL:?EMBEDDING_MODEL_URL is required}
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:?EMBEDDING_MODEL_NAME is required}
+      EMBEDDING_MODEL_API_KEY: ${EMBEDDING_MODEL_API_KEY:?EMBEDDING_MODEL_API_KEY is required}
+      EMBEDDING_MODEL_DIMENSION: ${EMBEDDING_MODEL_DIMENSION:?EMBEDDING_MODEL_DIMENSION is required}
     ports:
       - "50051:50051"
     volumes:
       - object-data:/app/data/objects
-    depends_on: &infrastructure-health
+    depends_on:
       mysql:
         condition: service_healthy
       elasticsearch:
         condition: service_healthy
-      nats:
-        condition: service_healthy
+      rag-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "/app/scripts/docker_healthcheck.py", "--grpc-only", "127.0.0.1:50051"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
     restart: unless-stopped
 
   rag-worker:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime
     command: ["rag-worker"]
-    environment: *rag-environment
+    environment:
+      <<: *rag-environment
+      EMBEDDING_MODEL_URL: ${EMBEDDING_MODEL_URL:?EMBEDDING_MODEL_URL is required}
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:?EMBEDDING_MODEL_NAME is required}
+      EMBEDDING_MODEL_API_KEY: ${EMBEDDING_MODEL_API_KEY:?EMBEDDING_MODEL_API_KEY is required}
+      EMBEDDING_MODEL_DIMENSION: ${EMBEDDING_MODEL_DIMENSION:?EMBEDDING_MODEL_DIMENSION is required}
     volumes:
       - object-data:/app/data/objects
-    depends_on: *infrastructure-health
+    depends_on:
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      rag-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
     restart: unless-stopped
 
   rag-outbox:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime
     command: ["rag-outbox"]
     environment: *rag-environment
     volumes:
       - object-data:/app/data/objects
-    depends_on: *infrastructure-health
+    depends_on:
+      mysql:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      rag-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
     restart: unless-stopped
+
+  rag-test:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    environment:
+      <<: *rag-environment
+      EMBEDDING_MODEL_URL: ${EMBEDDING_MODEL_URL:?EMBEDDING_MODEL_URL is required}
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:?EMBEDDING_MODEL_NAME is required}
+      EMBEDDING_MODEL_API_KEY: ${EMBEDDING_MODEL_API_KEY:?EMBEDDING_MODEL_API_KEY is required}
+      EMBEDDING_MODEL_DIMENSION: ${EMBEDDING_MODEL_DIMENSION:?EMBEDDING_MODEL_DIMENSION is required}
+      RAG_GRPC_TARGET: rag-server:50051
+    volumes:
+      - ./tests:/app/tests:ro
+      - ./proto:/app/proto:ro
+      - ./scripts:/app/scripts:ro
+      - object-data:/app/data/objects
+    depends_on:
+      rag-server:
+        condition: service_healthy
+      rag-worker:
+        condition: service_healthy
+      rag-outbox:
+        condition: service_healthy
 
 volumes:
   mysql-data:
   elasticsearch-data:
   nats-data:
   object-data:
-

@@ -1,8 +1,8 @@
 # RAG MVP 功能测试与验证指南
 
-本文说明如何在当前 Windows 本机环境验证 Python RAG 服务的功能、可靠性规则和检索质量。当前仓库完成的是 **Milestone D 的 Mock Reliability**：测试会走真实的 gRPC、application、Outbox、Worker、pipeline 和 retrieval 调用链，但以测试专用 Fake 实现替代 MySQL、Elasticsearch、NATS JetStream 和模型服务。
+本文说明如何在当前 Windows 本机环境验证 Python RAG 服务的功能、可靠性规则、真实基础设施与检索质量。快速门禁会走真实的 gRPC、application、Outbox、Worker、pipeline 和 retrieval 调用链，但以测试专用 Fake 保持确定性；`integration` 与 Compose 验收则使用真实 MySQL、Elasticsearch、NATS JetStream 和模型服务。
 
-因此，所有通过的结论都应表述为“Mock Functional / Mock Reliability 通过”，不能表述为真实基础设施或生产发布验收通过。
+报告结果时必须区分 Mock Functional/Resilience、真实 adapter integration、真实模型、Docker E2E 和 Docker Resilience。当前真实 adapter 与 Compose 拓扑已可验证；四格式 gRPC E2E 和容器强杀恢复需等对应测试任务完成后才能声明通过。
 
 ## 1. 先准备环境
 
@@ -66,7 +66,7 @@ git config core.hooksPath .githooks
 | 四类解析器和稳定切块 | `uv run pytest -vv tests/unit/ingestion/test_multiformat_parsers.py tests/unit/ingestion/test_recursive_chunker.py` | locator、chunk 边界和稳定 ID |
 | gRPC 与 Port 契约 | `uv run pytest -vv tests/contract` | proto、RPC DTO、Repository/Search/Queue/Model 等端口语义 |
 
-功能测试的权威入口是 `tests/functional/`，而不是手工启动 `rag-server`。当前生产 bootstrap 不会导入测试 Fake ports，且 `rag-dev` 目前只提供 `get-job` 诊断命令；在真实 adapters 尚未实现前，不能把它们当作无 Docker 的完整手工产品环境。
+无 Docker 的功能回归权威入口是 `tests/functional/`。生产 bootstrap 不导入测试 Fake ports；完整 Docker 服务启动后，`rag-dev` 可通过 generated gRPC client 执行 Dataset 创建、流式上传、Job 查询/重试/取消、检索和删除。
 
 ## 4. 验证可靠性规则
 
@@ -110,19 +110,36 @@ uv run pytest -vv -m eval tests/eval
 | resilience 失败 | 重点比较 Task/Job 终态、Outbox 是否撤销、generation 是否匹配，以及重复 delivery 是否被 ACK。 |
 | coverage 低于 85% | 为新增分支补充 unit/functional 测试，不应直接降低 `--cov-fail-under`。 |
 
-## 7. Docker 可用后的验证边界
+## 7. 真实基础设施与 Compose 验证
 
-Docker 可用时，可以先做依赖健康检查：
+`.env` 必须包含真实 Embedding provider 的 URL、模型名、API Key 和声明维度。禁止运行会输出渲染配置的 `docker compose config`；只使用 `--quiet`：
 
 ```powershell
+docker compose config --quiet
+docker compose build rag-server rag-worker rag-outbox
 docker compose up -d mysql elasticsearch nats
-docker compose ps
-docker compose down
+docker compose run --rm rag-migrate
+docker compose up -d rag-server rag-worker rag-outbox
+uv run python scripts/docker_healthcheck.py
 ```
 
-不要在恢复测试中使用 `docker compose down -v`，它会删除应被验证的持久数据。
+运行真实 adapter 与真实模型测试：
 
-但这一步目前只证明 Compose 服务能启动，**不等于真实 RAG 集成测试通过**。真实 MySQL、Elasticsearch、NATS JetStream concrete adapters、对应 integration/E2E 测试以及 Docker `KILL` Worker 恢复演练仍是待完成项。待这些实现完成后，才能运行真实环境中的 T1～T25、ES KNN/BM25、JetStream durable ACK/NAK/redelivery 和 MySQL 行锁/事务验证，并将结果作为 Milestone D5 发布验收依据。
+```powershell
+uv run pytest -m "integration and not model_integration" tests/integration
+uv run pytest -m model_integration tests/integration/test_real_embedding_model.py
+```
+
+验证测试目标、runtime 内容和日志密钥脱敏：
+
+```powershell
+docker compose --profile test build rag-test
+docker compose --profile test run --rm rag-test uv run pytest tests/contract/test_container_artifacts.py
+docker compose run --rm --no-deps rag-server sh -c 'test ! -e /app/tests && test ! -e /app/.env && test "$(id -u)" -ne 0'
+docker compose logs --no-color 2>&1 | uv run python scripts/check_secret_leaks.py
+```
+
+以上结果证明真实 adapters、迁移顺序、角色装配和容器安全边界；它仍不替代 Task 13 的四格式 Docker gRPC E2E 与 Task 14 的 Worker/Relay 强杀恢复。不要在恢复测试中使用 `docker compose down -v`，它会删除应被验证的持久状态。
 
 ## 8. 记录验证结果的模板
 

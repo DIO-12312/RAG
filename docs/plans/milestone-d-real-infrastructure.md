@@ -739,52 +739,58 @@ git commit -m "feat(bootstrap): 装配真实 RAG 进程依赖"
 ## Task 12：构建生产/测试镜像与完整 Compose 拓扑
 
 **Files:**
+- Modify: `.env.example`
 - Modify: `Dockerfile`
-- Create: `.dockerignore`
+- Modify: `.dockerignore`
 - Modify: `docker-compose.yml`
 - Create: `scripts/docker_healthcheck.py`
 - Create: `scripts/check_secret_leaks.py`
 - Create: `tests/contract/test_container_artifacts.py`
+- Modify: `src/rag_mvp/config.py`
+- Modify: `src/rag_mvp/adapters/metadata/migrate.py`
+- Modify: `tests/unit/test_config.py`
+- Modify: `docs/SPEC.md`
 - Modify: `docs/README.md`
 - Modify: `docs/testing-guide.md`
 - Modify: `tests/TEST.md`
 
 **Interfaces:**
 - Produces Docker targets: `runtime`, `test`
-- Produces services: `rag-migrate`, `rag-server`, `rag-worker`, `rag-outbox`, profile `rag-test`
+- Produces services: `rag-migrate`, `rag-server`, `rag-worker`, `rag-outbox`, `rag-test` under profile `test`
 - Produces command: `uv run python scripts/docker_healthcheck.py`
 
-- [ ] **Step 1: Write failing artifact/topology contract tests**
+- [x] **Step 1: Write failing artifact/topology contract tests**
 
 Assert runtime build context excludes `.env`, `tests`, `.git`, `data`, caches/logs; Compose includes migration ordering, shared object volume, health dependencies and only Server/Worker/test receive embedding variables.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest tests/contract/test_container_artifacts.py -q`
 
-- [ ] **Step 3: Implement multi-stage image and Compose**
+- [x] **Step 3: Implement multi-stage image and Compose**
 
 `rag-migrate` must complete before application services. `rag-test` uses the test target and same Compose network. Never run `docker compose config` without `--quiet` because rendered output may contain Secret values.
 
-- [ ] **Step 4: Build and health-check without exposing secrets**
+- [x] **Step 4: Build and health-check without exposing secrets**
 
 ```powershell
 docker compose config --quiet
 docker compose build rag-server rag-worker rag-outbox
+docker compose --profile test build rag-test
 docker compose up -d mysql elasticsearch nats
 docker compose run --rm rag-migrate
 docker compose up -d rag-server rag-worker rag-outbox
 uv run python scripts/docker_healthcheck.py
 ```
 
-- [ ] **Step 5: Inspect runtime image contents and logs**
+- [x] **Step 5: Inspect runtime image contents and logs**
 
-Assert `/app/tests` and `/app/.env` do not exist. Pipe `docker compose logs --no-color` to `scripts/check_secret_leaks.py`; the script reads the configured key, returns non-zero on a match, and prints only `secret leak detected` without echoing the secret.
+Assert `/app/tests` and `/app/.env` do not exist, runtime uses a non-root UID, and Outbox does not receive model variables. Run the artifact contract inside `rag-test`. Pipe `docker compose logs --no-color` to `scripts/check_secret_leaks.py`; the script reads the configured key, returns non-zero on a match, and prints only `secret leak detected` without echoing the secret.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
-git add Dockerfile .dockerignore docker-compose.yml scripts/docker_healthcheck.py scripts/check_secret_leaks.py tests/contract/test_container_artifacts.py docs/README.md docs/testing-guide.md tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
+git add .env.example Dockerfile .dockerignore docker-compose.yml src/rag_mvp/config.py src/rag_mvp/adapters/metadata/migrate.py scripts/docker_healthcheck.py scripts/check_secret_leaks.py tests/contract/test_container_artifacts.py tests/unit/test_config.py docs/SPEC.md docs/README.md docs/testing-guide.md tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "build(docker): 建立真实 RAG Compose 拓扑"
 ```
 

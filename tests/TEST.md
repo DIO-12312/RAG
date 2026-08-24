@@ -12,6 +12,7 @@ tests/
 ├─ __init__.py
 ├─ conftest.py                              # 共享 pytest 配置与 fixture
 ├─ contract/                                # gRPC、protobuf 与 Port 语义契约
+│  ├─ test_container_artifacts.py
 │  ├─ test_delete_document_contract.py
 │  ├─ test_generated_code.py
 │  ├─ test_grpc_application_contract.py
@@ -190,7 +191,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_rerank_rejects_score_count_mismatch` | 候选数和重排分数数目不一致时拒绝。 |
 | 同上 | `test_rerank_rejects_invalid_top_n` | 非法 Top-N 参数被拒绝。 |
 | `test_config.py` | `test_package_import_has_no_runtime_side_effects` | 包导入不建立运行时外部连接。 |
-| 同上 | `test_settings_can_be_constructed_explicitly_for_tests` | 测试可显式构造 Settings。 |
+| 同上 | `test_settings_can_be_constructed_explicitly_for_tests` | 测试可显式构造 Settings，migration root 有稳定默认值。 |
 | 同上 | `test_settings_builds_a_normalized_secret_embedding_profile` | 完整模型配置生成规范化 `/embeddings` endpoint，并在对象表示中隐藏 API Key。 |
 | 同上 | `test_embedding_profile_rejects_missing_or_partial_configuration` | Server/Worker 获取模型配置时拒绝缺失或不完整的 provider 设置。 |
 | 同上 | `test_parser_and_chunk_runtime_settings_reject_inconsistent_values` | parser 版本和 chunk overlap/size 的运行配置必须自洽。 |
@@ -219,6 +220,11 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
+| `test_container_artifacts.py` | `test_runtime_image_and_context_exclude_secrets_and_test_artifacts` | runtime/test 镜像目标、非 root 用户及 build context 排除规则正确。 |
+| 同上 | `test_compose_declares_migration_health_role_secrets_and_shared_storage` | Compose 固定迁移顺序、健康依赖、共享对象卷及模型密钥角色边界。 |
+| 同上 | `test_secret_scanner_fails_without_echoing_the_secret` | 日志命中模型密钥时扫描失败且不回显 Secret。 |
+| 同上 | `test_healthcheck_parses_ndjson_and_requires_every_process_to_be_healthy` | 健康检查要求基础设施和应用健康、迁移成功退出。 |
+| 同上 | `test_healthcheck_decodes_docker_output_as_utf8` | Windows 宿主机按 UTF-8 安全解析 Docker Unicode 输出。 |
 | `test_delete_document_contract.py` | `test_delete_atomically_hides_document_cancels_ingest_and_creates_cleanup` | 删除原子隐藏文档、取消摄取并创建清理任务。 |
 | 同上 | `test_new_delete_request_for_deleted_document_is_rejected` | 已删除文档的新删除请求返回稳定错误。 |
 | `test_generated_code.py` | `test_generated_python_is_in_sync_with_proto` | Python protobuf 生成物与 `.proto` 保持同步。 |

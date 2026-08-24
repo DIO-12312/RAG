@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     grpc_reflection: bool = True
 
     mysql_dsn: str = DEFAULT_MYSQL_DSN
+    migrations_root: Path = Path(".")
     elasticsearch_url: str = "http://elasticsearch:9200"
     elasticsearch_index: str = "rag-chunks-v1"
     nats_url: str = "nats://nats:4222"
