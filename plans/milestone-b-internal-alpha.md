@@ -1,6 +1,6 @@
 # Milestone B：Mock Functional 异步检索闭环实施计划
 
-> 状态：实施中（B1～B2 已完成）
+> 状态：实施中（B1～B3 已完成）
 > 对应路线图：`PLAN.md` B1～B6、2.1 无 Docker开发通道
 > 对应规格：`SPEC.md` 2.1～2.5、4.1～4.7、5.2～5.7、P1-1～P1-5、P2-1～P2-2、P3-1～P3-3
 > 范围：用真实 gRPC/application/Outbox/Worker/pipeline/retrieval 调用链和测试专用 Fake ports 跑通 TXT upload → async ingest → Dense retrieve。真实 MySQL/Elasticsearch/NATS adapter 与 Compose 验收延期，不据此声明内部 Alpha 发布出口通过。
@@ -310,7 +310,7 @@ MySQL schema、concrete MySQL/ES/NATS adapters、Compose E2E 和 Docker KILL 不
 
 - [x] B1 领域模型、状态机、digest/ID 单测通过并提交。
 - [x] B2 ports 与 Fake contract 全部通过并提交。
-- [ ] B3 staging/fingerprint/finalizer/relay 主线通过并提交。
+- [x] B3 staging/fingerprint/finalizer/relay 主线通过并提交。
 - [ ] B4 TXT Worker/pipeline/redelivery 测试通过并提交。
 - [ ] B5 Dense Retrieve 与四个已开放 RPC 契约通过并提交。
 - [ ] B6 in-process gRPC Mock Functional 闭环与全门禁通过并提交。
