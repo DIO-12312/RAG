@@ -18,6 +18,7 @@ from rag_mvp.application.retrieval_service import RetrievalService
 from rag_mvp.domain.enums import JobStatus, JobType, TaskStatus
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.models import Evidence, Locator, ScoreBreakdown
+from rag_mvp.observability import emit_event
 from rag_mvp.retrieval.context_builder import ContextPlan
 from rag_mvp.rpc.generated import rag_service_pb2
 from rag_mvp.rpc.interceptors import business_error
@@ -57,12 +58,19 @@ def _unavailable(request_id: str) -> rag_service_pb2.BusinessError:
 
 def _unexpected(error: Exception, request_id: str) -> rag_service_pb2.BusinessError:
     if isinstance(error, DomainError):
-        return business_error(error.failure, request_id)
-    if isinstance(error, ValueError):
-        return business_error(DomainFailure("INVALID_ARGUMENT", str(error)), request_id)
-    return business_error(
-        DomainFailure("INTERNAL_ERROR", "internal RAG service error", retryable=True), request_id
+        failure = error.failure
+    elif isinstance(error, ValueError):
+        failure = DomainFailure("INVALID_ARGUMENT", str(error))
+    else:
+        failure = DomainFailure("INTERNAL_ERROR", "internal RAG service error", retryable=True)
+    emit_event(
+        "rpc_failed",
+        request_id=request_id,
+        stage="rpc",
+        duration_ms=0.0,
+        error_code=failure.code,
     )
+    return business_error(failure, request_id)
 
 
 def _job_result(view: JobView) -> rag_service_pb2.JobResult:

@@ -6,3 +6,4 @@ uv run ruff format --check src tests scripts
 uv run mypy src scripts
 uv run python scripts/check_generated.py
 uv run pytest tests/unit tests/contract tests/functional
+uv run pytest -m resilience tests/resilience

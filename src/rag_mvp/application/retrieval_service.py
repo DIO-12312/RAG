@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from time import perf_counter
+
 from rag_mvp.application.dto import RetrieveQuery
 from rag_mvp.domain.errors import DomainError, DomainFailure
+from rag_mvp.observability import emit_event
 from rag_mvp.ports.metadata import MetadataRepository
 from rag_mvp.ports.model import ModelGateway
 from rag_mvp.ports.search_engine import SearchEngine, SearchRequest
@@ -23,6 +26,7 @@ class RetrievalService:
         self._model = model
 
     async def retrieve(self, query: RetrieveQuery) -> ContextPlan:
+        started_at = perf_counter()
         if not query.query.strip():
             raise DomainError(DomainFailure("QUERY_REQUIRED", "retrieval query is required"))
         if query.top_k < 1 or query.top_k > 100:
@@ -71,4 +75,12 @@ class RetrievalService:
         ]
         visible.sort(key=lambda item: (-item.score, item.record_id))
         evidence = tuple(dense_evidence(candidate) for candidate in visible[: query.top_k])
-        return build_context_plan(evidence, max_context_tokens=query.max_context_tokens)
+        result = build_context_plan(evidence, max_context_tokens=query.max_context_tokens)
+        emit_event(
+            "retrieval_completed",
+            request_id=query.request_id,
+            dataset_id=query.dataset_id,
+            stage="dense_retrieve",
+            duration_ms=(perf_counter() - started_at) * 1000,
+        )
+        return result

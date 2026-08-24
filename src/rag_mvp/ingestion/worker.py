@@ -14,6 +14,7 @@ from rag_mvp.bootstrap.container import (
 )
 from rag_mvp.config import Settings, load_settings
 from rag_mvp.domain.errors import DomainFailure
+from rag_mvp.observability import emit_event
 from rag_mvp.ports.message_queue import TaskQueue
 from rag_mvp.ports.metadata import MetadataRepository
 
@@ -39,11 +40,21 @@ async def worker_once(
     result = await ingestion.execute(delivery.task_id, delivery.delivery_sequence, now)
     if not result.claimed:
         await queue.ack(delivery)
+        emit_event(
+            "delivery_skipped",
+            stage="worker_ack_terminal",
+            duration_ms=0.0,
+        )
         return True
     if result.completed:
         if after_complete is not None:
             await after_complete()
         await queue.ack(delivery)
+        emit_event(
+            "ingestion_completed",
+            stage="worker_complete",
+            duration_ms=0.0,
+        )
         return True
 
     failure = result.failure or DomainFailure(
@@ -54,10 +65,22 @@ async def worker_once(
     delivery_number = delivery.redelivery_count + 1
     if failure.retryable and delivery_number < max_deliveries:
         await queue.nak(delivery, delay_seconds=0.0, error=failure)
+        emit_event(
+            "ingestion_retry_scheduled",
+            stage="worker_nak",
+            duration_ms=0.0,
+            error_code=failure.code,
+        )
         return True
 
     await metadata.fail_task(delivery.task_id, failure, now)
     await queue.ack(delivery)
+    emit_event(
+        "ingestion_failed",
+        stage="worker_failed",
+        duration_ms=0.0,
+        error_code=failure.code,
+    )
     return True
 
 

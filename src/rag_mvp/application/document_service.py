@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from time import perf_counter
 
 from rag_mvp.application.dto import (
     CreateDatasetCommand,
@@ -14,6 +15,7 @@ from rag_mvp.application.dto import (
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.ids import config_digest, file_sha256
 from rag_mvp.domain.models import Dataset
+from rag_mvp.observability import emit_event
 from rag_mvp.ports.metadata import MetadataRepository, SubmitIngestion
 from rag_mvp.ports.storage import ObjectStorage
 
@@ -33,6 +35,7 @@ class DocumentService:
         self._max_upload_bytes = max_upload_bytes
 
     async def create_dataset(self, command: CreateDatasetCommand) -> CreateDatasetResult:
+        started_at = perf_counter()
         if not command.idempotency_key:
             raise DomainError(
                 DomainFailure("IDEMPOTENCY_KEY_REQUIRED", "idempotency key is required")
@@ -58,12 +61,20 @@ class DocumentService:
                 created_at=command.now,
             )
         )
-        return CreateDatasetResult(
+        result = CreateDatasetResult(
             dataset_id=dataset.id,
             name=dataset.name,
             embedding_model=dataset.embedding_model,
             embedding_dimension=dataset.embedding_dimension,
         )
+        emit_event(
+            "dataset_created",
+            request_id=command.request_id,
+            dataset_id=dataset.id,
+            stage="create_dataset",
+            duration_ms=(perf_counter() - started_at) * 1000,
+        )
+        return result
 
     @staticmethod
     def staging_key(idempotency_key: str) -> str:
@@ -75,6 +86,7 @@ class DocumentService:
         return f"staging/{digest}"
 
     async def submit_document(self, command: SubmitDocumentCommand) -> SubmitDocumentResult:
+        started_at = perf_counter()
         self._validate_upload(command)
         dataset = await self._metadata.get_dataset(command.dataset_id)
         if dataset is None:
@@ -139,11 +151,21 @@ class DocumentService:
 
         if not submitted.staging_referenced and not staging_existed:
             await self._storage.delete(staging_key)
-        return SubmitDocumentResult(
+        result = SubmitDocumentResult(
             document_id=submitted.document_id,
             job_id=submitted.job_id,
             reused=submitted.reused,
         )
+        emit_event(
+            "document_submitted",
+            request_id=command.request_id,
+            job_id=submitted.job_id,
+            document_id=submitted.document_id,
+            dataset_id=command.dataset_id,
+            stage="submit_document",
+            duration_ms=(perf_counter() - started_at) * 1000,
+        )
+        return result
 
     def _validate_upload(self, command: SubmitDocumentCommand) -> None:
         if len(command.content) > self._max_upload_bytes:
