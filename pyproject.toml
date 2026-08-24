@@ -12,9 +12,15 @@ license = "Apache-2.0"
 dependencies = [
     "grpcio>=1.74.0,<2.0.0",
     "grpcio-reflection>=1.74.0,<2.0.0",
+    "alembic>=1.16.5,<2.0.0",
+    "asyncmy>=0.2.10,<1.0.0",
+    "elasticsearch[async]>=8.19.0,<9.0.0",
+    "httpx>=0.28.1,<1.0.0",
+    "nats-py>=2.11.0,<3.0.0",
     "protobuf>=6.31.0,<7.0.0",
     "pydantic-settings>=2.10.0,<3.0.0",
     "pypdf>=6.0.0,<7.0.0",
+    "SQLAlchemy[asyncio]>=2.0.43,<3.0.0",
     "structlog>=25.4.0,<26.0.0",
     "xxhash>=3.5.0,<4.0.0",
 ]
@@ -66,9 +72,11 @@ testpaths = ["tests"]
 asyncio_mode = "strict"
 markers = [
     "integration: requires one or more real infrastructure services",
+    "model_integration: calls the configured real embedding provider",
     "functional: uses real service boundaries with test-only fake infrastructure ports",
     "e2e: exercises an end-to-end process across components",
     "resilience: exercises crash, redelivery, and recovery behavior",
+    "docker_resilience: controls Docker processes to validate crash recovery",
     "eval: measures deterministic retrieval quality",
 ]
 

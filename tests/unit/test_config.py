@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -77,5 +78,20 @@ def test_production_rejects_development_mysql_credentials() -> None:
 def test_test_markers_are_registered(request: pytest.FixtureRequest) -> None:
     markers = "\n".join(request.config.getini("markers"))
 
-    for marker in ("integration", "e2e", "resilience", "eval"):
+    for marker in (
+        "integration",
+        "model_integration",
+        "e2e",
+        "resilience",
+        "docker_resilience",
+        "eval",
+    ):
         assert f"{marker}:" in markers
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    ["sqlalchemy", "asyncmy", "alembic", "httpx", "elasticsearch", "nats"],
+)
+def test_runtime_adapter_dependencies_are_importable(module_name: str) -> None:
+    assert importlib.util.find_spec(module_name) is not None

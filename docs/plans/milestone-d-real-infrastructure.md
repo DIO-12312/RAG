@@ -117,7 +117,7 @@ git commit -m "fix(build): 修复跨平台 protobuf 同步检查"
 - Produces installed modules: `sqlalchemy`, `asyncmy`, `alembic`, `httpx`, `elasticsearch`, `nats`
 - Produces pytest markers: `model_integration`, `docker_resilience`；保留现有 `e2e`
 
-- [ ] **Step 1: Add a dependency/marker smoke test that fails before lock update**
+- [x] **Step 1: Add a dependency/marker smoke test that fails before lock update**
 
 ```python
 @pytest.mark.parametrize(
@@ -130,13 +130,13 @@ def test_runtime_adapter_dependencies_are_importable(module_name: str) -> None:
 
 Extend the marker assertion to require all three new marker names.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest tests/unit/test_config.py -q`
 
 Expected: at least SQLAlchemy/asyncmy/Alembic/ES/NATS imports and marker assertions fail.
 
-- [ ] **Step 3: Add bounded dependencies**
+- [x] **Step 3: Add bounded dependencies**
 
 Add production dependencies:
 
@@ -158,7 +158,7 @@ Register:
 
 Regenerate lock: `uv lock` then `uv sync --frozen --group dev`.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run:
 
@@ -168,7 +168,7 @@ uv run ruff check tests/unit/test_config.py
 uv run mypy src scripts
 ```
 
-- [ ] **Step 5: Update test index and commit**
+- [x] **Step 5: Update test index and commit**
 
 ```powershell
 git add pyproject.toml uv.lock tests/unit/test_config.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
