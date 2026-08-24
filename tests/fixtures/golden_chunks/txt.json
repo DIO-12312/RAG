@@ -1,0 +1,12 @@
+{
+  "input": "alpha beta\ngamma delta\nepsilon",
+  "chunk_size": 12,
+  "overlap": 4,
+  "start_line": 10,
+  "chunks": [
+    {"ordinal": 0, "content": "alpha beta\n", "start_line": 10, "end_line": 10},
+    {"ordinal": 1, "content": "eta\ngamma ", "start_line": 10, "end_line": 11},
+    {"ordinal": 2, "content": "mma delta\n", "start_line": 11, "end_line": 11},
+    {"ordinal": 3, "content": "lta\nepsilon", "start_line": 11, "end_line": 12}
+  ]
+}
