@@ -87,7 +87,11 @@ class FakeMetadataRepository:
                 command.config_digest,
             )
             fingerprint = self.fingerprints.get(fingerprint_key)
-            if fingerprint is not None and fingerprint.state is not FingerprintState.RELEASED:
+            if (
+                command.target_document_id is None
+                and fingerprint is not None
+                and fingerprint.state is not FingerprintState.RELEASED
+            ):
                 existing_task = next(
                     task for task in self.tasks.values() if task.job_id == fingerprint.job_id
                 )
@@ -105,28 +109,57 @@ class FakeMetadataRepository:
                 self.fail_next_submit = False
                 raise InjectedRepositoryFailure("submit fault injected before atomic write")
 
-            document_id = command.target_document_id or new_id()
+            if command.target_document_id is None:
+                document_id = new_id()
+                index_version = 1
+                document_generation = 0
+                document = Document(
+                    id=document_id,
+                    dataset_id=command.dataset_id,
+                    source_name=command.source_name,
+                    file_sha256=command.file_sha256,
+                    status=DocumentStatus.PENDING,
+                    active_version=None,
+                    next_index_version=2,
+                    lifecycle_generation=0,
+                    created_at=command.now,
+                )
+            else:
+                existing_document = self.documents.get(command.target_document_id)
+                if existing_document is None:
+                    raise DomainError(
+                        DomainFailure("DOCUMENT_NOT_FOUND", "target document does not exist")
+                    )
+                if existing_document.dataset_id != command.dataset_id:
+                    raise DomainError(
+                        DomainFailure(
+                            "DOCUMENT_DATASET_MISMATCH",
+                            "target document belongs to another dataset",
+                        )
+                    )
+                if existing_document.status is DocumentStatus.DELETED:
+                    raise DomainError(
+                        DomainFailure("DOCUMENT_ALREADY_DELETED", "target document is deleted")
+                    )
+                document_id = existing_document.id
+                index_version = existing_document.next_index_version
+                document_generation = existing_document.lifecycle_generation
+                document = replace(
+                    existing_document,
+                    source_name=command.source_name,
+                    file_sha256=command.file_sha256,
+                    next_index_version=index_version + 1,
+                )
             job_id = new_id()
             task_id = new_id()
             event_id = new_id()
-            document = Document(
-                id=document_id,
-                dataset_id=command.dataset_id,
-                source_name=command.source_name,
-                file_sha256=command.file_sha256,
-                status=DocumentStatus.PENDING,
-                active_version=None,
-                next_index_version=2,
-                lifecycle_generation=0,
-                created_at=command.now,
-            )
             job = Job(
                 id=job_id,
                 type=JobType.INGEST_DOCUMENT,
                 document_id=document_id,
                 config_digest=command.config_digest,
-                index_version=1,
-                document_generation=0,
+                index_version=index_version,
+                document_generation=document_generation,
                 status=JobStatus.PENDING,
                 progress=0.0,
                 created_at=command.now,
@@ -149,17 +182,9 @@ class FakeMetadataRepository:
                 staging_key=command.staging_key,
                 created_at=command.now,
             )
-            fingerprint = IngestionFingerprint(
-                dataset_id=command.dataset_id,
-                file_sha256=command.file_sha256,
-                config_digest=command.config_digest,
-                document_id=document_id,
-                job_id=job_id,
-                state=FingerprintState.PENDING,
-            )
             index_build = IndexBuild(
                 document_id=document_id,
-                index_version=1,
+                index_version=index_version,
                 job_id=job_id,
                 status=IndexBuildStatus.BUILDING,
                 created_at=command.now,
@@ -175,8 +200,16 @@ class FakeMetadataRepository:
             self.jobs[job_id] = job
             self.tasks[task_id] = task
             self.outbox[event_id] = event
-            self.fingerprints[fingerprint_key] = fingerprint
-            self.index_builds[(document_id, 1)] = index_build
+            if command.target_document_id is None:
+                self.fingerprints[fingerprint_key] = IngestionFingerprint(
+                    dataset_id=command.dataset_id,
+                    file_sha256=command.file_sha256,
+                    config_digest=command.config_digest,
+                    document_id=document_id,
+                    job_id=job_id,
+                    state=FingerprintState.PENDING,
+                )
+            self.index_builds[(document_id, index_version)] = index_build
             self._idempotency[command.idempotency_key] = result
             return result
 
