@@ -277,6 +277,7 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | 同上 | `test_real_jetstream_provisioning_is_idempotent_and_rejects_incompatible_consumer` | stream/consumer 同配置装配幂等，不兼容 consumer 参数 fail fast。 |
 | `test_mysql_concurrency.py` | `test_concurrent_retry_keys_reuse_one_active_child_job` | 八个并发 Retry key 只创建并复用一个活跃子 Job/Task，重试计数只增加一次。 |
 | 同上 | `test_concurrent_rebuilds_allocate_distinct_index_versions` | 四个并发重建在 Document 行锁下分配互不重复的 index version，旧 active version 保持可见。 |
+| 同上 | `test_out_of_order_rebuild_completion_never_regresses_active_version` | 高版本先完成、低版本迟到时 active version 只前进，迟到 IndexBuild 被废弃并创建版本清理 Job。 |
 | 同上 | `test_delete_and_finalizer_race_never_leaves_ingest_outbox_ready` | 删除与 Finalizer 并发时，摄取 Outbox 最终必为 CANCELLED，且仅删除清理 Outbox 可发布。 |
 | `test_mysql_lifecycle.py` | `test_pending_cancel_is_immediate_idempotent_and_withdraws_outbox` | PENDING 取消原子终止 Job/Task、撤销未发布 Outbox，并支持同 key 幂等回放。 |
 | 同上 | `test_running_cancel_converges_at_completion_without_activating_version` | RUNNING 取消先记录请求，再由完成 checkpoint 收敛为 CANCELLED、放弃索引版本并创建清理任务。 |

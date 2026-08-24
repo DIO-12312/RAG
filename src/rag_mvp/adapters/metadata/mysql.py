@@ -801,10 +801,17 @@ class MySQLMetadataRepository:
                     for chunk in chunks
                 )
             )
-            index_build.status = IndexBuildStatus.ACTIVE
+            superseded = (
+                aggregate.document.active_version is not None
+                and aggregate.job.index_version < aggregate.document.active_version
+            )
+            index_build.status = (
+                IndexBuildStatus.ABANDONED if superseded else IndexBuildStatus.ACTIVE
+            )
             index_build.updated_at = now
             aggregate.document.status = DocumentStatus.READY
-            aggregate.document.active_version = aggregate.job.index_version
+            if not superseded:
+                aggregate.document.active_version = aggregate.job.index_version
             aggregate.document.updated_at = now
             aggregate.task.status = TaskStatus.SUCCEEDED
             aggregate.task.checkpoint = "complete"
@@ -818,6 +825,8 @@ class MySQLMetadataRepository:
                 .where(IngestionFingerprintTable.job_id == aggregate.job.id)
                 .values(state=FingerprintState.SUCCEEDED, updated_at=now)
             )
+            if superseded:
+                await self._schedule_version_cleanup(session, aggregate, now)
             return True
 
     async def fail_task(self, task_id: str, failure: DomainFailure, now: datetime) -> bool:

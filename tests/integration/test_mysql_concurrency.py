@@ -168,6 +168,88 @@ async def test_concurrent_rebuilds_allocate_distinct_index_versions(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_out_of_order_rebuild_completion_never_regresses_active_version(
+    mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
+) -> None:
+    repository, engine = mysql_repository
+    now = datetime.now(UTC)
+    submitted = await _submitted(repository, now)
+    await _ready_and_claim(repository, submitted, now)
+    assert await repository.complete_ingestion(
+        submitted.task_id,
+        [_chunk(submitted.document_id)],
+        now,
+    )
+    version_two, version_three = await asyncio.gather(
+        repository.submit_ingestion(
+            SubmitIngestion(
+                idempotency_key="rebuild-two",
+                dataset_id="dataset-1",
+                source_name="guide-two.txt",
+                staging_key="staging/rebuild-two",
+                file_sha256="2" * 64,
+                config_digest="e" * 64,
+                now=now,
+                target_document_id=submitted.document_id,
+            )
+        ),
+        repository.submit_ingestion(
+            SubmitIngestion(
+                idempotency_key="rebuild-three",
+                dataset_id="dataset-1",
+                source_name="guide-three.txt",
+                staging_key="staging/rebuild-three",
+                file_sha256="3" * 64,
+                config_digest="e" * 64,
+                now=now,
+                target_document_id=submitted.document_id,
+            )
+        ),
+    )
+    jobs = {
+        (await repository.get_job(result.job_id)).index_version: result
+        for result in (version_two, version_three)
+    }
+    assert await repository.claim_task(jobs[3].task_id, 3, now)
+    assert await repository.complete_ingestion(
+        jobs[3].task_id,
+        [_chunk(submitted.document_id, 3)],
+        now,
+    )
+    assert await repository.claim_task(jobs[2].task_id, 2, now)
+    assert await repository.complete_ingestion(
+        jobs[2].task_id,
+        [_chunk(submitted.document_id, 2)],
+        now,
+    )
+
+    document = await repository.get_document(submitted.document_id)
+    assert document is not None and document.active_version == 3
+    async with engine.connect() as connection:
+        builds = dict(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT index_version, status FROM index_builds "
+                        "WHERE document_id = :document_id ORDER BY index_version"
+                    ),
+                    {"document_id": submitted.document_id},
+                )
+            ).all()
+        )
+        cleanup_count = await connection.scalar(
+            text(
+                "SELECT COUNT(*) FROM jobs WHERE document_id = :document_id "
+                "AND type = 'CLEANUP_INDEX_VERSION' AND index_version = 2"
+            ),
+            {"document_id": submitted.document_id},
+        )
+    assert builds == {1: "ACTIVE", 2: "ABANDONED", 3: "ACTIVE"}
+    assert cleanup_count == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_delete_and_finalizer_race_never_leaves_ingest_outbox_ready(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:

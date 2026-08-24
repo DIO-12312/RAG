@@ -899,6 +899,8 @@ Run: `docker compose --profile test run --rm rag-test uv run pytest -m docker_re
 
 Expected: all scenarios converge; no Document resurrection, duplicate active retry or duplicate visible Chunk.
 
+Production defect found by the combined Docker run: version 3 could complete before version 2, after which the late version 2 completion regressed `Document.active_version`. A real MySQL regression test now fixes the rule: active versions advance monotonically, and a late lower IndexBuild becomes ABANDONED with a `CLEANUP_INDEX_VERSION` task. This correction is committed separately as `fix(mysql)` before the Task 14 test commit.
+
 - [ ] **Step 6: Update T1～T25 real evidence and commit**
 
 ```powershell

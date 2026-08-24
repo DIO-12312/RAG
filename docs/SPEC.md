@@ -151,7 +151,7 @@ Object Finalizer 将 staging object 幂等提升为正式 `object_key` 后，必
 
 Outbox Relay 必须同时支持两种触发方式：一是按固定间隔轮询 MySQL 中的 `READY_TO_PUBLISH` 事件，作为进程重启、唤醒丢失和临时故障后的最终兜底；二是由 Finalizer 成功、RetryJob/Delete/Cleanup Task 创建或运维调试发起一次手动/即时唤醒，降低正常路径延迟。两种触发都只能唤醒同一个 Relay 扫描逻辑，随后仍须查询 MySQL 决定发布哪些 `task_id`，禁止应用服务因手动触发而直接发布 NATS。手动唤醒是 best-effort，丢失时由下一轮定时轮询补偿；并发扫描允许产生重复发布，但必须由条件状态更新和 Worker 幂等收敛。
 
-未给 `target_document_id` 是新文档模式：按前述 `IngestionFingerprint` 状态复用 canonical Job 或在 RELEASED 后创建新 Document。给出 `target_document_id` 是重建模式：必须属于该 Dataset，系统在 `SELECT ... FOR UPDATE` 的 Document 行锁内分配唯一的新 `index_version`，并创建对应 Job；新版本完整后才切换 `active_version`。相同 `idempotency_key` 的完整提交必须返回第一次的 `document_id/job_id`，不得新建 Document、Job 或 Task。`CreateDataset`、`DeleteDocument`、`RetryJob` 与 `CancelJob` 也必须携带 `idempotency_key`；`request_id` 用于日志与 trace，不承担去重语义。Worker 的内部状态迁移记录 `operation_id`，不伪装为客户端请求。
+未给 `target_document_id` 是新文档模式：按前述 `IngestionFingerprint` 状态复用 canonical Job 或在 RELEASED 后创建新 Document。给出 `target_document_id` 是重建模式：必须属于该 Dataset，系统在 `SELECT ... FOR UPDATE` 的 Document 行锁内分配唯一的新 `index_version`，并创建对应 Job；新版本完整后才切换 `active_version`。多个重建乱序完成时，`active_version` 只能单调前进；低版本迟到成功不得覆盖已激活的高版本，其 IndexBuild 必须置为 `ABANDONED` 并创建 `CLEANUP_INDEX_VERSION` Task。相同 `idempotency_key` 的完整提交必须返回第一次的 `document_id/job_id`，不得新建 Document、Job 或 Task。`CreateDataset`、`DeleteDocument`、`RetryJob` 与 `CancelJob` 也必须携带 `idempotency_key`；`request_id` 用于日志与 trace，不承担去重语义。Worker 的内部状态迁移记录 `operation_id`，不伪装为客户端请求。
 
 `Job.status` 与 `Task.status` 统一为 `PENDING → RUNNING → SUCCEEDED | FAILED | CANCELLED`。Job 是用户可查询的聚合状态：首个 Task 投递后仍为 `PENDING`，任一必要 Task 运行时为 `RUNNING`，全部必要 Task 成功后才为 `SUCCEEDED`。`FAILED` 必须返回稳定的业务错误码、可读错误信息和 `retryable`；`RetryJob` 是唯一的 Job 重试命令，且总是生成新 Job，重复上传不会产生未定义的 `SKIPPED` 状态。MVP 的 `tenant_id` 固定为服务端注入的 `default_tenant`，不接受客户端任意指定。
 
@@ -299,7 +299,7 @@ tests/
 | T14 | 未完成上传或 MySQL 提交失败不产生可见 Document，staging object 最终被清理。 | 中断客户端流与注入事务失败；断言无 Document/Job/Task，并在 TTL sweeper 后断言 staging key 消失。 |
 | T15 | Outbox 只能在正式对象可读后发布。 | Finalizer 前运行 Relay，断言无 NATS 消息；Finalizer 成功后才允许投递；模拟 Finalizer 崩溃后可恢复。 |
 | T16 | `CancelJob` 不会让摄取 Job 切换 active version。 | 分别在 PENDING、RUNNING checkpoint、SUCCEEDED 下取消；断言 Outbox 撤销/取消标记、终态和旧版本可见性。 |
-| T17 | 同一 Document 并发重建获得不同 index_version；失败构建最终清理。 | 并发提交 target_document_id，断言唯一约束；使 ES 写后失败，断言 IndexBuild=ABANDONED 并由清理 Task 删除不可见版本。 |
+| T17 | 同一 Document 并发重建获得不同 index_version；失败构建或迟到旧版本最终清理，active version 不回退。 | 并发提交 target_document_id，断言唯一约束；让高版本先完成再完成低版本，断言 active version 单调、迟到 IndexBuild=ABANDONED 并由清理 Task 删除不可见版本。 |
 | T18 | Finalizer 持续失败不会让 Job 永久 PENDING。 | 超过 `max_finalize_attempts`，断言 Task/Job=`FAILED`、Outbox=`CANCELLED`、错误码稳定，staging object 在保留期后清理。 |
 | T19 | Delete 与运行中 ingest 并发时 Document 不会被重新激活。 | 在 ES upsert 后、active-version 事务前调用 Delete；断言 Document 保持 `DELETED`、旧 Worker 为 `CANCELLED(DOCUMENT_DELETED_DURING_INGEST)`、所有版本进入清理。 |
 | T20 | Cancel 与已发布 delivery 竞态不会执行摄取或覆盖取消。 | Outbox=PUBLISHED 后、Worker 认领前取消，断言 Worker 仅 ACK；在最终事务前取消，断言不切 active version。 |
