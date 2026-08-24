@@ -1,6 +1,6 @@
 # Milestone A：工程基线实施计划
 
-> 状态：已实施；快速门禁通过，等待 Docker/CI 环境验收  
+> 状态：本地实现门禁通过；Docker/CI 发布出口延期，已按 `PLAN.md` 2.1 进入 Mock Functional 开发通道
 > 对应路线图：`PLAN.md` A1～A5  
 > 对应规格：`SPEC.md` 3.1、4.1～4.7、5.1～5.2、5.4、5.7、Phase 0（P0-1～P0-3）  
 > 范围：只建立可生成、检查、测试和启动的 Python RAG 工程基线，不实现 Document、Job、Task、Outbox、摄取或检索业务行为。
@@ -454,7 +454,7 @@ uv run pytest tests/unit tests/contract
 
 ## 8. 实施顺序与复选框
 
-每项严格执行“失败测试 → 最小实现 → 通过验证”，不并行进入 Milestone B：
+每项严格执行“失败测试 → 最小实现 → 通过验证”。Docker/CI 发布出口仍待验收，但可按 `PLAN.md` 2.1 继续 Mock Functional 模块：
 
 - [x] A1.1 创建 `pyproject.toml`、基础测试目录和预期失败的包/config 测试。
 - [x] A1.2 创建包、Settings、README、ignore、license，并生成 `uv.lock`。
@@ -512,4 +512,4 @@ uv run pytest tests/unit tests/contract
 - [x] `git status --short` 已检查；`references/` 未读取、未修改、未暂存。
 - [x] 未实现或暗中引入 Milestone B～E 行为。
 
-验收通过后，才能开始执行本计划；Milestone A 全部完成后，再依据真实代码结构编写 `plans/milestone-b-internal-alpha.md`。
+本地实现门禁通过后，可依据真实代码结构编写 `plans/milestone-b-internal-alpha.md`；Docker/CI 清单未完成前，Milestone A 不得标记为正式阶段出口已通过。

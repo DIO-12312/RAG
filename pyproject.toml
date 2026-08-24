@@ -63,6 +63,7 @@ testpaths = ["tests"]
 asyncio_mode = "strict"
 markers = [
     "integration: requires one or more real infrastructure services",
+    "functional: uses real service boundaries with test-only fake infrastructure ports",
     "e2e: exercises an end-to-end process across components",
     "resilience: exercises crash, redelivery, and recovery behavior",
     "eval: measures deterministic retrieval quality",

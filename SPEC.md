@@ -226,11 +226,13 @@ RAGFlow 需要复杂文档理解、多个检索引擎、对象存储、模型提
 3. **确定性优先**：模型输出和 embedding 在 unit 层由 FakeModelGateway 固定；真实模型只在 opt-in 的评测/集成层运行。
 4. **适配器统一契约**：每个 SearchEngine、ObjectStorage、TaskQueue 实现必须跑同一组 contract tests。
 5. **质量与正确性分开**：代码测试验证行为；离线评测集验证 Recall@K、MRR、evidence/来源定位准确率，不将 LLM 自由文本做脆弱的逐字 snapshot。最终 Citation 编号准确率属于未来 Go 层测试。
+6. **无容器开发通道**：本机无法运行 Docker 时，允许通过测试专用 Fake/Mock ports 完成真实 gRPC、application、Worker、Outbox、pipeline 与 retrieval 的 Functional 闭环。Fake 只能位于 `tests/fakes/`，不得进入生产 container、不得伪装成 MySQL/Elasticsearch/NATS integration，也不得据此声明发布验收通过。
 
 ### 4.2 测试目录
 
 ```text
 tests/
+├─ fakes/                       # 测试专用 ports 实现；禁止由生产 bootstrap 导入
 ├─ unit/
 │  ├─ domain/                 # 状态机、digest、稳定 ID、领域校验
 │  ├─ ingestion/              # parser、chunker、dedup、pipeline
@@ -240,6 +242,8 @@ tests/
 │  ├─ test_search_engine_contract.py
 │  ├─ test_object_storage_contract.py
 │  └─ test_task_queue_contract.py
+├─ functional/
+│  └─ test_mock_upload_ingest_retrieve.py  # 真实进程边界 + Fake ports 的无容器闭环
 ├─ integration/
 │  ├─ test_mysql_repository.py
 │  ├─ test_elasticsearch_adapter.py
@@ -263,6 +267,7 @@ tests/
 |---|---|---|---|---|
 | Unit | `pytest tests/unit` | 无外部服务 | 核心领域与纯函数 | 每次提交 |
 | Contract | `pytest tests/contract` | in-memory / 临时目录 | 各端口的语义一致性 | 每次提交 |
+| Functional | `pytest tests/functional` | 测试专用 Fake ports、临时目录、进程内 gRPC | 无 Docker 的 upload → outbox → worker → retrieve 功能闭环；不计作真实 E2E | 每次提交 |
 | Integration | `pytest -m integration` | MySQL、Elasticsearch、NATS、Compose | 真实 adapter、mapping 与 stream 配置 | PR |
 | E2E | `pytest -m e2e` | gRPC、Worker、Outbox Relay、MySQL、Elasticsearch、NATS、fake embedding/rerank | 上传到可追溯 evidence 闭环 | PR/夜间 |
 | Resilience | `pytest -m resilience` | 可控 queue/DB | crash/redelivery、幂等、取消 | PR |
@@ -337,7 +342,7 @@ git config core.hooksPath .githooks
 uv run ruff check src tests
 uv run ruff format --check src tests
 uv run mypy src
-uv run pytest tests/unit tests/contract
+uv run pytest tests/unit tests/contract tests/functional
 ```
 
 hook 只做检查，不运行会改写工作区的 `ruff format` 或 `gofmt -w`；否则格式化后的内容不会自动进入本次暂存区，检查对象与提交对象可能不一致。开发者应先显式执行格式化命令并重新 `git add`。Integration、E2E、resilience 和 eval 因依赖容器、耗时或模型资源，不进入每次提交 hook，仍按 4.3 的 PR/夜间频率执行。

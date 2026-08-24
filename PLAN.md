@@ -36,7 +36,15 @@ plans/milestone-<x>-*.md
 - 所有 Task 与 OutboxEvent 在同一 MySQL 事务创建；Worker 是唯一消费 NATS 并执行 ACK/NAK 的进程。
 - 核心 schema 从首次落库起采用最终实体和关键字段，避免后续为可靠性能力重写主表、ES `_id` 或消息格式。
 - 每项实现先写失败测试，再做最小实现；实际运行和未运行的检查必须记录。
-- 路线图只提供建议提交边界。未经用户明确授权，不执行 `git commit` 或 `git push`。
+- 执行已验收详细计划时，每完成一个可独立验收的小模块必须按 `AGENTS.md` 自动创建独立 commit；任何 `git push` 仍需用户明确授权。
+
+### 2.1 无 Docker 的 Mock Functional 开发通道
+
+- 本机无法运行 Docker 时，可用 `tests/fakes/` 中的测试专用 ports 实现推进 B～D 的领域、application、RPC、Worker、Outbox、pipeline、retrieval 和可靠性逻辑。
+- Functional 测试必须使用真实 gRPC/application/Worker/Outbox 调用链，只替换 MetadataRepository、TaskQueue、SearchEngine、ModelGateway 等基础设施端口；Local ObjectStorage 可使用临时目录运行真实实现。
+- Fake 不得由 `bootstrap/container.py` 的生产装配导入，不得放入 `src/rag_mvp/adapters/`，不得演变成 SQLite、Qdrant、内存搜索产品实现或第二套消息系统。
+- 本地通过 unit/contract/functional/fake-resilience 只允许声明“Mock Functional 闭环通过”。MySQL 行锁/事务、ES mapping/KNN/BM25、JetStream durable/ACK/NAK/redelivery、Compose E2E 与 Docker 强杀仍必须由后续 CI 或具备基础设施的环境运行。
+- 该通道允许在 Milestone A 的 Docker/CI 发布出口延期时开始后续代码工作，但不改变各 Milestone 的正式阶段出口；真实 integration/E2E/resilience 未通过前，不得声明内部 Alpha、受控 MVP 或可靠发布基线已经验收完成。
 
 ## 3. 里程碑总览
 
@@ -110,7 +118,7 @@ Milestone E  ← Go 公网产品面与 Agent
 - GitHub Actions 从第一阶段起运行同一组检查；后续 Milestone 只扩展 job，不另建平行 CI。
 - Hook 失败阻止本地提交；CI 防止未配置 hook 或 `--no-verify` 绕过。
 
-**阶段出口：** 质量命令全部成功；proto 可重复生成；三个应用入口可启动后退出；MySQL/ES/NATS healthcheck 成功；CI 在文档或 smoke-test PR 上实际运行。
+**阶段出口：** 质量命令全部成功；proto 可重复生成；三个应用入口可启动后退出；MySQL/ES/NATS healthcheck 成功；CI 在文档或 smoke-test PR 上实际运行。若采用 2.1 的开发通道，可在前三项通过后继续编写后续 Mock Functional 模块，但 Milestone A 仍保持“发布出口未验收”。
 
 ## 6. Milestone B：最小异步检索闭环（内部 Alpha）
 
@@ -155,7 +163,7 @@ Milestone E  ← Go 公网产品面与 Agent
 - 验证相同 idempotency key 复用、不同 key 相同内容复用 canonical Job、Finalizer 发布门、ACK 丢失重投和 chunk upsert 幂等。
 - Compose E2E：上传 TXT，轮询 Job 成功，通过 gRPC Retrieve 获得 evidence。
 
-**阶段出口：** TXT 的 upload → async ingest → Dense retrieve 全链路成功；失败 Finalizer 不挂死；重复提交和重复 delivery 不产生第二份可见索引。该版本仅限内部验证。
+**阶段出口：** TXT 的 upload → async ingest → Dense retrieve 全链路成功；失败 Finalizer 不挂死；重复提交和重复 delivery 不产生第二份可见索引。Fake ports 下只记为“B Mock Functional 完成”；真实 adapter integration 与 Compose E2E 通过后才记为内部 Alpha。
 
 ## 7. Milestone C：纯 RAG MVP（单机受控试用）
 
@@ -308,11 +316,11 @@ plans/
 2. 任务消费与产出的准确接口/类型；
 3. 先失败测试、预期失败原因、最小实现和通过命令；
 4. 独立可验收的任务边界；
-5. 建议 `git add` 文件和 Conventional Commit 消息；
-6. 明确说明只有用户授权后才实际提交。
+5. 每个小模块准确的 `git add` 文件和 Conventional Commit 消息；
+6. 模块通过相称检查后按 `AGENTS.md` 自动提交，并明确 `git push` 仍需用户授权。
 
 不要一次写完五份详细施工计划。完成并验收当前 Milestone 后，再结合真实代码结构编写下一份，避免后续计划基于尚不存在的实现细节失真。
 
 ## 12. 当前起点
 
-`plans/milestone-a-engineering-baseline.md` 已验收并实施：Python 工程、完整 gRPC 契约、分层包、三个进程骨架、Compose、pre-commit 与基础 CI 已落地，unit/contract 快速门禁通过。当前环境没有 Docker，因此 MySQL、Elasticsearch、NATS healthcheck 和真实 GitHub Actions 尚未验收，Milestone A 仍未达到阶段出口。下一步是在具备 Docker 的环境完成剩余验收；Milestone A 全部通过前不实施 B～E。
+`plans/milestone-a-engineering-baseline.md` 已实施，快速门禁通过；Docker/CI 发布出口因本机环境限制延期。项目已获准使用 2.1 的 Mock Functional 通道推进 Python RAG：下一步编写并执行 `plans/milestone-b-internal-alpha.md`，本地以真实调用链 + Fake ports 跑通 TXT 异步摄取和 Dense Retrieve；真实基础设施验收继续保留为发布阻塞项。
