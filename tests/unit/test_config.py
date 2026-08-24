@@ -122,7 +122,7 @@ def test_test_markers_are_registered(request: pytest.FixtureRequest) -> None:
 
 @pytest.mark.parametrize(
     "module_name",
-    ["sqlalchemy", "asyncmy", "alembic", "httpx", "elasticsearch", "nats"],
+    ["sqlalchemy", "asyncmy", "cryptography", "alembic", "httpx", "elasticsearch", "nats"],
 )
 def test_runtime_adapter_dependencies_are_importable(module_name: str) -> None:
     assert importlib.util.find_spec(module_name) is not None

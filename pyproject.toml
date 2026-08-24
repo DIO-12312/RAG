@@ -14,6 +14,7 @@ dependencies = [
     "grpcio-reflection>=1.74.0,<2.0.0",
     "alembic>=1.16.5,<2.0.0",
     "asyncmy>=0.2.10,<1.0.0",
+    "cryptography>=45.0.0,<47.0.0",
     "elasticsearch[async]>=8.19.0,<9.0.0",
     "httpx>=0.28.1,<1.0.0",
     "nats-py>=2.11.0,<3.0.0",
@@ -30,6 +31,7 @@ rag-server = "rag_mvp.main:main"
 rag-worker = "rag_mvp.ingestion.worker:main"
 rag-outbox = "rag_mvp.outbox.main:main"
 rag-dev = "rag_mvp.dev.cli:main"
+rag-migrate = "rag_mvp.adapters.metadata.migrate:main"
 
 [dependency-groups]
 dev = [

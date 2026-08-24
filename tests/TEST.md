@@ -51,6 +51,9 @@ tests/
 │  ├─ test_mock_four_formats.py
 │  ├─ test_mock_retry_job.py
 │  └─ test_mock_upload_ingest_retrieve.py
+├─ integration/                             # 依赖真实 Docker 基础设施的 adapter 验证
+│  ├─ conftest.py                            # host/container MySQL 测试 DSN
+│  └─ test_mysql_migrations.py
 ├─ resilience/                              # 故障、竞态、重投与恢复矩阵
 │  ├─ test_cancel_races.py
 │  ├─ test_concurrent_uniqueness.py
@@ -59,6 +62,8 @@ tests/
 │  ├─ test_redelivery_idempotency.py
 │  └─ test_spec_invariant_matrix.py
 └─ unit/                                    # 领域纯规则和单组件行为
+   ├─ adapters/
+   │  └─ test_mysql_schema.py
    ├─ application/
    │  ├─ test_document_service.py
    │  ├─ test_job_service.py
@@ -95,6 +100,7 @@ tests/
 | Unit | 领域规则、单个 application service、parser、chunker、Worker、Outbox 与纯检索算法 | `uv run pytest tests/unit` | 不依赖真实外部服务 |
 | Contract | protobuf、gRPC DTO、Port 抽象及各实现必须共同遵守的语义 | `uv run pytest tests/contract` | 使用确定性 Fake 或本地对象存储；真实 adapter 契约待补充 |
 | Functional | upload → Finalizer → Relay → Worker → Retrieve 的完整调用链 | `uv run pytest tests/functional` | 真实 gRPC/application 流程 + Fake Metadata/Queue/Search/Model |
+| Integration | migration 和真实基础设施 adapter 的协议、约束与幂等性 | `uv run pytest -m integration tests/integration` | 要求对应 Docker 服务健康；缺少基础设施时失败而非跳过 |
 | Resilience | failpoint、重投、取消、并发、generation fence 与恢复不变量 | `uv run pytest -m resilience tests/resilience` | Mock Reliability；不替代进程强杀和真实中间件恢复 |
 | Eval | 固定 30 问检索集的 Recall@6、MRR@6、locator accuracy | `uv run pytest -m eval tests/eval` | 确定性 Fake 检索与固定 fixture |
 
@@ -104,6 +110,10 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
+| `adapters/test_mysql_schema.py` | `test_core_schema_declares_all_authoritative_tables_and_innodb` | ORM metadata 声明全部权威表，并固定为 InnoDB。 |
+| 同上 | `test_schema_declares_business_uniqueness_constraints` | Fingerprint、版本、幂等记录、manifest 和 Outbox 具有业务唯一约束。 |
+| 同上 | `test_schema_declares_aggregate_foreign_keys` | Dataset、Document、Job、Task、Outbox 和 manifest 的聚合外键完整。 |
+| 同上 | `test_schema_uses_precise_json_time_and_digest_columns_without_vectors` | JSON、DATETIME(6) 与 64 位摘要字段类型正确，manifest 不保存向量。 |
 | `application/test_document_service.py` | `test_create_dataset_rejects_runtime_embedding_mismatch` | Dataset 声明的 Embedding 模型或维度与运行配置不一致时返回稳定错误。 |
 | 同上 | `test_submit_writes_staging_and_atomically_creates_waiting_work` | 上传先写 staging，再原子创建 Document、Job、Task 和 WAITING Outbox。 |
 | 同上 | `test_same_file_different_key_reuses_canonical_job_and_cleans_loser_staging` | 相同内容不同幂等键复用 canonical Job，并删除未被引用的 staging。 |
@@ -206,6 +216,14 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | `test_search_engine_contract.py` | `test_search_upsert_is_idempotent_and_dense_sparse_are_separate` | Search upsert 幂等，Dense 与 Sparse 候选分离。 |
 | `test_task_queue_contract.py` | `test_queue_preserves_at_least_once_delivery_and_explicit_ack_nak` | Queue 保持至少一次投递和显式 ACK/NAK。 |
 | 同上 | `test_unacked_delivery_can_be_redelivered` | 未 ACK delivery 可重新投递。 |
+
+## Integration 测试函数
+
+Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；显式选择该测试类型时，基础设施不可用必须失败。
+
+| 文件 | 测试函数 | 职责 |
+| --- | --- | --- |
+| `test_mysql_migrations.py` | `test_upgrade_head_is_idempotent_and_creates_innodb_schema` | 对真实 MySQL 连续升级两次，验证 revision、默认租户、InnoDB 表和关键唯一约束。 |
 
 ## Functional 测试函数
 

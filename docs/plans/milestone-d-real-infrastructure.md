@@ -279,7 +279,9 @@ git commit -m "feat(config): 固定租户与 embedding 运行配置"
 - Create: `tests/unit/adapters/test_mysql_schema.py`
 - Create: `tests/integration/conftest.py`
 - Create: `tests/integration/test_mysql_migrations.py`
+- Modify: `tests/unit/test_config.py`（覆盖 MySQL 8 认证运行依赖）
 - Modify: `pyproject.toml`（增加 `rag-migrate` console script）
+- Modify: `uv.lock`（锁定 MySQL 8 `caching_sha2_password` 所需运行依赖）
 - Modify: `tests/TEST.md`
 
 **Interfaces:**
@@ -288,7 +290,7 @@ git commit -m "feat(config): 固定租户与 embedding 运行配置"
 - Produces: `create_session_factory(engine) -> async_sessionmaker[AsyncSession]`
 - Produces CLI: `rag-migrate`
 
-- [ ] **Step 1: Write failing schema metadata tests**
+- [x] **Step 1: Write failing schema metadata tests**
 
 Assert exact tables and constraints:
 
@@ -303,17 +305,17 @@ assert unique_columns("idempotency_records") == {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest tests/unit/adapters/test_mysql_schema.py -q`
 
 Expected: import fails because `tables.py` does not exist.
 
-- [ ] **Step 3: Implement final schema and migration**
+- [x] **Step 3: Implement final schema and migration**
 
 Use string enum columns sized for current enum values, UTC `DATETIME(6)`, JSON for errors/locator/metadata, binary-safe 64-character digest columns, foreign keys and the design constraints. `chunk_manifests` stores no vector.
 
-- [ ] **Step 4: Start MySQL and verify real migration twice**
+- [x] **Step 4: Start MySQL and verify real migration twice**
 
 Run:
 
@@ -326,7 +328,7 @@ uv run pytest -m integration tests/integration/test_mysql_migrations.py -q
 
 Expected: both upgrades exit 0; all expected InnoDB tables and unique constraints exist.
 
-- [ ] **Step 5: Run static and import-boundary checks**
+- [x] **Step 5: Run static and import-boundary checks**
 
 ```powershell
 uv run ruff check src/rag_mvp/adapters/metadata migrations tests/unit/adapters tests/integration
@@ -334,10 +336,10 @@ uv run mypy src migrations
 uv run pytest tests/unit/test_import_boundaries.py -q
 ```
 
-- [ ] **Step 6: Update test index and commit**
+- [x] **Step 6: Update test index and commit**
 
 ```powershell
-git add alembic.ini migrations/env.py migrations/script.py.mako migrations/versions/0001_core_schema.py pyproject.toml src/rag_mvp/adapters/metadata/tables.py src/rag_mvp/adapters/metadata/database.py src/rag_mvp/adapters/metadata/migrate.py tests/unit/adapters/test_mysql_schema.py tests/integration/conftest.py tests/integration/test_mysql_migrations.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
+git add alembic.ini migrations/env.py migrations/script.py.mako migrations/versions/0001_core_schema.py pyproject.toml uv.lock src/rag_mvp/adapters/metadata/tables.py src/rag_mvp/adapters/metadata/database.py src/rag_mvp/adapters/metadata/migrate.py tests/unit/adapters/test_mysql_schema.py tests/unit/test_config.py tests/integration/conftest.py tests/integration/test_mysql_migrations.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "feat(mysql): 建立核心 schema 与迁移"
 ```
 
