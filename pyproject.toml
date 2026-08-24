@@ -1,0 +1,77 @@
+[build-system]
+requires = ["uv_build>=0.8.0,<0.9.0"]
+build-backend = "uv_build"
+
+[project]
+name = "rag-mvp"
+version = "0.1.0"
+description = "A reliable Python RAG compute service exposed through versioned gRPC."
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+license = "Apache-2.0"
+dependencies = [
+    "grpcio>=1.74.0,<2.0.0",
+    "grpcio-reflection>=1.74.0,<2.0.0",
+    "protobuf>=6.31.0,<7.0.0",
+    "pydantic-settings>=2.10.0,<3.0.0",
+    "structlog>=25.4.0,<26.0.0",
+]
+
+[project.scripts]
+rag-server = "rag_mvp.main:main"
+rag-worker = "rag_mvp.ingestion.worker:main"
+rag-outbox = "rag_mvp.outbox.main:main"
+rag-dev = "rag_mvp.dev.cli:main"
+
+[dependency-groups]
+dev = [
+    "grpcio-tools>=1.74.0,<2.0.0",
+    "mypy>=1.17.0,<2.0.0",
+    "pytest>=8.4.0,<9.0.0",
+    "pytest-asyncio>=1.1.0,<2.0.0",
+    "pytest-cov>=6.2.0,<7.0.0",
+    "ruff>=0.12.0,<0.13.0",
+    "types-grpcio>=1.0.0,<2.0.0",
+    "types-grpcio-reflection>=1.0.0,<2.0.0",
+    "types-protobuf>=6.30.2,<7.0.0",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["src/rag_mvp/rpc/generated"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["rag_mvp"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+pretty = true
+show_error_codes = true
+exclude = ["^src/rag_mvp/rpc/generated/"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --strict-config"
+testpaths = ["tests"]
+asyncio_mode = "strict"
+markers = [
+    "integration: requires one or more real infrastructure services",
+    "e2e: exercises an end-to-end process across components",
+    "resilience: exercises crash, redelivery, and recovery behavior",
+    "eval: measures deterministic retrieval quality",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["rag_mvp"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

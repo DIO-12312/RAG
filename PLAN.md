@@ -315,4 +315,4 @@ plans/
 
 ## 12. 当前起点
 
-仓库目前只有设计文档，下一步是编写 `plans/milestone-a-engineering-baseline.md`。该计划验收后才开始创建 Python 工程文件；Milestone A 完成前不并行实施 B～E。
+`plans/milestone-a-engineering-baseline.md` 已验收并实施：Python 工程、完整 gRPC 契约、分层包、三个进程骨架、Compose、pre-commit 与基础 CI 已落地，unit/contract 快速门禁通过。当前环境没有 Docker，因此 MySQL、Elasticsearch、NATS healthcheck 和真实 GitHub Actions 尚未验收，Milestone A 仍未达到阶段出口。下一步是在具备 Docker 的环境完成剩余验收；Milestone A 全部通过前不实施 B～E。

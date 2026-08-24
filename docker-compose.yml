@@ -1,0 +1,109 @@
+name: rag-mvp
+
+services:
+  mysql:
+    image: mysql:8.4.6
+    environment:
+      MYSQL_DATABASE: rag
+      MYSQL_USER: rag
+      MYSQL_PASSWORD: rag
+      MYSQL_ROOT_PASSWORD: root-rag-dev
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:9200/_cluster/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+  nats:
+    image: nats:2.11.8-alpine
+    command: ["-js", "-m", "8222", "--store_dir", "/data"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8222/healthz >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  rag-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["rag-server"]
+    environment: &rag-environment
+      RAG_ENVIRONMENT: development
+      RAG_GRPC_REFLECTION: "true"
+      RAG_MYSQL_DSN: mysql+asyncmy://rag:rag@mysql:3306/rag
+      RAG_ELASTICSEARCH_URL: http://elasticsearch:9200
+      RAG_NATS_URL: nats://nats:4222
+      RAG_OBJECT_ROOT: /app/data/objects
+    ports:
+      - "50051:50051"
+    volumes:
+      - object-data:/app/data/objects
+    depends_on: &infrastructure-health
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+
+  rag-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["rag-worker"]
+    environment: *rag-environment
+    volumes:
+      - object-data:/app/data/objects
+    depends_on: *infrastructure-health
+    restart: unless-stopped
+
+  rag-outbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["rag-outbox"]
+    environment: *rag-environment
+    volumes:
+      - object-data:/app/data/objects
+    depends_on: *infrastructure-health
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  elasticsearch-data:
+  nats-data:
+  object-data:
+

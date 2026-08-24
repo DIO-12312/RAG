@@ -1,0 +1,253 @@
+syntax = "proto3";
+
+package rag.v1;
+
+service RagService {
+  rpc CreateDataset(CreateDatasetRequest) returns (CreateDatasetResponse);
+  rpc SubmitDocument(stream UploadDocumentRequest) returns (SubmitDocumentResponse);
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+  rpc RetryJob(RetryJobRequest) returns (RetryJobResponse);
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+  rpc Retrieve(RetrieveRequest) returns (RetrieveResponse);
+  rpc DeleteDocument(DeleteDocumentRequest) returns (DeleteDocumentResponse);
+}
+
+message RequestContext {
+  string request_id = 1;
+  string idempotency_key = 2;
+}
+
+message BusinessError {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+  string request_id = 4;
+}
+
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_PENDING = 1;
+  JOB_STATUS_RUNNING = 2;
+  JOB_STATUS_SUCCEEDED = 3;
+  JOB_STATUS_FAILED = 4;
+  JOB_STATUS_CANCELLED = 5;
+}
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_PENDING = 1;
+  TASK_STATUS_RUNNING = 2;
+  TASK_STATUS_SUCCEEDED = 3;
+  TASK_STATUS_FAILED = 4;
+  TASK_STATUS_CANCELLED = 5;
+}
+
+enum JobType {
+  JOB_TYPE_UNSPECIFIED = 0;
+  JOB_TYPE_INGEST_DOCUMENT = 1;
+  JOB_TYPE_DELETE_DOCUMENT = 2;
+  JOB_TYPE_CLEANUP_INDEX_VERSION = 3;
+}
+
+enum DocumentStatus {
+  DOCUMENT_STATUS_UNSPECIFIED = 0;
+  DOCUMENT_STATUS_PENDING = 1;
+  DOCUMENT_STATUS_READY = 2;
+  DOCUMENT_STATUS_FAILED = 3;
+  DOCUMENT_STATUS_DELETED = 4;
+}
+
+message RetrievalConfig {
+  uint32 dense_top_k = 1;
+  uint32 sparse_top_k = 2;
+  uint32 rrf_k = 3;
+  bool rerank_enabled = 4;
+  uint32 rerank_top_n = 5;
+  uint32 max_context_tokens = 6;
+}
+
+message CreateDatasetRequest {
+  RequestContext context = 1;
+  string name = 2;
+  string embedding_model = 3;
+  uint32 embedding_dimension = 4;
+  RetrievalConfig retrieval_config = 5;
+}
+
+message CreateDatasetResult {
+  string dataset_id = 1;
+  string name = 2;
+  string embedding_model = 3;
+  uint32 embedding_dimension = 4;
+}
+
+message CreateDatasetResponse {
+  oneof outcome {
+    CreateDatasetResult result = 1;
+    BusinessError error = 2;
+  }
+}
+
+message UploadHeader {
+  RequestContext context = 1;
+  string dataset_id = 2;
+  string source_name = 3;
+  optional string expected_sha256 = 4;
+  optional string target_document_id = 5;
+}
+
+message UploadDocumentRequest {
+  oneof payload {
+    UploadHeader header = 1;
+    bytes data = 2;
+  }
+}
+
+message SubmitDocumentResult {
+  string document_id = 1;
+  string job_id = 2;
+  bool reused = 3;
+}
+
+message SubmitDocumentResponse {
+  oneof outcome {
+    SubmitDocumentResult result = 1;
+    BusinessError error = 2;
+  }
+}
+
+message GetJobRequest {
+  string request_id = 1;
+  string job_id = 2;
+}
+
+message JobFailure {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+}
+
+message JobResult {
+  string job_id = 1;
+  string document_id = 2;
+  JobType type = 3;
+  JobStatus status = 4;
+  float progress = 5;
+  optional JobFailure failure = 6;
+  bool retryable = 7;
+  uint32 retry_count = 8;
+  bool cancel_requested = 9;
+  TaskStatus task_status = 10;
+}
+
+message GetJobResponse {
+  oneof outcome {
+    JobResult result = 1;
+    BusinessError error = 2;
+  }
+}
+
+message RetryJobRequest {
+  RequestContext context = 1;
+  string job_id = 2;
+}
+
+message RetryJobResponse {
+  oneof outcome {
+    JobResult result = 1;
+    BusinessError error = 2;
+  }
+}
+
+message CancelJobRequest {
+  RequestContext context = 1;
+  string job_id = 2;
+}
+
+message CancelJobResult {
+  string job_id = 1;
+  JobStatus job_status = 2;
+  TaskStatus task_status = 3;
+  bool cancel_requested = 4;
+}
+
+message CancelJobResponse {
+  oneof outcome {
+    CancelJobResult result = 1;
+    BusinessError error = 2;
+  }
+}
+
+message MetadataFilter {
+  string key = 1;
+  string value = 2;
+}
+
+message RetrieveRequest {
+  string request_id = 1;
+  string dataset_id = 2;
+  string query = 3;
+  repeated MetadataFilter filters = 4;
+  uint32 top_k = 5;
+  bool enable_rerank = 6;
+  uint32 max_context_tokens = 7;
+}
+
+message Locator {
+  optional uint32 page_number = 1;
+  optional uint32 start_line = 2;
+  optional uint32 end_line = 3;
+  optional string symbol = 4;
+  optional string language = 5;
+  map<string, string> metadata = 6;
+}
+
+message ScoreBreakdown {
+  optional double dense_score = 1;
+  optional double sparse_score = 2;
+  optional double fusion_score = 3;
+  optional double rerank_score = 4;
+}
+
+message Evidence {
+  string chunk_id = 1;
+  string document_id = 2;
+  string content_with_weight = 3;
+  string source_name = 4;
+  Locator locator = 5;
+  map<string, string> metadata = 6;
+  ScoreBreakdown scores = 7;
+  uint64 index_version = 8;
+}
+
+message RetrieveResult {
+  repeated Evidence evidence = 1;
+  uint32 estimated_tokens = 2;
+  repeated string omitted_chunk_ids = 3;
+}
+
+message RetrieveResponse {
+  oneof outcome {
+    RetrieveResult result = 1;
+    BusinessError error = 2;
+  }
+}
+
+message DeleteDocumentRequest {
+  RequestContext context = 1;
+  string document_id = 2;
+}
+
+message DeleteDocumentResult {
+  string document_id = 1;
+  string job_id = 2;
+  DocumentStatus document_status = 3;
+}
+
+message DeleteDocumentResponse {
+  oneof outcome {
+    DeleteDocumentResult result = 1;
+    BusinessError error = 2;
+  }
+}
+
