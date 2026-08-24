@@ -46,3 +46,16 @@ jobs:
 
       - name: Run fake resilience tests
         run: uv run pytest -m resilience tests/resilience
+
+      - name: Run deterministic retrieval evaluation
+        run: uv run pytest -m eval tests/eval
+
+      - name: Enforce core Python coverage
+        run: >-
+          uv run pytest
+          --cov=rag_mvp.domain
+          --cov=rag_mvp.application
+          --cov=rag_mvp.ingestion
+          --cov=rag_mvp.retrieval
+          --cov-fail-under=85
+          tests/unit tests/contract tests/functional tests/resilience tests/eval

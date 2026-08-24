@@ -1,6 +1,6 @@
 # Milestone C：纯 RAG MVP（Mock Functional）实施计划
 
-> 状态：实施中（C1～C5 已完成）
+> 状态：Mock Functional 已完成；真实基础设施与 Compose 验收延期
 > 对应路线图：`PLAN.md` C1～C6、2.1 无 Docker 开发通道
 > 对应规格：`SPEC.md` 2.1、2.3、2.5、3.3、4.2～4.6、5.4～5.5、P1-3、P2-3～P2-4、P3-1～P3-4
 > 范围：在 Milestone B 的最终 ports 上完成四类文件、Dense + BM25 + RRF、可选 Rerank、基础 Retry/Delete 与离线评测。真实 MySQL/Elasticsearch/NATS adapter、Compose E2E 和并发极端竞态继续延期到真实基础设施环境及 Milestone D。
@@ -116,5 +116,5 @@ uv run pytest -m eval tests/eval
 - [x] C3 可选 Rerank、降级与 ContextPlan 通过并提交。
 - [x] C4 RetryJob 新 Job/Task/Outbox 闭环通过并提交。
 - [x] C5 DeleteDocument 立即不可见与异步清理通过并提交。
-- [ ] C6 四格式 gRPC Functional、30 问评测和全门禁通过并提交。
-- [ ] Fake 仍只存在于 `tests/fakes/`，真实 integration/E2E 未运行项明确保留。
+- [x] C6 四格式 gRPC Functional、30 问评测和全门禁通过并提交。
+- [x] Fake 仍只存在于 `tests/fakes/`，真实 integration/E2E 未运行项明确保留。

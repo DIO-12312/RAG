@@ -32,6 +32,7 @@ async def _upload(
     *,
     idempotency_key: str,
     content: bytes,
+    source_name: str = "guide.txt",
 ) -> AsyncIterator[rag_service_pb2.UploadDocumentRequest]:
     yield rag_service_pb2.UploadDocumentRequest(
         header=rag_service_pb2.UploadHeader(
@@ -39,7 +40,7 @@ async def _upload(
                 request_id=f"request-{idempotency_key}", idempotency_key=idempotency_key
             ),
             dataset_id=dataset_id,
-            source_name="guide.txt",
+            source_name=source_name,
         )
     )
     midpoint = len(content) // 2

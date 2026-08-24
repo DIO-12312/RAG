@@ -2,7 +2,7 @@
 
 可靠、可恢复的 Python RAG 计算服务。Python 只通过版本化 gRPC 提供文档摄取、检索与 evidence 能力；未来的公网 API、鉴权、会话、Chat Model、Agent Harness 和 SSE 由 Go 控制面负责。
 
-当前已完成 Milestone B 的 Mock Functional 闭环：`CreateDataset`、TXT `SubmitDocument`、`GetJob` 与 Dense `Retrieve` 可通过真实 gRPC/application/Outbox/Worker/pipeline 调用链运行。MySQL、Elasticsearch、NATS JetStream 的真实 adapter 与 Compose 验收仍未完成，因此当前状态不是内部 Alpha 发布出口。
+当前已完成 Milestone C 的 Mock Functional 闭环：四类文件摄取、Dense + BM25 + RRF、可选 Rerank、ContextPlan、RetryJob 与 DeleteDocument 均可通过真实 gRPC/application/Outbox/Worker/pipeline 调用链运行。MySQL、Elasticsearch、NATS JetStream 的真实 adapter 与 Compose 验收仍未完成，因此当前状态不是可发布的受控 MVP。
 
 ## 环境要求
 
@@ -38,9 +38,13 @@ uv run python scripts/check_generated.py
 uv run pytest tests/unit tests/contract
 uv run pytest tests/functional
 uv run pytest -m resilience tests/resilience
+uv run pytest -m eval tests/eval
+uv run pytest --cov=rag_mvp.domain --cov=rag_mvp.application --cov=rag_mvp.ingestion --cov=rag_mvp.retrieval --cov-fail-under=85 tests/unit tests/contract tests/functional tests/resilience tests/eval
 ```
 
-无需 Docker 时，`tests/functional/` 使用真实 gRPC 与本地文件对象存储，只将 MetadataRepository、TaskQueue、SearchEngine 和 ModelGateway 替换为 `tests/fakes/` 中的确定性实现。Fake 不会被生产 `bootstrap/container.py` 导入。
+无需 Docker 时，`tests/functional/` 使用真实 gRPC 与本地文件对象存储，只将 MetadataRepository、TaskQueue、SearchEngine 和 ModelGateway 替换为 `tests/fakes/` 中的确定性实现。它覆盖 TXT、Markdown、Python 和文本 PDF 的 upload → ingest → hybrid retrieve，以及重试、逻辑删除和异步清理。Fake 不会被生产 `bootstrap/container.py` 导入。
+
+固定 30 问评测集当前门禁为 `Recall@6 ≥ 0.85`、`MRR@6 ≥ 0.70`、locator accuracy `= 1.0`；核心 `domain/application/ingestion/retrieval` 聚合覆盖率不得低于 85%。
 
 为当前 clone 启用仓库内的提交门禁：
 
