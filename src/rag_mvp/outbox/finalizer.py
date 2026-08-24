@@ -15,7 +15,10 @@ async def finalize_once(
     now: datetime,
     *,
     limit: int,
+    max_finalize_attempts: int = 5,
 ) -> int:
+    if max_finalize_attempts < 1:
+        raise ValueError("max_finalize_attempts must be at least 1")
     finalized = 0
     for event in await metadata.list_waiting_outbox(limit):
         if event.staging_key is None:
@@ -30,7 +33,11 @@ async def finalize_once(
         if document is None:
             continue
         final_key = f"objects/{document.id}/source"
-        await storage.promote(event.staging_key, final_key)
+        try:
+            await storage.promote(event.staging_key, final_key)
+        except Exception:
+            await metadata.record_finalization_failure(event.id, max_finalize_attempts, now)
+            continue
         if not await metadata.mark_object_ready(event.id, final_key, now):
             await storage.delete(final_key)
             continue

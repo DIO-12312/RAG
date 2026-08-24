@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
+
+from rag_mvp.ports.storage import StoredObject
 
 
 class LocalObjectStorage:
@@ -64,3 +67,20 @@ class LocalObjectStorage:
 
     async def exists(self, key: str) -> bool:
         return await asyncio.to_thread(self._path(key).is_file)
+
+    async def list_objects(self, prefix: str) -> tuple[StoredObject, ...]:
+        prefix_path = self._path(prefix)
+
+        def scan() -> tuple[StoredObject, ...]:
+            if not prefix_path.exists():
+                return ()
+            return tuple(
+                StoredObject(
+                    path.relative_to(self._root).as_posix(),
+                    datetime.fromtimestamp(path.stat().st_mtime, tz=UTC),
+                )
+                for path in sorted(prefix_path.rglob("*"))
+                if path.is_file()
+            )
+
+        return await asyncio.to_thread(scan)

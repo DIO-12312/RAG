@@ -1,6 +1,14 @@
 """Object storage capability boundary."""
 
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
+
+
+@dataclass(frozen=True, slots=True)
+class StoredObject:
+    key: str
+    modified_at: datetime
 
 
 class ObjectStorage(Protocol):
@@ -15,3 +23,5 @@ class ObjectStorage(Protocol):
     async def delete(self, key: str) -> None: ...
 
     async def exists(self, key: str) -> bool: ...
+
+    async def list_objects(self, prefix: str) -> tuple[StoredObject, ...]: ...

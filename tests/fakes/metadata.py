@@ -214,6 +214,47 @@ class FakeMetadataRepository:
             self.outbox[event_id] = replace(event, status=OutboxStatus.READY_TO_PUBLISH)
             return True
 
+    async def record_finalization_failure(
+        self, event_id: str, max_attempts: int, now: datetime
+    ) -> bool:
+        del now
+        async with self._lock:
+            event = self.outbox.get(event_id)
+            if event is None or event.status is not OutboxStatus.WAITING_OBJECT:
+                return False
+            attempt = event.attempt + 1
+            if attempt < max_attempts:
+                self.outbox[event_id] = replace(event, attempt=attempt)
+                return False
+
+            failure = DomainFailure(
+                "OBJECT_FINALIZATION_FAILED",
+                "source object could not be finalized",
+                retryable=False,
+            )
+            task = self.tasks[event.task_id]
+            job = self.jobs[task.job_id]
+            document = self.documents[job.document_id]
+            self.outbox[event_id] = replace(event, attempt=attempt, status=OutboxStatus.CANCELLED)
+            self.tasks[task.id] = replace(task, status=TaskStatus.FAILED, error=failure)
+            self.jobs[job.id] = replace(
+                job, status=JobStatus.FAILED, error=failure, retryable=False
+            )
+            if document.active_version is None:
+                self.documents[document.id] = replace(document, status=DocumentStatus.FAILED)
+            for key, fingerprint in self.fingerprints.items():
+                if fingerprint.job_id == job.id:
+                    self.fingerprints[key] = replace(fingerprint, state=FingerprintState.RELEASED)
+                    break
+            return True
+
+    async def waiting_staging_keys(self) -> Sequence[str]:
+        return tuple(
+            event.staging_key
+            for event in self.outbox.values()
+            if event.status is OutboxStatus.WAITING_OBJECT and event.staging_key is not None
+        )
+
     async def list_ready_outbox(self, limit: int) -> Sequence[OutboxEvent]:
         return tuple(
             event
