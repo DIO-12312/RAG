@@ -635,7 +635,7 @@ git commit -m "feat(search): 实现 ES 稠密与 BM25 检索"
 - Implements: `publish`, `consume`, `ack`, `nak`
 - Produces: `close() -> None`
 
-- [ ] **Step 1: Write failing delivery metadata mapping test**
+- [x] **Step 1: Write failing delivery metadata mapping test**
 
 ```python
 delivery = delivery_from_message(message)
@@ -644,15 +644,15 @@ assert delivery.delivery_sequence == message.metadata.sequence.consumer
 assert delivery.redelivery_count == message.metadata.num_delivered - 1
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest tests/unit/adapters/test_nats_delivery_mapping.py -q`
 
-- [ ] **Step 3: Implement stream/consumer provisioning and explicit ACK/NAK**
+- [x] **Step 3: Implement stream/consumer provisioning and explicit ACK/NAK**
 
 Provisioning must be idempotent and validate incompatible existing consumer settings. Publish waits for PubAck. Empty fetch timeout returns `None`, not an exception.
 
-- [ ] **Step 4: Run real JetStream integration**
+- [x] **Step 4: Run real JetStream integration**
 
 ```powershell
 docker compose up -d nats
@@ -662,7 +662,7 @@ uv run pytest tests/contract/test_task_queue_contract.py -q
 
 Assert durable redelivery after missing ACK, NAK delay, ACK removal and duplicate publish preservation.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/rag_mvp/adapters/message_queue/nats_jetstream.py tests/unit/adapters/test_nats_delivery_mapping.py tests/integration/test_nats_jetstream_adapter.py tests/contract/test_task_queue_contract.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md

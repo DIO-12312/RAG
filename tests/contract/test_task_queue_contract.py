@@ -27,6 +27,16 @@ async def test_queue_preserves_at_least_once_delivery_and_explicit_ack_nak() -> 
     assert await queue.consume("worker-a", timeout_seconds=0) is None
     assert queue.acked_task_ids == ["task-1"]
 
+    await queue.publish("task-duplicate")
+    await queue.publish("task-duplicate")
+    duplicate_a = await queue.consume("worker-a", timeout_seconds=0)
+    duplicate_b = await queue.consume("worker-b", timeout_seconds=0)
+    assert duplicate_a is not None and duplicate_b is not None
+    assert duplicate_a.task_id == duplicate_b.task_id == "task-duplicate"
+    assert duplicate_a.id != duplicate_b.id
+    await queue.ack(duplicate_a)
+    await queue.ack(duplicate_b)
+
 
 @pytest.mark.asyncio
 async def test_unacked_delivery_can_be_redelivered() -> None:

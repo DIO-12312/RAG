@@ -59,6 +59,7 @@ tests/
 │  ├─ test_mysql_migrations.py
 │  ├─ test_mysql_outbox_worker.py
 │  ├─ test_mysql_submission.py
+│  ├─ test_nats_jetstream_adapter.py
 │  └─ test_real_embedding_model.py
 ├─ resilience/                              # 故障、竞态、重投与恢复矩阵
 │  ├─ test_cancel_races.py
@@ -71,6 +72,7 @@ tests/
    ├─ adapters/
    │  ├─ test_elasticsearch_mapping.py
    │  ├─ test_mysql_schema.py
+   │  ├─ test_nats_delivery_mapping.py
    │  └─ test_openai_compatible_model.py
    ├─ application/
    │  ├─ test_document_service.py
@@ -123,6 +125,8 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_indexed_chunk_round_trips_through_source_and_hit_without_score_loss` | IndexedChunk 经 `_source`/hit 往返后完整保留 Chunk、定位、metadata 和原始分数。 |
 | 同上 | `test_bulk_action_uses_versioned_physical_id_and_rejects_mismatch` | Bulk action 强制使用 document/version/chunk 组成的物理 `_id`，拒绝伪造 ID。 |
 | 同上 | `test_bulk_action_rejects_vector_dimension_mismatch` | 写入向量维度必须与 ES mapping 声明一致。 |
+| `adapters/test_nats_delivery_mapping.py` | `test_delivery_uses_task_id_consumer_sequence_and_redelivery_count` | 将 JetStream task_id、consumer sequence 和投递次数映射为稳定 Delivery。 |
+| 同上 | `test_delivery_rejects_invalid_payload_and_metadata` | 参数化拒绝空/非 UTF-8 task_id 及非法 sequence/delivery metadata。 |
 | `adapters/test_mysql_schema.py` | `test_core_schema_declares_all_authoritative_tables_and_innodb` | ORM metadata 声明全部权威表，并固定为 InnoDB。 |
 | 同上 | `test_schema_declares_business_uniqueness_constraints` | Fingerprint、版本、幂等记录、manifest 和 Outbox 具有业务唯一约束。 |
 | 同上 | `test_schema_declares_aggregate_foreign_keys` | Dataset、Document、Job、Task、Outbox 和 manifest 的聚合外键完整。 |
@@ -235,7 +239,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_retry_rejects_failure_without_final_object` | 无正式对象的失败不可 Retry。 |
 | 同上 | `test_retry_enforces_user_retry_limit` | Retry 强制执行用户重试上限。 |
 | `test_search_engine_contract.py` | `test_search_upsert_is_idempotent_and_dense_sparse_are_separate` | Search upsert 幂等，Dense 与 Sparse 候选分离，并共同遵守 Dataset/metadata 过滤。 |
-| `test_task_queue_contract.py` | `test_queue_preserves_at_least_once_delivery_and_explicit_ack_nak` | Queue 保持至少一次投递和显式 ACK/NAK。 |
+| `test_task_queue_contract.py` | `test_queue_preserves_at_least_once_delivery_and_explicit_ack_nak` | Queue 保持至少一次投递、重复 publish 和显式 ACK/NAK。 |
 | 同上 | `test_unacked_delivery_can_be_redelivered` | 未 ACK delivery 可重新投递。 |
 
 ## Integration 测试函数
@@ -246,6 +250,9 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | --- | --- | --- |
 | `test_elasticsearch_adapter.py` | `test_real_es_upsert_dense_bm25_isolation_and_metadata_filters` | 真实 ES 验证 Bulk 幂等、KNN/BM25 召回、稳定排序、Dataset 隔离和 metadata 过滤。 |
 | 同上 | `test_real_es_version_and_document_delete_are_idempotent` | 真实 ES 按版本和整文档删除均可重复执行并收敛到正确记录数。 |
+| `test_nats_jetstream_adapter.py` | `test_real_jetstream_preserves_duplicate_publish_and_ack_removes_deliveries` | 真实 JetStream 保留重复 task_id 消息，PubAck 后可消费，显式 ACK 后移除。 |
+| 同上 | `test_real_jetstream_redelivers_after_ack_wait_and_honors_delayed_nak` | 真实 durable consumer 在 ACK 超时后重投，并遵守 NAK delay。 |
+| 同上 | `test_real_jetstream_provisioning_is_idempotent_and_rejects_incompatible_consumer` | stream/consumer 同配置装配幂等，不兼容 consumer 参数 fail fast。 |
 | `test_mysql_concurrency.py` | `test_concurrent_retry_keys_reuse_one_active_child_job` | 八个并发 Retry key 只创建并复用一个活跃子 Job/Task，重试计数只增加一次。 |
 | 同上 | `test_concurrent_rebuilds_allocate_distinct_index_versions` | 四个并发重建在 Document 行锁下分配互不重复的 index version，旧 active version 保持可见。 |
 | 同上 | `test_delete_and_finalizer_race_never_leaves_ingest_outbox_ready` | 删除与 Finalizer 并发时，摄取 Outbox 最终必为 CANCELLED，且仅删除清理 Outbox 可发布。 |
