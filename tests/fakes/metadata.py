@@ -17,7 +17,7 @@ from rag_mvp.domain.enums import (
     TaskStatus,
     TaskType,
 )
-from rag_mvp.domain.errors import DomainFailure
+from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.ids import new_id
 from rag_mvp.domain.models import (
     Chunk,
@@ -29,7 +29,13 @@ from rag_mvp.domain.models import (
     OutboxEvent,
     Task,
 )
-from rag_mvp.ports.metadata import SubmitIngestion, SubmitResult, TaskClaim
+from rag_mvp.ports.metadata import (
+    RetryJobRequest,
+    RetryJobResult,
+    SubmitIngestion,
+    SubmitResult,
+    TaskClaim,
+)
 
 
 class InjectedRepositoryFailure(RuntimeError):
@@ -50,6 +56,7 @@ class FakeMetadataRepository:
         self.index_builds: dict[tuple[str, int], IndexBuild] = {}
         self.chunk_manifests: dict[tuple[str, int], tuple[Chunk, ...]] = {}
         self._idempotency: dict[str, SubmitResult] = {}
+        self._retry_idempotency: dict[str, RetryJobResult] = {}
         self.fail_next_submit = False
 
     async def create_dataset(self, dataset: Dataset) -> Dataset:
@@ -290,6 +297,7 @@ class FakeMetadataRepository:
             if task is None or task.status not in {TaskStatus.PENDING, TaskStatus.RUNNING}:
                 return False
             job = self.jobs[task.job_id]
+            document = self.documents[job.document_id]
             self.tasks[task_id] = replace(task, status=TaskStatus.FAILED, error=failure)
             self.jobs[job.id] = replace(
                 job,
@@ -297,7 +305,118 @@ class FakeMetadataRepository:
                 error=failure,
                 retryable=failure.retryable,
             )
+            if document.active_version is None:
+                self.documents[document.id] = replace(document, status=DocumentStatus.FAILED)
+            for key, fingerprint in self.fingerprints.items():
+                if fingerprint.job_id == job.id:
+                    state = (
+                        FingerprintState.FAILED_RETRYABLE
+                        if failure.retryable and document.object_key is not None
+                        else FingerprintState.RELEASED
+                    )
+                    self.fingerprints[key] = replace(fingerprint, state=state)
+                    break
             return True
+
+    async def retry_job(self, request: RetryJobRequest) -> RetryJobResult:
+        async with self._lock:
+            repeated = self._retry_idempotency.get(request.idempotency_key)
+            if repeated is not None:
+                return replace(repeated, reused=True)
+            original = self.jobs.get(request.job_id)
+            if original is None:
+                raise DomainError(DomainFailure("JOB_NOT_FOUND", "job does not exist"))
+            if original.status is not JobStatus.FAILED:
+                raise DomainError(
+                    DomainFailure("JOB_NOT_FAILED", "only failed jobs can be retried")
+                )
+            if not original.retryable:
+                raise DomainError(
+                    DomainFailure("JOB_NOT_RETRYABLE", "job failure is not retryable")
+                )
+            document = self.documents[original.document_id]
+            if document.object_key is None:
+                raise DomainError(
+                    DomainFailure(
+                        "RETRY_OBJECT_MISSING", "retry requires a finalized source object"
+                    )
+                )
+            active_child = next(
+                (
+                    job
+                    for job in self.jobs.values()
+                    if job.retry_of_job_id == original.id
+                    and job.status in {JobStatus.PENDING, JobStatus.RUNNING}
+                ),
+                None,
+            )
+            if active_child is not None:
+                active_task = next(
+                    task for task in self.tasks.values() if task.job_id == active_child.id
+                )
+                result = RetryJobResult(active_child.id, active_task.id, reused=True)
+                self._retry_idempotency[request.idempotency_key] = result
+                return result
+            if original.retry_count >= request.max_user_retries:
+                raise DomainError(
+                    DomainFailure("MAX_USER_RETRIES_EXCEEDED", "job reached its user retry limit")
+                )
+
+            job_id = new_id()
+            task_id = new_id()
+            retry_count = original.retry_count + 1
+            child = Job(
+                id=job_id,
+                type=original.type,
+                document_id=original.document_id,
+                config_digest=original.config_digest,
+                index_version=original.index_version,
+                document_generation=original.document_generation,
+                status=JobStatus.PENDING,
+                progress=0.0,
+                created_at=request.now,
+                retry_count=retry_count,
+                retry_of_job_id=original.id,
+            )
+            task = Task(
+                id=task_id,
+                job_id=job_id,
+                type=TaskType.INGEST_DOCUMENT,
+                status=TaskStatus.PENDING,
+                attempt=0,
+                last_delivery_sequence=None,
+                checkpoint=None,
+                created_at=request.now,
+            )
+            event = OutboxEvent(
+                id=new_id(),
+                task_id=task_id,
+                status=OutboxStatus.READY_TO_PUBLISH,
+                attempt=0,
+                staging_key=None,
+                created_at=request.now,
+            )
+            self.jobs[original.id] = replace(original, retry_count=retry_count)
+            self.jobs[job_id] = child
+            self.tasks[task_id] = task
+            self.outbox[event.id] = event
+            index_key = (document.id, child.index_version)
+            index_build = self.index_builds.get(index_key)
+            if index_build is not None:
+                self.index_builds[index_key] = replace(
+                    index_build, job_id=child.id, status=IndexBuildStatus.BUILDING
+                )
+            for key, fingerprint in self.fingerprints.items():
+                if fingerprint.document_id == document.id:
+                    self.fingerprints[key] = replace(
+                        fingerprint,
+                        job_id=child.id,
+                        state=FingerprintState.PENDING,
+                    )
+                    break
+            result = RetryJobResult(job_id, task_id, reused=False)
+            self._retry_idempotency[request.idempotency_key] = result
+            return result
 
     async def visible_document_versions(self, document_ids: Sequence[str]) -> Mapping[str, int]:
         return {

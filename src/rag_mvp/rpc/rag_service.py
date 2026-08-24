@@ -11,6 +11,7 @@ from rag_mvp.application.dto import (
     GetJobQuery,
     JobView,
     RetrieveQuery,
+    RetryJobCommand,
     SubmitDocumentCommand,
 )
 from rag_mvp.application.job_service import JobService
@@ -294,7 +295,22 @@ class RagService:
         context: object,
     ) -> rag_service_pb2.RetryJobResponse:
         del context
-        return rag_service_pb2.RetryJobResponse(error=_unavailable(request.context.request_id))
+        if self._jobs is None:
+            return rag_service_pb2.RetryJobResponse(error=_unavailable(request.context.request_id))
+        try:
+            view = await self._jobs.retry_job(
+                RetryJobCommand(
+                    request_id=request.context.request_id,
+                    idempotency_key=request.context.idempotency_key,
+                    job_id=request.job_id,
+                    now=self._now(),
+                )
+            )
+            return rag_service_pb2.RetryJobResponse(result=_job_result(view))
+        except Exception as error:
+            return rag_service_pb2.RetryJobResponse(
+                error=_unexpected(error, request.context.request_id)
+            )
 
     async def CancelJob(
         self,

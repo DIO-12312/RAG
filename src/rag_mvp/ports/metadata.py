@@ -39,6 +39,21 @@ class TaskClaim:
     document: Document
 
 
+@dataclass(frozen=True, slots=True)
+class RetryJobRequest:
+    idempotency_key: str
+    job_id: str
+    now: datetime
+    max_user_retries: int
+
+
+@dataclass(frozen=True, slots=True)
+class RetryJobResult:
+    job_id: str
+    task_id: str
+    reused: bool
+
+
 class MetadataRepository(Protocol):
     """Persist authoritative RAG metadata and conditional state changes."""
 
@@ -73,5 +88,7 @@ class MetadataRepository(Protocol):
     ) -> bool: ...
 
     async def fail_task(self, task_id: str, failure: DomainFailure, now: datetime) -> bool: ...
+
+    async def retry_job(self, request: RetryJobRequest) -> RetryJobResult: ...
 
     async def visible_document_versions(self, document_ids: Sequence[str]) -> Mapping[str, int]: ...
