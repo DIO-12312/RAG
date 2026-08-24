@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from rag_mvp.application.ingestion_service import IngestionExecution
+from rag_mvp.domain.enums import TaskType
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.ports.metadata import MetadataRepository
 from rag_mvp.ports.search_engine import SearchEngine
@@ -29,9 +30,14 @@ class CleanupService:
         if claim is None:
             return IngestionExecution(claimed=False, completed=False)
         try:
-            await self._search.delete_document(claim.document.id)
-            if claim.document.object_key is not None:
-                await self._storage.delete(claim.document.object_key)
+            if claim.task.type is TaskType.CLEANUP_INDEX_VERSION:
+                await self._search.delete_document_version(
+                    claim.document.id, claim.job.index_version
+                )
+            else:
+                await self._search.delete_document(claim.document.id)
+                if claim.document.object_key is not None:
+                    await self._storage.delete(claim.document.object_key)
         except DomainError as error:
             return IngestionExecution(claimed=True, completed=False, failure=error.failure)
         except Exception as error:

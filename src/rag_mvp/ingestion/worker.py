@@ -41,7 +41,10 @@ async def worker_once(
         return False
 
     task = await metadata.get_task(delivery.task_id)
-    if task is not None and task.type is TaskType.CLEANUP_DOCUMENT:
+    if task is not None and task.type in {
+        TaskType.CLEANUP_DOCUMENT,
+        TaskType.CLEANUP_INDEX_VERSION,
+    }:
         if cleanup is None:
             result = IngestionExecution(
                 claimed=True,

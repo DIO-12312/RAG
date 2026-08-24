@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from rag_mvp.ports.metadata import MetadataRepository
@@ -16,6 +17,7 @@ async def finalize_once(
     *,
     limit: int,
     max_finalize_attempts: int = 5,
+    after_promote: Callable[[], Awaitable[None]] | None = None,
 ) -> int:
     if max_finalize_attempts < 1:
         raise ValueError("max_finalize_attempts must be at least 1")
@@ -38,6 +40,8 @@ async def finalize_once(
         except Exception:
             await metadata.record_finalization_failure(event.id, max_finalize_attempts, now)
             continue
+        if after_promote is not None:
+            await after_promote()
         if not await metadata.mark_object_ready(event.id, final_key, now):
             await storage.delete(final_key)
             continue

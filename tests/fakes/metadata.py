@@ -343,7 +343,6 @@ class FakeMetadataRepository:
     async def complete_ingestion(
         self, task_id: str, chunks: Sequence[Chunk], now: datetime
     ) -> bool:
-        del now
         async with self._lock:
             task = self.tasks.get(task_id)
             if task is None or task.status is not TaskStatus.RUNNING:
@@ -354,6 +353,7 @@ class FakeMetadataRepository:
                 failure = DomainFailure("JOB_CANCELLED", "ingestion was cancelled")
                 self.tasks[task.id] = replace(task, status=TaskStatus.CANCELLED, error=failure)
                 self.jobs[job.id] = replace(job, status=JobStatus.CANCELLED, error=failure)
+                self._create_version_cleanup(document, job, now)
                 return False
             if (
                 document.status is DocumentStatus.DELETED
@@ -375,6 +375,56 @@ class FakeMetadataRepository:
                     self.fingerprints[key] = replace(fingerprint, state=FingerprintState.SUCCEEDED)
                     break
             return True
+
+    def _create_version_cleanup(self, document: Document, source_job: Job, now: datetime) -> None:
+        if any(
+            job.is_system
+            and job.document_id == document.id
+            and job.index_version == source_job.index_version
+            and job.status in {JobStatus.PENDING, JobStatus.RUNNING}
+            for job in self.jobs.values()
+        ):
+            return
+        job_id = new_id()
+        task_id = new_id()
+        job = Job(
+            id=job_id,
+            type=JobType.CLEANUP_INDEX_VERSION,
+            document_id=document.id,
+            config_digest=source_job.config_digest,
+            index_version=source_job.index_version,
+            document_generation=document.lifecycle_generation,
+            status=JobStatus.PENDING,
+            progress=0.0,
+            created_at=now,
+            is_system=True,
+        )
+        task = Task(
+            id=task_id,
+            job_id=job_id,
+            type=TaskType.CLEANUP_INDEX_VERSION,
+            status=TaskStatus.PENDING,
+            attempt=0,
+            last_delivery_sequence=None,
+            checkpoint=None,
+            created_at=now,
+        )
+        event = OutboxEvent(
+            id=new_id(),
+            task_id=task_id,
+            status=OutboxStatus.READY_TO_PUBLISH,
+            attempt=0,
+            staging_key=None,
+            created_at=now,
+        )
+        self.jobs[job.id] = job
+        self.tasks[task.id] = task
+        self.outbox[event.id] = event
+        index_build = self.index_builds.get((document.id, source_job.index_version))
+        if index_build is not None:
+            self.index_builds[(document.id, source_job.index_version)] = replace(
+                index_build, status=IndexBuildStatus.ABANDONED
+            )
 
     async def fail_task(self, task_id: str, failure: DomainFailure, now: datetime) -> bool:
         del now
@@ -637,22 +687,27 @@ class FakeMetadataRepository:
             if (
                 task is None
                 or task.status is not TaskStatus.RUNNING
-                or task.type is not TaskType.CLEANUP_DOCUMENT
+                or task.type not in {TaskType.CLEANUP_DOCUMENT, TaskType.CLEANUP_INDEX_VERSION}
             ):
                 return False
             job = self.jobs[task.job_id]
             document = self.documents[job.document_id]
-            if (
-                document.status is not DocumentStatus.DELETED
-                or document.lifecycle_generation != job.document_generation
-            ):
+            if document.lifecycle_generation != job.document_generation:
                 return False
-            self.chunk_manifests = {
-                key: chunks for key, chunks in self.chunk_manifests.items() if key[0] != document.id
-            }
-            self.index_builds = {
-                key: build for key, build in self.index_builds.items() if key[0] != document.id
-            }
+            if task.type is TaskType.CLEANUP_DOCUMENT:
+                if document.status is not DocumentStatus.DELETED:
+                    return False
+                self.chunk_manifests = {
+                    key: chunks
+                    for key, chunks in self.chunk_manifests.items()
+                    if key[0] != document.id
+                }
+                self.index_builds = {
+                    key: build for key, build in self.index_builds.items() if key[0] != document.id
+                }
+            else:
+                self.chunk_manifests.pop((document.id, job.index_version), None)
+                self.index_builds.pop((document.id, job.index_version), None)
             self.tasks[task.id] = replace(
                 task, status=TaskStatus.SUCCEEDED, checkpoint="cleanup_complete"
             )
