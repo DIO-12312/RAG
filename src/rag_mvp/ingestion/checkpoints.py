@@ -10,6 +10,7 @@ class Checkpoint(StrEnum):
     AFTER_PARSE = "after_parse"
     AFTER_INDEX_WRITE = "after_index_write"
     AFTER_COMPLETE_BEFORE_ACK = "after_complete_before_ack"
+    AFTER_RELAY_PUBLISH_BEFORE_MARK = "after_relay_publish_before_mark"
 
 
 class InjectedWorkerCrash(BaseException):

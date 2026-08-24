@@ -854,11 +854,18 @@ Before commit, confirm `git diff --cached --name-only` contains only Task 13 fix
 ## Task 14：新增 Docker KILL、redelivery 与并发恢复测试
 
 **Files:**
+- Modify: `Dockerfile`
+- Modify: `docs/SPEC.md`
 - Create: `src/rag_mvp/ingestion/failpoints.py`
+- Modify: `src/rag_mvp/ingestion/checkpoints.py`
+- Modify: `src/rag_mvp/ingestion/worker.py`
 - Modify: `src/rag_mvp/config.py`
 - Modify: `src/rag_mvp/bootstrap/container.py`
+- Modify: `src/rag_mvp/outbox/main.py`
+- Modify: `src/rag_mvp/outbox/relay.py`
 - Create: `tests/unit/ingestion/test_failpoints.py`
 - Create: `tests/resilience/docker/conftest.py`
+- Create: `tests/resilience/docker/docker-compose.resilience.yml`
 - Create: `tests/resilience/docker/test_worker_kill_recovery.py`
 - Create: `tests/resilience/docker/test_relay_nats_recovery.py`
 - Create: `tests/resilience/docker/test_real_concurrency_fences.py`
@@ -870,19 +877,19 @@ Before commit, confirm `git diff --cached --name-only` contains only Task 13 fix
 - Produces: `FileBarrierFailpoint(root: Path, enabled_checkpoints: set[Checkpoint])`
 - Security: construction allowed only when `Settings.environment == TEST`
 
-- [ ] **Step 1: Write failing failpoint safety/unit tests**
+- [x] **Step 1: Write failing failpoint safety/unit tests**
 
 Assert production environment rejects fault injection, test environment writes a reached marker and blocks until a release marker exists, and cancellation closes without hanging.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest tests/unit/ingestion/test_failpoints.py -q`
 
-- [ ] **Step 3: Implement gated file barrier and test image wiring**
+- [x] **Step 3: Implement gated file barrier and test image wiring**
 
 Runtime production services must not enable it. Docker resilience profile mounts only a dedicated barrier volume and sets `RAG_ENVIRONMENT=test` plus explicit checkpoint names.
 
-- [ ] **Step 4: Write and run Worker/Relay recovery scenarios**
+- [x] **Step 4: Write and run Worker/Relay recovery scenarios**
 
 Commands are issued by pytest through Docker CLI:
 
@@ -893,18 +900,20 @@ wait for barrier → docker kill --signal=KILL rag-worker → remove release mar
 
 Cover after-index-before-complete, after-success-before-ACK, Relay publish-before-mark and NATS stop/start READY-Outbox recovery. Never remove volumes.
 
-- [ ] **Step 5: Run concurrent upload/Retry/rebuild/Delete fences**
+- [x] **Step 5: Run concurrent upload/Retry/rebuild/Delete fences**
 
-Run: `docker compose --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q`
+Run: `docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q`
 
 Expected: all scenarios converge; no Document resurrection, duplicate active retry or duplicate visible Chunk.
 
 Production defect found by the combined Docker run: version 3 could complete before version 2, after which the late version 2 completion regressed `Document.active_version`. A real MySQL regression test now fixes the rule: active versions advance monotonically, and a late lower IndexBuild becomes ABANDONED with a `CLEANUP_INDEX_VERSION` task. This correction is committed separately as `fix(mysql)` before the Task 14 test commit.
 
-- [ ] **Step 6: Update T1～T25 real evidence and commit**
+- [x] **Step 6: Update T1～T25 real evidence and commit**
+
+Actual: the final combined Docker resilience run passed 8/8. Read-only convergence checks found zero unfinished Job/Task, unpublished Outbox, deleted Document retaining an object, active-version mismatch, JetStream pending delivery, ACK pending or redelivery. The reliability matrix now resolves every required real-validation entry to an existing test node.
 
 ```powershell
-git add src/rag_mvp/ingestion/failpoints.py src/rag_mvp/config.py src/rag_mvp/bootstrap/container.py tests/resilience/docker/conftest.py tests/resilience/docker/test_worker_kill_recovery.py tests/resilience/docker/test_relay_nats_recovery.py tests/resilience/docker/test_real_concurrency_fences.py tests/unit/ingestion/test_failpoints.py tests/fixtures/reliability_matrix.json tests/TEST.md docs/testing-guide.md docs/plans/milestone-d-real-infrastructure.md
+git add Dockerfile docs/SPEC.md src/rag_mvp/ingestion/failpoints.py src/rag_mvp/ingestion/checkpoints.py src/rag_mvp/ingestion/worker.py src/rag_mvp/config.py src/rag_mvp/bootstrap/container.py src/rag_mvp/outbox/main.py src/rag_mvp/outbox/relay.py tests/resilience/docker/conftest.py tests/resilience/docker/docker-compose.resilience.yml tests/resilience/docker/test_worker_kill_recovery.py tests/resilience/docker/test_relay_nats_recovery.py tests/resilience/docker/test_real_concurrency_fences.py tests/unit/ingestion/test_failpoints.py tests/unit/test_container_roles.py tests/resilience/test_spec_invariant_matrix.py tests/fixtures/reliability_matrix.json tests/TEST.md docs/testing-guide.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "test(resilience): 验证 Docker 强杀与真实投递恢复"
 ```
 

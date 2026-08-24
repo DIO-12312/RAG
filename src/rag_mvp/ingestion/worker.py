@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
+from functools import partial
 
 from rag_mvp.application.cleanup_service import CleanupService
 from rag_mvp.application.ingestion_service import IngestionExecution, IngestionService
@@ -17,6 +18,7 @@ from rag_mvp.bootstrap.container import (
 from rag_mvp.config import Settings, load_settings
 from rag_mvp.domain.enums import TaskType
 from rag_mvp.domain.errors import DomainFailure
+from rag_mvp.ingestion.checkpoints import Checkpoint
 from rag_mvp.observability import emit_event
 from rag_mvp.ports.message_queue import TaskQueue
 from rag_mvp.ports.metadata import MetadataRepository
@@ -118,6 +120,11 @@ async def run_worker(
     ingestion = container.ingestion
     if queue is None or metadata is None or ingestion is None:
         raise RuntimeError("worker container is missing required services")
+    after_complete = (
+        partial(container.failpoint, Checkpoint.AFTER_COMPLETE_BEFORE_ACK)
+        if container.failpoint is not None
+        else None
+    )
     while not stop_event.is_set():
         processed = await worker_once(
             queue,
@@ -126,6 +133,7 @@ async def run_worker(
             settings.nats_consumer,
             datetime.now(UTC),
             max_deliveries=settings.nats_max_deliver,
+            after_complete=after_complete,
             cleanup=container.cleanup,
         )
         if not processed:

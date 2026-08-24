@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     max_finalize_attempts: int = Field(default=5, ge=1)
     staging_sweep_interval_seconds: float = Field(default=60.0, gt=0)
     staging_ttl_seconds: float = Field(default=3600.0, gt=0)
+    failpoint_root: Path | None = None
+    failpoint_checkpoints: str = ""
 
     default_tenant_id: str = "default_tenant"
     embedding_model_url: str | None = Field(
@@ -138,6 +140,14 @@ class Settings(BaseSettings):
             max_retries=self.embedding_max_retries,
         )
 
+    @property
+    def failpoint_checkpoint_names(self) -> frozenset[str]:
+        """Return the explicitly configured test-only checkpoint names."""
+
+        return frozenset(
+            name.strip() for name in self.failpoint_checkpoints.split(",") if name.strip()
+        )
+
     @model_validator(mode="after")
     def validate_production_safety(self) -> Self:
         """Reject development-only settings in production."""
@@ -146,6 +156,20 @@ class Settings(BaseSettings):
             raise ValueError("parser_version must not be empty")
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap must be smaller than chunk_size")
+        checkpoint_names = self.failpoint_checkpoint_names
+        failpoints_configured = self.failpoint_root is not None or bool(checkpoint_names)
+        if failpoints_configured:
+            if self.environment is not Environment.TEST:
+                raise ValueError("failpoints are allowed only in test environment")
+            if self.failpoint_root is None or not checkpoint_names:
+                raise ValueError("failpoint root and checkpoints must be configured together")
+            from rag_mvp.ingestion.checkpoints import Checkpoint
+
+            supported = {checkpoint.value for checkpoint in Checkpoint}
+            unknown = checkpoint_names - supported
+            if unknown:
+                names = ", ".join(sorted(unknown))
+                raise ValueError(f"unknown failpoint checkpoints: {names}")
         if self.environment is not Environment.PRODUCTION:
             return self
         if self.grpc_reflection:

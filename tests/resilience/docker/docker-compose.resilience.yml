@@ -1,0 +1,47 @@
+services:
+  rag-worker:
+    user: "0:0"
+    environment:
+      RAG_ENVIRONMENT: test
+      RAG_FAILPOINT_ROOT: /failpoints
+      RAG_FAILPOINT_CHECKPOINTS: after_index_write,after_complete_before_ack
+      RAG_NATS_STREAM: RAG_RESILIENCE_TASKS
+      RAG_NATS_SUBJECT: rag.resilience.tasks
+      RAG_NATS_CONSUMER: rag-resilience-worker
+      RAG_NATS_ACK_WAIT_SECONDS: "2"
+      RAG_NATS_MAX_DELIVER: "5"
+    volumes:
+      - failpoint-data:/failpoints
+    restart: "no"
+
+  rag-outbox:
+    user: "0:0"
+    environment:
+      RAG_ENVIRONMENT: test
+      RAG_FAILPOINT_ROOT: /failpoints
+      RAG_FAILPOINT_CHECKPOINTS: after_relay_publish_before_mark
+      RAG_NATS_STREAM: RAG_RESILIENCE_TASKS
+      RAG_NATS_SUBJECT: rag.resilience.tasks
+      RAG_NATS_CONSUMER: rag-resilience-worker
+      RAG_NATS_ACK_WAIT_SECONDS: "2"
+      RAG_NATS_MAX_DELIVER: "5"
+    volumes:
+      - failpoint-data:/failpoints
+    restart: "no"
+
+  rag-test:
+    user: "0:0"
+    environment:
+      RAG_NATS_STREAM: RAG_RESILIENCE_TASKS
+      RAG_NATS_SUBJECT: rag.resilience.tasks
+      RAG_NATS_CONSUMER: rag-resilience-worker
+      RAG_DOCKER_WORKER_CONTAINER: rag-mvp-rag-worker-1
+      RAG_DOCKER_OUTBOX_CONTAINER: rag-mvp-rag-outbox-1
+      RAG_DOCKER_NATS_CONTAINER: rag-mvp-nats-1
+      RAG_FAILPOINT_ROOT: /failpoints
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - failpoint-data:/failpoints
+
+volumes:
+  failpoint-data:

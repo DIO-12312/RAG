@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from functools import partial
 
 from rag_mvp.bootstrap.container import (
     Container,
@@ -10,6 +11,7 @@ from rag_mvp.bootstrap.container import (
     install_shutdown_handlers,
 )
 from rag_mvp.config import Settings, load_settings
+from rag_mvp.ingestion.checkpoints import Checkpoint
 from rag_mvp.outbox.finalizer import run_finalizer
 from rag_mvp.outbox.relay import run_relay
 from rag_mvp.outbox.sweeper import run_staging_sweeper
@@ -45,6 +47,14 @@ async def run_outbox(
                 stop_event,
                 interval_seconds=settings.outbox_poll_interval_seconds,
                 limit=settings.outbox_batch_size,
+                after_publish=(
+                    partial(
+                        container.failpoint,
+                        Checkpoint.AFTER_RELAY_PUBLISH_BEFORE_MARK,
+                    )
+                    if container.failpoint is not None
+                    else None
+                ),
             )
         )
         task_group.create_task(

@@ -27,6 +27,8 @@ from rag_mvp.application.ingestion_service import IngestionService
 from rag_mvp.application.job_service import JobService
 from rag_mvp.application.retrieval_service import RetrievalService
 from rag_mvp.config import Settings
+from rag_mvp.ingestion.checkpoints import Failpoint
+from rag_mvp.ingestion.failpoints import FileBarrierFailpoint
 from rag_mvp.ingestion.pipeline import IngestionPipeline
 from rag_mvp.ports.message_queue import TaskQueue
 from rag_mvp.ports.metadata import MetadataRepository
@@ -75,6 +77,7 @@ class Container:
     model: ModelGateway | None = None
     ingestion: IngestionService | None = None
     cleanup: CleanupService | None = None
+    failpoint: Failpoint | None = None
     _closers: list[AsyncCloser] = field(default_factory=list, init=False, repr=False)
     _closed: bool = field(default=False, init=False)
     _close_count: int = field(default=0, init=False)
@@ -179,17 +182,20 @@ async def build_worker_container(
         search = container.register(await selected.search(settings))
         model = container.register(await selected.model(settings))
         queue = container.register(await selected.queue(settings))
+        failpoint = FileBarrierFailpoint.from_settings(settings)
         container.metadata = metadata
         container.storage = storage
         container.search = search
         container.model = model
         container.queue = queue
+        container.failpoint = failpoint
         pipeline = IngestionPipeline(
             storage,
             SourceParserRouter(),
             RecursiveChunker(settings.chunk_size, settings.chunk_overlap),
             model,
             search,
+            failpoint=failpoint,
         )
         container.ingestion = IngestionService(metadata, pipeline)
         container.cleanup = CleanupService(metadata, search, storage)
@@ -212,6 +218,7 @@ async def build_outbox_container(
         container.metadata = container.register(await selected.metadata(settings))
         container.storage = container.register(await selected.storage(settings))
         container.queue = container.register(await selected.queue(settings))
+        container.failpoint = FileBarrierFailpoint.from_settings(settings)
         return container
     except BaseException:
         with suppress(Exception):

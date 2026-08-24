@@ -36,10 +36,17 @@ async def run_relay(
     *,
     interval_seconds: float,
     limit: int,
+    after_publish: Callable[[], Awaitable[None]] | None = None,
 ) -> None:
     """Relay bounded READY batches and remain promptly interruptible while idle."""
 
     while not stop_event.is_set():
-        await relay_once(metadata, queue, datetime.now(UTC), limit=limit)
+        await relay_once(
+            metadata,
+            queue,
+            datetime.now(UTC),
+            limit=limit,
+            after_publish=after_publish,
+        )
         with suppress(TimeoutError):
             await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)

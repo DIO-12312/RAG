@@ -125,3 +125,29 @@ async def test_container_close_is_reverse_order_and_idempotent(
     ]
     assert container.closed is True
     assert container.close_count == 1
+
+
+@pytest.mark.asyncio
+async def test_test_only_failpoint_is_wired_only_into_worker_and_outbox_roles(
+    tmp_path: Path,
+) -> None:
+    values = _settings(tmp_path).model_dump()
+    values.update(
+        failpoint_root=tmp_path / "barriers",
+        failpoint_checkpoints=(
+            "after_index_write,after_complete_before_ack,after_relay_publish_before_mark"
+        ),
+    )
+    settings = Settings(**values)
+
+    server = await build_server_container(settings, _factories([]))
+    worker = await build_worker_container(settings, _factories([]))
+    outbox = await build_outbox_container(settings, _factories([]))
+    try:
+        assert server.failpoint is None
+        assert worker.failpoint is not None
+        assert outbox.failpoint is not None
+    finally:
+        await server.close()
+        await worker.close()
+        await outbox.close()

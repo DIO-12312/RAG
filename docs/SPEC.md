@@ -314,16 +314,13 @@ tests/
 RAGFlow 的 Go 摄取测试将“已持久化结果但还没 `MarkCompleted`，随后消息重投”作为关键窗口，并断言计数只应用一次。Python MVP 复用这个思想：不把 `panic/recover` 当断电，而在真正的持久化边界放置 test-only failpoint。
 
 ```text
-after_delivery
 after_parse
-after_object_write
 after_index_write
-after_counter_apply
-before_mark_succeeded
-after_mark_succeeded_before_ack
+after_complete_before_ack
+after_relay_publish_before_mark
 ```
 
-在 unit/resilience 测试中，failpoint 让执行停在边界并直接结束 Worker（不执行完成逻辑）；重新创建 Worker，重新投递同一 `task_id`。断言 T2/T3/T4。Docker 集成演练中，等待 Worker 写入测试 barrier 后用 `docker kill -s KILL <worker>` 强杀，再启动新 Worker；不得用 `docker compose down -v`，否则把持久化数据删掉，测不到恢复语义。
+在 unit/resilience 测试中，failpoint 让执行停在边界并直接结束 Worker（不执行完成逻辑）；重新创建 Worker，重新投递同一 `task_id`。断言 T2/T3/T4。Docker 集成演练中，`FileBarrierFailpoint` 只允许在 `environment=test` 且同时配置专用根目录和显式 checkpoint 时装配；它先在共享卷写 `.reached`，再等待测试创建 `.release`。等待 Worker/Relay 写入 barrier 后用 `docker kill -s KILL <container>` 强杀，再启动精确容器；持久 `.reached` 让重启进程不会再次卡在相同的一次性断点。基础 Compose 和生产环境不得挂载 barrier 或 Docker socket，也不得用 `docker compose down -v`，否则把持久化数据删掉，测不到恢复语义。
 
 ### 4.6 覆盖率与质量门禁
 
@@ -474,6 +471,7 @@ python-rag-mvp/
 │  ├─ ingestion/
 │  │  ├─ pipeline.py                   # 由 IngestionService 调用：parse → normalize → chunk → embed → index
 │  │  ├─ checkpoints.py                 # 阶段进度和故障注入点
+│  │  ├─ failpoints.py                  # TEST-only 跨进程文件 barrier；生产配置拒绝启用
 │  │  └─ worker.py                     # 唯一的 JetStream consumer：consume → IngestionService → ACK/NAK
 │  ├─ retrieval/                       # 纯检索算法；不依赖 gRPC、MySQL、NATS 或 ES SDK
 │  │  ├─ hybrid.py                      # 合并 Dense KNN 与 BM25 候选，按 RRF 融合、去重、保留各阶段分数

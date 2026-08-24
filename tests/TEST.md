@@ -71,6 +71,12 @@ tests/
 │  ├─ test_nats_jetstream_adapter.py
 │  └─ test_real_embedding_model.py
 ├─ resilience/                              # 故障、竞态、重投与恢复矩阵
+│  ├─ docker/                               # 显式控制真实容器 KILL/stop/start 的恢复验收
+│  │  ├─ conftest.py                        # Docker/barrier/gRPC/MySQL/ES/NATS fixtures 与恢复清理
+│  │  ├─ docker-compose.resilience.yml       # test-only root、Docker socket 与专用 barrier 卷
+│  │  ├─ test_real_concurrency_fences.py
+│  │  ├─ test_relay_nats_recovery.py
+│  │  └─ test_worker_kill_recovery.py
 │  ├─ test_cancel_races.py
 │  ├─ test_concurrent_uniqueness.py
 │  ├─ test_finalizer_recovery.py
@@ -92,6 +98,7 @@ tests/
    │  ├─ test_models.py
    │  └─ test_state_machines.py
    ├─ ingestion/
+   │  ├─ test_failpoints.py
    │  ├─ test_multiformat_parsers.py
    │  ├─ test_pipeline.py
    │  ├─ test_recursive_chunker.py
@@ -124,6 +131,7 @@ tests/
 | Integration | migration 和真实基础设施 adapter 的协议、约束与幂等性 | `uv run pytest -m integration tests/integration` | 要求对应 Docker 服务健康；缺少基础设施时失败而非跳过 |
 | E2E | 四格式 upload → 异步摄取 → hybrid Retrieve 的容器业务闭环 | `docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e -q` | generated gRPC client + 真实 MySQL/ES/NATS/模型；禁止 Fake |
 | Resilience | failpoint、重投、取消、并发、generation fence 与恢复不变量 | `uv run pytest -m resilience tests/resilience` | Mock Reliability；不替代进程强杀和真实中间件恢复 |
+| Docker Resilience | Worker/Relay KILL、NATS 停启和真实并发栅栏 | `docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q` | test-only Docker socket + barrier 卷；必须显式选择 marker，禁止删除数据卷 |
 | Eval | 固定 30 问检索集的 Recall@6、MRR@6、locator accuracy | `uv run pytest -m eval tests/eval` | 确定性 Fake 检索与固定 fixture |
 
 ## Unit 测试函数
@@ -172,6 +180,10 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_task_delivery_counters_cannot_be_negative` | Task 投递计数不允许为负。 |
 | `domain/test_state_machines.py` | `test_valid_state_transitions` | Job/Task 合法状态迁移可执行。 |
 | 同上 | `test_terminal_states_cannot_be_reopened` | 终态不得重新变为可执行状态。 |
+| `ingestion/test_failpoints.py` | `test_non_test_environment_rejects_configured_fault_injection` | 非 TEST 环境一旦配置 file barrier 即在 Settings 校验期失败。 |
+| 同上 | `test_factory_defends_against_unconfigured_or_unvalidated_settings` | 未配置时不装配，且 factory 对绕过 Settings 校验的非 TEST/半配置对象保持防御。 |
+| 同上 | `test_enabled_checkpoint_writes_reached_and_blocks_until_release` | 启用 checkpoint 写 reached、等待 release，并以持久 reached 实现跨进程一次性触发。 |
+| 同上 | `test_disabled_checkpoint_is_noop_and_cancellation_does_not_hang` | 未启用 checkpoint 无副作用，取消 barrier await 会立即传播。 |
 | `ingestion/test_multiformat_parsers.py` | `test_markdown_parser_preserves_heading_sections_and_lines` | Markdown 保留标题分段及行定位。 |
 | 同上 | `test_code_parser_preserves_language_symbols_and_lines` | 代码保留语言、符号和行定位。 |
 | 同上 | `test_pdf_parser_returns_one_traceable_segment_per_text_page` | 文本 PDF 每页输出可追溯片段。 |
@@ -210,6 +222,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_runtime_adapter_dependencies_are_importable` | MySQL、ES、NATS、模型 HTTP adapter 的运行依赖可导入。 |
 | `test_container_roles.py` | `test_role_factories_build_only_allowed_dependencies_and_services` | Server、Worker、Outbox 只装配各自允许的 adapter 与 application service。 |
 | 同上 | `test_container_close_is_reverse_order_and_idempotent` | 容器资源按创建逆序关闭，重复关闭不重复执行。 |
+| 同上 | `test_test_only_failpoint_is_wired_only_into_worker_and_outbox_roles` | 只有 TEST Worker/Outbox 装配 file barrier，Server 永不注入。 |
 | `test_dev_cli.py` | `test_mutating_commands_require_request_and_idempotency_keys` | gRPC 调试 CLI 的变更命令强制要求 request/idempotency key。 |
 | 同上 | `test_submit_document_streams_one_header_then_bounded_data_frames` | 调试 CLI 按一个 header 加有界 data 帧流式上传文件。 |
 | `test_generated_comparison.py` | `test_generated_comparison_ignores_only_line_endings` | protobuf 生成物同步检查忽略 Windows/Unix 换行符差异。 |
@@ -334,7 +347,22 @@ Resilience 测试负责覆盖 failpoint、重投、并发和状态栅栏。`reli
 | 同上 | `test_delete_between_promote_and_ready_compensates_final_object` | 提升正式对象与 READY 之间删除时补偿该对象。 |
 | `test_redelivery_idempotency.py` | `test_crash_after_index_write_redelivers_and_upserts_idempotently` | 索引写后崩溃重投不会产生重复可见索引。 |
 | 同上 | `test_crash_after_success_before_ack_redelivery_only_acks` | 成功但 ACK 前崩溃后，重投仅 ACK 不重跑 pipeline。 |
-| `test_spec_invariant_matrix.py` | `test_every_spec_invariant_has_mock_evidence_and_explicit_real_validation_status` | 每项 SPEC 不变量都有 Mock 证据及真实复验状态。 |
+| `test_spec_invariant_matrix.py` | `test_every_spec_invariant_has_mock_evidence_and_explicit_real_validation_status` | 每项 SPEC 不变量都有 Mock 证据；所有要求真实复验的条目都指向仓库内真实测试文件。 |
+
+## Docker Resilience 测试函数
+
+Docker Resilience 只在命令显式包含 `-m docker_resilience` 时执行；默认快速、Mock resilience 和 coverage 会跳过。`docker/conftest.py` 提供 generated gRPC stub、真实 MySQL/ES/NATS probes、Docker CLI 控制器和共享卷 barrier，并在每个测试后释放断点、重启精确容器；不会执行 `down -v`。
+
+| 文件 | 测试函数 | 职责 |
+| --- | --- | --- |
+| `docker/test_worker_kill_recovery.py` | `test_worker_kill_after_index_write_redelivers_without_duplicate_chunks` | ES 已写、MySQL 未完成时 SIGKILL Worker，验证 JetStream 重投、attempt 递增且 manifest/ES 不重复。 |
+| 同上 | `test_worker_kill_after_success_before_ack_redelivery_only_acks` | MySQL 已成功、ACK 前 SIGKILL，验证重投只 ACK，attempt、manifest 和 ES 均不重复。 |
+| `docker/test_relay_nats_recovery.py` | `test_relay_kill_after_publish_before_mark_republishes_safely` | NATS PubAck 后、Outbox 标记前 SIGKILL Relay，验证 READY 重发并最终 PUBLISHED。 |
+| 同上 | `test_ready_outbox_survives_nats_stop_and_publishes_after_restart` | NATS 停机期间事务创建 READY 删除清理事件，恢复后发布、消费并完成清理。 |
+| `docker/test_real_concurrency_fences.py` | `test_concurrent_same_content_upload_reuses_one_canonical_job` | 八个真实 gRPC 同内容上传只产生一个 fingerprint/canonical Job/Task/Outbox。 |
+| 同上 | `test_concurrent_retry_calls_create_one_child_and_one_delivery` | 八个并发 Retry RPC 只产生一个子 Job，真实队列最终收敛。 |
+| 同上 | `test_concurrent_rebuilds_allocate_unique_monotonic_versions` | 并发 rebuild 分配唯一版本，并在乱序执行下保持 active version 单调。 |
+| 同上 | `test_delete_during_blocked_rebuild_never_resurrects_document` | rebuild 写 ES 后阻塞并并发 Delete，验证立即不可见、generation fence、对象/ES 清理且不复活。 |
 
 ## Eval 测试函数
 
@@ -356,7 +384,7 @@ Eval 测试负责防止检索排序和 evidence 定位质量回退。不得以 L
 | `fakes/storage.py`、`fakes/parser.py`、`fakes/chunker.py`、`fakes/clock.py` | 为单测提供可控的端口替身、时间和输入。 |
 | `fixtures/golden_chunks/*.json` | 四种文档格式的切块和 locator 基准。 |
 | `fixtures/documents/*` | 真实 Docker E2E 的 TXT、Markdown、Python 与确定性生成 PDF 输入；`scripts/build_test_fixtures.py --check` 防止 PDF 漂移。 |
-| `fixtures/reliability_matrix.json` | SPEC T1～T25 与 Mock 测试证据、真实复验状态的映射。 |
+| `fixtures/reliability_matrix.json` | SPEC T1～T25 与 Mock/真实测试节点、真实复验要求的可执行证据映射。 |
 | `eval/fixtures/retrieval_quality.json` | 固定问题、相关 chunk 与 locator 的检索质量基线。 |
 
 ## 维护规则

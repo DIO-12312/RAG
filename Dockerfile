@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 FROM ghcr.io/astral-sh/uv:0.12.1 AS uv
+FROM docker:29.4.0-cli AS docker-cli
 
 FROM python:3.12.11-slim-bookworm AS build-base
 
@@ -55,6 +56,7 @@ ENV UV_NO_SYNC=1 \
 USER root
 
 COPY --from=uv /uv /uvx /bin/
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --chown=rag:rag --from=test-builder /app/.venv /app/.venv
 COPY --chown=rag:rag pyproject.toml uv.lock LICENSE Dockerfile docker-compose.yml .dockerignore ./
 COPY --chown=rag:rag docs/README.md ./docs/README.md

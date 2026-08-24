@@ -2,7 +2,7 @@
 
 本文说明如何在当前 Windows 本机环境验证 Python RAG 服务的功能、可靠性规则、真实基础设施与检索质量。快速门禁会走真实的 gRPC、application、Outbox、Worker、pipeline 和 retrieval 调用链，但以测试专用 Fake 保持确定性；`integration` 与 Compose 验收则使用真实 MySQL、Elasticsearch、NATS JetStream 和模型服务。
 
-报告结果时必须区分 Mock Functional/Resilience、真实 adapter integration、真实模型、Docker E2E 和 Docker Resilience。当前真实 adapter、Compose 拓扑与四格式 gRPC E2E 已可验证；容器强杀恢复需等对应测试任务完成后才能声明通过。
+报告结果时必须区分 Mock Functional/Resilience、真实 adapter integration、真实模型、Docker E2E 和 Docker Resilience。当前五类边界均有独立入口；不能用 Mock 结果代替容器强杀，也不能把 Docker 恢复测试混进默认覆盖率命令。
 
 ## 1. 先准备环境
 
@@ -139,6 +139,17 @@ docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e/t
 
 该测试分别上传 TXT、Markdown、Python 和 PDF，等待异步 Job/Task 终态，再验证真实 Embedding、ES Dense/BM25 候选、RRF evidence、active index version 和 line/symbol/language/page provenance。测试每次生成新的 request/idempotency key；重复运行后还应只读核对 MySQL 没有遗留 PENDING/RUNNING 状态、ES 记录数与 ChunkManifest 一致、NATS consumer 没有 pending 或 ack pending。
 
+运行真实容器强杀、NATS 停启和并发栅栏：
+
+```powershell
+docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test build rag-worker rag-outbox rag-test
+docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q
+```
+
+该 override 只用于测试：Worker、Outbox 和测试容器共享专用 barrier 卷，测试容器额外挂载 Docker socket；为允许跨容器创建 marker，受控 Worker/Outbox 在这个 override 中临时使用 root，基础 Compose 的 runtime 仍保持非 root。测试通过精确容器名执行 KILL/stop/start，并在每例结束后释放 barrier、恢复 NATS/Worker/Outbox。禁止把 override 用于生产，禁止执行 `down -v`。未显式提供 `-m docker_resilience` 时，这组破坏性测试会跳过；显式选择后缺少 Docker socket、容器名、模型或基础设施配置会失败。
+
+当前矩阵覆盖：ES 写后 Worker KILL、MySQL 成功后 ACK 前 KILL、Relay PubAck 后标记前 KILL、NATS 停启下 READY Outbox，以及真实并发上传/Retry/rebuild/Delete。`tests/fixtures/reliability_matrix.json` 将 SPEC T1～T25 映射到 Mock 和真实测试节点。
+
 验证测试目标、runtime 内容和日志密钥脱敏：
 
 ```powershell
@@ -148,7 +159,7 @@ docker compose run --rm --no-deps rag-server sh -c 'test ! -e /app/tests && test
 docker compose logs --no-color 2>&1 | uv run python scripts/check_secret_leaks.py
 ```
 
-以上结果证明真实 adapters、迁移顺序、角色装配、容器安全边界和四格式 gRPC RAG 闭环；它仍不替代 Task 14 的 Worker/Relay 强杀恢复。不要在恢复测试中使用 `docker compose down -v`，它会删除应被验证的持久状态。
+以上命令分别证明真实 adapters、迁移顺序、角色装配、容器安全边界、四格式 gRPC RAG 闭环和 Worker/Relay 强杀恢复；报告时仍须逐类列出实际运行结果。
 
 ## 8. 记录验证结果的模板
 
