@@ -1,0 +1,138 @@
+name: Docker Quality
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Real Docker suite to run
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - integration-e2e
+          - nightly
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-quality-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  integration-e2e:
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' &&
+      (inputs.suite == 'integration-e2e' || inputs.suite == 'all'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      EMBEDDING_MODEL_URL: ${{ secrets.EMBEDDING_MODEL_URL }}
+      EMBEDDING_MODEL_NAME: ${{ secrets.EMBEDDING_MODEL_NAME }}
+      EMBEDDING_MODEL_API_KEY: ${{ secrets.EMBEDDING_MODEL_API_KEY }}
+      EMBEDDING_MODEL_DIMENSION: ${{ secrets.EMBEDDING_MODEL_DIMENSION }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate required model secrets
+        shell: bash
+        run: |
+          set -eu
+          test -n "${EMBEDDING_MODEL_URL:-}" || { echo "::error title=Missing required GitHub Secret::EMBEDDING_MODEL_URL is not configured"; exit 1; }
+          test -n "${EMBEDDING_MODEL_NAME:-}" || { echo "::error title=Missing required GitHub Secret::EMBEDDING_MODEL_NAME is not configured"; exit 1; }
+          test -n "${EMBEDDING_MODEL_API_KEY:-}" || { echo "::error title=Missing required GitHub Secret::EMBEDDING_MODEL_API_KEY is not configured"; exit 1; }
+          test -n "${EMBEDDING_MODEL_DIMENSION:-}" || { echo "::error title=Missing required GitHub Secret::EMBEDDING_MODEL_DIMENSION is not configured"; exit 1; }
+
+      - name: Validate and build Compose topology
+        run: |
+          docker compose config --quiet
+          docker compose --profile test build rag-server rag-worker rag-outbox rag-test
+
+      - name: Start real RAG services
+        run: docker compose up -d --wait --wait-timeout 240 rag-server rag-worker rag-outbox
+
+      - name: Run adapter, model, and four-format gRPC tests
+        run: |
+          docker compose --profile test run --rm \
+            -e RAG_MIGRATIONS_ROOT=/app \
+            -e RAG_TEST_MYSQL_DSN=mysql+asyncmy://rag:rag@mysql:3306/rag \
+            -e RAG_TEST_ELASTICSEARCH_URL=http://elasticsearch:9200 \
+            -e RAG_TEST_NATS_URL=nats://nats:4222 \
+            rag-test uv run pytest -m "integration or model_integration or e2e" \
+            tests/integration tests/e2e -q
+
+      - name: Scan logs and stop services
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          docker compose logs --no-color > compose.log 2>&1
+          status=0
+          if test -n "${EMBEDDING_MODEL_API_KEY:-}" && grep -Fq -- "$EMBEDDING_MODEL_API_KEY" compose.log; then
+            echo "::error title=Secret leak::Compose logs contain the embedding API key"
+            status=1
+          fi
+          docker compose down --remove-orphans || status=1
+          exit "$status"
+
+  nightly-resilience-eval:
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+      (inputs.suite == 'nightly' || inputs.suite == 'all'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      EMBEDDING_MODEL_URL: ${{ secrets.EMBEDDING_MODEL_URL }}
+      EMBEDDING_MODEL_NAME: ${{ secrets.EMBEDDING_MODEL_NAME }}
+      EMBEDDING_MODEL_API_KEY: ${{ secrets.EMBEDDING_MODEL_API_KEY }}
+      EMBEDDING_MODEL_DIMENSION: ${{ secrets.EMBEDDING_MODEL_DIMENSION }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate required model secrets
+        shell: bash
+        run: |
+          set -eu
+          test -n "${EMBEDDING_MODEL_URL:-}" || { echo "::error title=Missing required GitHub Secret::EMBEDDING_MODEL_URL is not configured"; exit 1; }
+          test -n "${EMBEDDING_MODEL_NAME:-}" || { echo "::error title=Missing required GitHub Secret::EMBEDDING_MODEL_NAME is not configured"; exit 1; }
+          test -n "${EMBEDDING_MODEL_API_KEY:-}" || { echo "::error title=Missing required GitHub Secret::EMBEDDING_MODEL_API_KEY is not configured"; exit 1; }
+          test -n "${EMBEDDING_MODEL_DIMENSION:-}" || { echo "::error title=Missing required GitHub Secret::EMBEDDING_MODEL_DIMENSION is not configured"; exit 1; }
+
+      - name: Validate and build resilience topology
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml config --quiet
+          docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test build rag-server rag-worker rag-outbox rag-test
+
+      - name: Run Docker crash-recovery suite
+        run: |
+          docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test run --rm rag-test \
+            uv run pytest -m docker_resilience tests/resilience/docker -q
+
+      - name: Run real thirty-question retrieval evaluation
+        run: |
+          docker compose --profile test run --rm rag-test \
+            uv run pytest -m eval tests/eval/test_real_retrieval_quality.py -q
+
+      - name: Scan logs and stop services
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml logs --no-color > compose.log 2>&1
+          status=0
+          if test -n "${EMBEDDING_MODEL_API_KEY:-}" && grep -Fq -- "$EMBEDDING_MODEL_API_KEY" compose.log; then
+            echo "::error title=Secret leak::Compose logs contain the embedding API key"
+            status=1
+          fi
+          docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml down --remove-orphans || status=1
+          exit "$status"

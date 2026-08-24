@@ -28,9 +28,11 @@ tests/
 │  ├─ conftest.py                            # generated gRPC client、真实运行配置和轮询 helpers
 │  └─ test_real_upload_ingest_retrieve.py
 ├─ eval/                                    # 固定问题集的检索质量评测
+│  ├─ conftest.py                            # 复用真实 E2E gRPC client 与模型运行配置
 │  ├─ fixtures/
 │  │  └─ retrieval_quality.json
-│  └─ test_retrieval_quality.py
+│  ├─ test_retrieval_quality.py
+│  └─ test_real_retrieval_quality.py
 ├─ fakes/                                   # 测试专用 Port 实现；生产代码不得导入
 │  ├─ chunker.py
 │  ├─ clock.py
@@ -61,7 +63,7 @@ tests/
 │  ├─ test_mock_retry_job.py
 │  └─ test_mock_upload_ingest_retrieve.py
 ├─ integration/                             # 依赖真实 Docker 基础设施的 adapter 验证
-│  ├─ conftest.py                            # MySQL DSN、迁移、清库和 Repository fixture
+│  ├─ conftest.py                            # MySQL DSN、显式迁移根目录、清库和 Repository fixture
 │  ├─ test_elasticsearch_adapter.py
 │  ├─ test_mysql_concurrency.py
 │  ├─ test_mysql_lifecycle.py
@@ -132,7 +134,7 @@ tests/
 | E2E | 四格式 upload → 异步摄取 → hybrid Retrieve 的容器业务闭环 | `docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e -q` | generated gRPC client + 真实 MySQL/ES/NATS/模型；禁止 Fake |
 | Resilience | failpoint、重投、取消、并发、generation fence 与恢复不变量 | `uv run pytest -m resilience tests/resilience` | Mock Reliability；不替代进程强杀和真实中间件恢复 |
 | Docker Resilience | Worker/Relay KILL、NATS 停启和真实并发栅栏 | `docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q` | test-only Docker socket + barrier 卷；必须显式选择 marker，禁止删除数据卷 |
-| Eval | 固定 30 问检索集的 Recall@6、MRR@6、locator accuracy | `uv run pytest -m eval tests/eval` | 确定性 Fake 检索与固定 fixture |
+| Eval | 固定 30 问检索集的 Recall@6、MRR@6、locator accuracy | 离线：`uv run pytest -m "eval and not e2e" tests/eval`；真实：`docker compose --profile test run --rm rag-test uv run pytest -m eval tests/eval/test_real_retrieval_quality.py -q` | 离线 fixture 负责算法门槛；真实评测通过 gRPC 使用真实 MySQL/ES/NATS/模型，禁止 Fake |
 
 ## Unit 测试函数
 
@@ -247,6 +249,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_secret_scanner_fails_without_echoing_the_secret` | 日志命中模型密钥时扫描失败且不回显 Secret。 |
 | 同上 | `test_healthcheck_parses_ndjson_and_requires_every_process_to_be_healthy` | 健康检查要求基础设施和应用健康、迁移成功退出。 |
 | 同上 | `test_healthcheck_decodes_docker_output_as_utf8` | Windows 宿主机按 UTF-8 安全解析 Docker Unicode 输出。 |
+| 同上 | `test_quality_workflows_keep_offline_and_secret_backed_suites_separate` | PR 门禁保持离线，真实 Docker 作业只由 push/手动/夜间触发并使用 Secret、真实 E2E/强杀/评测入口。 |
 | `test_delete_document_contract.py` | `test_delete_atomically_hides_document_cancels_ingest_and_creates_cleanup` | 删除原子隐藏文档、取消摄取并创建清理任务。 |
 | 同上 | `test_new_delete_request_for_deleted_document_is_rejected` | 已删除文档的新删除请求返回稳定错误。 |
 | `test_generated_code.py` | `test_generated_python_is_in_sync_with_proto` | Python protobuf 生成物与 `.proto` 保持同步。 |
@@ -279,7 +282,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 
 ## Integration 测试函数
 
-Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；显式选择该测试类型时，基础设施不可用必须失败。
+Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；显式选择该测试类型时，基础设施不可用必须失败。`integration/conftest.py` 的 `migrations_root` fixture 在宿主机解析仓库根目录，在非 editable 测试镜像中读取 `RAG_MIGRATIONS_ROOT=/app`，禁止依赖 site-packages 相对层级猜测迁移位置。
 
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
@@ -371,6 +374,7 @@ Eval 测试负责防止检索排序和 evidence 定位质量回退。不得以 L
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
 | `test_retrieval_quality.py` | `test_fixed_thirty_question_quality_baseline` | 在固定 30 问集上验证 Recall@6、MRR@6 和 locator accuracy 门槛。 |
+| `test_real_retrieval_quality.py` | `test_real_thirty_question_quality_baseline` | 十份固定语料经真实 gRPC 摄取后执行 30 问，使用真实 chunk_id 验证 Recall@6、MRR@6 和来源行定位。 |
 
 ## Fake 与 Fixture 的职责
 

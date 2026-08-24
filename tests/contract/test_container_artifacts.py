@@ -138,3 +138,27 @@ def test_healthcheck_decodes_docker_output_as_utf8(monkeypatch: pytest.MonkeyPat
 
     assert captured["encoding"] == "utf-8"
     assert captured["errors"] == "replace"
+
+
+def test_quality_workflows_keep_offline_and_secret_backed_suites_separate() -> None:
+    quick = (ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
+    docker_path = ROOT / ".github" / "workflows" / "docker-quality.yml"
+    attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+
+    assert docker_path.is_file()
+    docker = docker_path.read_text(encoding="utf-8")
+    assert "pull_request:" in quick
+    assert "eval and not e2e" in quick
+    assert "secrets." not in quick
+    assert "workflow_dispatch:" in docker
+    assert "schedule:" in docker
+    assert "pull_request_target:" not in docker
+    assert "EMBEDDING_MODEL_API_KEY: ${{ secrets.EMBEDDING_MODEL_API_KEY }}" in docker
+    assert docker.count("docker compose config --quiet") >= 2
+    assert "RAG_MIGRATIONS_ROOT=/app" in docker
+    assert "tests/integration tests/e2e" in docker
+    assert "tests/resilience/docker" in docker
+    assert "tests/eval/test_real_retrieval_quality.py" in docker
+    assert "down -v" not in docker
+    assert ".githooks/* text eol=lf" in attributes
+    assert ".github/workflows/*.yml text eol=lf" in attributes

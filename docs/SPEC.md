@@ -249,17 +249,23 @@ tests/
 ├─ functional/
 │  └─ test_mock_upload_ingest_retrieve.py  # 真实进程边界 + Fake ports 的无容器闭环
 ├─ integration/
-│  ├─ test_mysql_repository.py
+│  ├─ test_mysql_submission.py
+│  ├─ test_mysql_lifecycle.py
+│  ├─ test_mysql_concurrency.py
+│  ├─ test_mysql_outbox_worker.py
+│  ├─ test_mysql_migrations.py
 │  ├─ test_elasticsearch_adapter.py
 │  ├─ test_nats_jetstream_adapter.py
-│  └─ test_grpc_with_compose.py
+│  └─ test_real_embedding_model.py
 ├─ e2e/
-│  └─ test_upload_ingest_retrieve.py
+│  └─ test_real_upload_ingest_retrieve.py
 ├─ resilience/
+│  ├─ docker/                 # 真实容器 KILL/NATS 停启/并发栅栏
 │  └─ test_redelivery_idempotency.py
-├─ evals/
-│  ├─ cases.jsonl
-│  └─ test_retrieval_metrics.py
+├─ eval/
+│  ├─ fixtures/retrieval_quality.json
+│  ├─ test_retrieval_quality.py
+│  └─ test_real_retrieval_quality.py
 └─ fixtures/
    ├─ documents/
    └─ golden_chunks/
@@ -272,14 +278,16 @@ tests/
 | Unit | `pytest tests/unit` | 无外部服务 | 核心领域与纯函数 | 每次提交 |
 | Contract | `pytest tests/contract` | in-memory / 临时目录 | 各端口的语义一致性 | 每次提交 |
 | Functional | `pytest tests/functional` | 测试专用 Fake ports、临时目录、进程内 gRPC | 无 Docker 的 upload → outbox → worker → retrieve 功能闭环；不计作真实 E2E | 每次提交 |
-| Integration | `pytest -m integration` | MySQL、Elasticsearch、NATS、Compose | 真实 adapter、mapping 与 stream 配置 | PR |
-| E2E | `pytest -m e2e tests/e2e` | 完整 Compose、真实 OpenAI-compatible Embedding API | 四格式 gRPC upload → async ingest → hybrid retrieve；禁止 Fake ports | PR/发布前 |
+| Integration | `pytest -m integration` | MySQL、Elasticsearch、NATS、Compose | 真实 adapter、mapping 与 stream 配置 | main push/手动/发布前 |
+| E2E | `pytest -m e2e tests/e2e` | 完整 Compose、真实 OpenAI-compatible Embedding API | 四格式 gRPC upload → async ingest → hybrid retrieve；禁止 Fake ports | main push/手动/发布前 |
 | Mock Resilience | `pytest -m resilience tests/resilience` | 可控 Fake queue/DB | 快速验证 crash/redelivery、幂等、取消和状态栅栏 | PR |
 | Eval | `pytest -m eval` | 固定 embedding 或受控模型 | Recall@K、MRR、evidence/来源定位准确率 | 夜间/发布前 |
-| Model Integration | `pytest -m model_integration` | Docker 网络、真实 OpenAI-compatible Embedding API 与 Secret | 鉴权、单条/批量、顺序、维度、有限数值、相对语义和密钥脱敏 | PR/发布前 |
+| Model Integration | `pytest -m model_integration` | Docker 网络、真实 OpenAI-compatible Embedding API 与 Secret | 鉴权、单条/批量、顺序、维度、有限数值、相对语义和密钥脱敏 | main push/手动/发布前 |
 | Docker Resilience | `pytest -m docker_resilience` | 完整 Compose、可控 failpoint 与容器 KILL 权限 | Worker/Relay 强杀、NATS 暂停恢复、并发与最终一致性 | 夜间/发布前 |
 
 ### 4.4 必测领域不变量
+
+**真实验收状态（2026-08-25）：** T1～T25 均已同时具备 Mock 证据和按需的真实 MySQL/Elasticsearch/NATS/Docker 证据；权威测试节点映射见 `tests/fixtures/reliability_matrix.json`。Docker 强杀、重复投递、NATS 停启与并发栅栏共 8 个真实场景全部通过。
 
 | 编号 | 不变量 | 测试方式 |
 |---|---|---|
@@ -327,7 +335,7 @@ after_relay_publish_before_mark
 - `domain/`、`application/`、`ingestion/`、`retrieval/` 的 line coverage 不低于 85%；新增代码不低于 90%。
 - `ports/` 所有抽象方法必须至少有一个 contract 测试覆盖。
 - 发布前 E2E 必须覆盖 `.md`、`.txt`、代码文件和文本 PDF 各一例。
-- 离线评测集初始至少 30 个问题，每题提供 `relevant_chunk_ids`；发布门槛：`Recall@6 ≥ 0.85`、`MRR@6 ≥ 0.70`。阈值应随真实数据集校准，而不是盲目沿用。
+- 离线评测集初始至少 30 个问题，每题提供 `relevant_chunk_ids`；真实评测还必须把固定语料经 gRPC 摄取到真实 ES，并使用真实模型执行 30 问。两者发布门槛均为 `Recall@6 ≥ 0.85`、`MRR@6 ≥ 0.70`、locator accuracy `= 1.0`；不得通过修改向量 snapshot、自由文本 snapshot 或降低阈值消除失败。
 
 ### 4.7 本地提交质量门禁（Git Hook）
 
@@ -342,13 +350,17 @@ git config core.hooksPath .githooks
 当前 Python MVP 的 hook 依次执行：
 
 ```sh
-uv run ruff check src tests
-uv run ruff format --check src tests
-uv run mypy src
+uv run ruff check src tests scripts migrations
+uv run ruff format --check src tests scripts migrations
+uv run mypy src scripts migrations
+uv run python scripts/check_generated.py
 uv run pytest tests/unit tests/contract tests/functional
+uv run pytest -m "resilience and not docker_resilience" tests/resilience
+uv run pytest -m "eval and not e2e" tests/eval
+uv run pytest --cov=rag_mvp.domain --cov=rag_mvp.application --cov=rag_mvp.ingestion --cov=rag_mvp.retrieval --cov-fail-under=85 -m "not e2e and not docker_resilience and not integration and not model_integration" tests/unit tests/contract tests/functional tests/resilience tests/eval
 ```
 
-hook 只做检查，不运行会改写工作区的 `ruff format` 或 `gofmt -w`；否则格式化后的内容不会自动进入本次暂存区，检查对象与提交对象可能不一致。开发者应先显式执行格式化命令并重新 `git add`。Integration、E2E、resilience 和 eval 因依赖容器、耗时或模型资源，不进入每次提交 hook，仍按 4.3 的 PR/夜间频率执行。
+hook 只做检查，不运行会改写工作区的 `ruff format` 或 `gofmt -w`；否则格式化后的内容不会自动进入本次暂存区，检查对象与提交对象可能不一致。开发者应先显式执行格式化命令并重新 `git add`。hook 中的 resilience 与 eval 分别只运行 Fake 和离线集合；真实 Integration、Model Integration、E2E、Docker Resilience 与 Real Eval 依赖容器、Secret、耗时或模型资源，不进入每次提交 hook，改由 `.github/workflows/docker-quality.yml` 在 main push、手动或夜间执行。
 
 未来引入 Go 产品控制面后，在其 Go module 根目录执行下列检查（路径以实际模块目录为准），并将它们追加到同一 hook：
 
@@ -663,7 +675,7 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 
 ## 6. 项目排期
 
-### Phase 0：工程基线（状态：⬜）
+### Phase 0：工程基线（状态：✅ 已验收）
 
 | ID | 任务 | 验收 | 依赖 |
 |---|---|---|---|
@@ -671,7 +683,7 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 | P0-2 | 创建 Application Container 和 Settings | 测试可注入 fake ports，无 import-time 网络/连接 | P0-1 |
 | P0-3 | 配置 Compose：gRPC Server、Worker、Outbox Relay、MySQL、Elasticsearch、NATS JetStream | 一条命令启动，全部依赖 healthcheck 可用 | P0-1 |
 
-### Phase 1：领域模型与可靠摄取（状态：⬜）
+### Phase 1：领域模型与可靠摄取（状态：✅ 已验收）
 
 | ID | 任务 | 验收 | 依赖 |
 |---|---|---|---|
@@ -681,7 +693,7 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 | P1-4 | Outbox Relay + NATS JetStream publish/consume/ACK/NAK/retry/cancel | Relay 仅发布 READY 事件且可恢复；durable consumer 下同一 delivery 不会被两个 Worker 同时成功处理；ACK 丢失会 redelivery | P1-1 |
 | P1-5 | Pipeline 与 failpoints | redelivery/断电恢复测试通过 | P1-2~P1-4 |
 
-### Phase 2：索引与检索（状态：⬜）
+### Phase 2：索引与检索（状态：✅ 已验收）
 
 | ID | 任务 | 验收 | 依赖 |
 |---|---|---|---|
@@ -690,7 +702,7 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 | P2-3 | Hybrid/RRF/metadata filter | 固定 fixture 的预期排序通过 | P2-2 |
 | P2-4 | 可选 Rerank + ContextBuilder | token 预算、Evidence locator 与 ContextPlan 通过 | P2-3 |
 
-### Phase 3：Python gRPC 服务与验收（状态：⬜）
+### Phase 3：Python gRPC 服务与验收（状态：✅ 已验收）
 
 | ID | 任务 | 验收 | 依赖 |
 |---|---|---|---|
@@ -758,16 +770,18 @@ Python RAG: 给定合法 Dataset 和 Query，返回可靠、可解释、可引�
 
 ## 附录 A：MVP 发布验收清单
 
-- [ ] 支持 Markdown、TXT、代码文件、文本 PDF 上传与解析；不支持的类型返回确定错误。
-- [ ] 上传立即返回 `document_id`/`job_id`；摄取在后台执行并能查询进度。
-- [ ] 相同 `idempotency_key` 的提交返回同一 Job；相同内容和配置的不同提交不产生重复索引；配置/内容变化产生新版本。
-- [ ] Task 与 OutboxEvent 在一个 MySQL 事务中创建；NATS 短暂不可用后，Relay 能补发且不丢摄取任务。
-- [ ] Worker 强杀后，未 ACK 任务可被重新领取；最终索引、统计、chunk 数均不重复。
-- [ ] 用户只能在指定 Dataset 中检索；返回的每个 hit 都有来源定位。
-- [ ] 默认混合检索可运行；RRF 排名、metadata filter、删除行为有自动化测试。
-- [ ] `Retrieve` 返回的每个 hit 都含稳定 `chunk_id`、分数及来源定位；Go 可据此构造 Citation，Python 不分配 `[n]`。
-- [ ] Unit/contract/resilience/integration/E2E 测试均通过；核心覆盖率达到本规范门槛。
-- [ ] `docker compose up` 可启动完整本地演示；密钥不被提交或记录在日志。
+- [x] 支持 Markdown、TXT、代码文件、文本 PDF 上传与解析；不支持的类型返回确定错误。
+- [x] 上传立即返回 `document_id`/`job_id`；摄取在后台执行并能查询进度。
+- [x] 相同 `idempotency_key` 的提交返回同一 Job；相同内容和配置的不同提交不产生重复索引；配置/内容变化产生新版本。
+- [x] Task 与 OutboxEvent 在一个 MySQL 事务中创建；NATS 短暂不可用后，Relay 能补发且不丢摄取任务。
+- [x] Worker 强杀后，未 ACK 任务可被重新领取；最终索引、统计、chunk 数均不重复。
+- [x] 用户只能在指定 Dataset 中检索；返回的每个 hit 都有来源定位。
+- [x] 默认混合检索可运行；RRF 排名、metadata filter、删除行为有自动化测试。
+- [x] `Retrieve` 返回的每个 hit 都含稳定 `chunk_id`、分数及来源定位；Go 可据此构造 Citation，Python 不分配 `[n]`。
+- [x] Unit/contract/resilience/integration/E2E 测试均通过；核心覆盖率达到本规范门槛。
+- [x] `docker compose up` 可启动完整本地演示；密钥不被提交或记录在日志。
+
+**发布验收记录（2026-08-25）：** 使用 `qwen3.7-text-embedding`、1024 维向量完成验收；运行环境为 Docker Engine 29.4.0、Docker Compose 5.1.1、MySQL 8.4.6、Elasticsearch 8.19.3、NATS 2.11.8。离线门禁 190 项通过、核心覆盖率 88.01%；真实 adapter/model 与四格式 E2E 合计 27 项通过；Docker Resilience 8 项通过；真实 30 问评测 1 项通过且达到上述指标门槛。API Key、模型 URL 和向量值不写入文档或测试 artifact。
 
 ## 附录 B：参考来源
 

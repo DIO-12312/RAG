@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from sqlalchemy import Connection, inspect, text
@@ -62,9 +63,12 @@ async def _schema_snapshot(dsn: str) -> SchemaSnapshot:
 
 
 @pytest.mark.integration
-def test_upgrade_head_is_idempotent_and_creates_innodb_schema(mysql_dsn: str) -> None:
-    run_migrations(mysql_dsn, "upgrade", "head")
-    run_migrations(mysql_dsn, "upgrade", "head")
+def test_upgrade_head_is_idempotent_and_creates_innodb_schema(
+    mysql_dsn: str,
+    migrations_root: Path,
+) -> None:
+    run_migrations(mysql_dsn, "upgrade", "head", migrations_root)
+    run_migrations(mysql_dsn, "upgrade", "head", migrations_root)
 
     snapshot = asyncio.run(_schema_snapshot(mysql_dsn))
 

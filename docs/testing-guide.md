@@ -35,9 +35,9 @@ uv run ruff format --check src tests scripts
 uv run mypy src scripts
 uv run python scripts/check_generated.py
 uv run pytest tests/unit tests/contract tests/functional
-uv run pytest -m resilience tests/resilience
-uv run pytest -m eval tests/eval
-uv run pytest --cov=rag_mvp.domain --cov=rag_mvp.application --cov=rag_mvp.ingestion --cov=rag_mvp.retrieval --cov-fail-under=85 tests/unit tests/contract tests/functional tests/resilience tests/eval
+uv run pytest -m "resilience and not docker_resilience" tests/resilience
+uv run pytest -m "eval and not e2e" tests/eval
+uv run pytest -m "not e2e and not docker_resilience and not integration and not model_integration" --cov=rag_mvp.domain --cov=rag_mvp.application --cov=rag_mvp.ingestion --cov=rag_mvp.retrieval --cov-fail-under=85 tests/unit tests/contract tests/functional tests/resilience tests/eval
 ```
 
 最后一条会再次执行测试以计算聚合覆盖率，这是正常的。通过条件是全部命令退出码为 0，且核心覆盖率不低于 85%。当前固定评测集的门槛为 Recall@6 ≥ 0.85、MRR@6 ≥ 0.70、locator accuracy = 1.0。
@@ -91,11 +91,19 @@ uv run pytest -vv -m resilience tests/resilience
 
 ## 5. 验证检索质量
 
+离线评测不访问网络，适合 pre-commit 与 PR quick job：
+
 ```powershell
-uv run pytest -vv -m eval tests/eval
+uv run pytest -vv -m "eval and not e2e" tests/eval
 ```
 
-评测集位于 `tests/eval/fixtures/retrieval_quality.json`，包含固定问题、相关 chunk 和预期 locator。它验证的是可重复的检索质量：Recall@6、MRR@6 和 evidence 来源定位；不对 LLM 自由文本答案做逐字 snapshot。
+真实评测必须在 Compose 内通过 gRPC、真实模型和真实 ES 运行：
+
+```powershell
+docker compose --profile test run --rm rag-test uv run pytest -m eval tests/eval/test_real_retrieval_quality.py -q
+```
+
+离线评测集位于 `tests/eval/fixtures/retrieval_quality.json`；真实评测在测试代码中固定十份互相干扰的语料和 30 个问题，并根据摄取返回的 `document_id` 计算真实相关 `chunk_id`。两者都验证 Recall@6、MRR@6 和 evidence 来源定位，不 snapshot 向量或 LLM 自由文本。
 
 当指标下降时，先运行相应的 `tests/unit/retrieval/` 测试，再检查 fixture 是否被有意更新。不能为了让门禁通过而随意降低阈值或修改相关 chunk 标注；这类变化应有数据依据并同步更新规格或计划。
 
@@ -130,6 +138,12 @@ uv run pytest -m "integration and not model_integration" tests/integration
 uv run pytest -m model_integration tests/integration/test_real_embedding_model.py
 ```
 
+若要在与 GitHub Docker job 相同的测试镜像内一次执行 integration、model integration 和 E2E，必须显式传入容器网络地址与 migration root：
+
+```powershell
+docker compose --profile test run --rm -e RAG_MIGRATIONS_ROOT=/app -e RAG_TEST_MYSQL_DSN=mysql+asyncmy://rag:rag@mysql:3306/rag -e RAG_TEST_ELASTICSEARCH_URL=http://elasticsearch:9200 -e RAG_TEST_NATS_URL=nats://nats:4222 rag-test uv run pytest -m "integration or model_integration or e2e" tests/integration tests/e2e -q
+```
+
 运行只通过 generated gRPC client 驱动的四格式真实 E2E：
 
 ```powershell
@@ -161,7 +175,16 @@ docker compose logs --no-color 2>&1 | uv run python scripts/check_secret_leaks.p
 
 以上命令分别证明真实 adapters、迁移顺序、角色装配、容器安全边界、四格式 gRPC RAG 闭环和 Worker/Relay 强杀恢复；报告时仍须逐类列出实际运行结果。
 
-## 8. 记录验证结果的模板
+## 8. CI 与最近发布证据
+
+- `.github/workflows/quality.yml`：pull request/push 的无网络 quick job，运行 unit、contract、functional、Fake resilience、offline eval 和覆盖率。
+- `.github/workflows/docker-quality.yml`：main push/手动运行 Secret 驱动的 adapter/model/E2E；定时或手动运行 Docker Resilience 与 Real Eval。为避免在不受信任 PR 上暴露 Secret，不使用 `pull_request_target`。
+- 四个必需 Secret 为 `EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_MODEL_API_KEY`、`EMBEDDING_MODEL_DIMENSION`；任何一个缺失时，所选真实作业在 Compose 启动前以具名错误失败。
+- 两个 Docker job 都只运行 `docker compose config --quiet`，结束时扫描 Compose 日志是否含 API Key，并使用 `down --remove-orphans` 保留卷语义；禁止 `down -v`。
+
+2026-08-25 的发布基线使用 `qwen3.7-text-embedding`（1024 维）、Docker Engine 29.4.0、Compose 5.1.1、MySQL 8.4.6、Elasticsearch 8.19.3、NATS 2.11.8。实际结果：离线 190 项通过、88.01% 覆盖率；真实 adapter/model/E2E 27 项通过；Docker Resilience 8 项通过；真实 30 问评测 1 项通过。
+
+## 9. 记录验证结果的模板
 
 每次完成一个可验收模块，可在提交说明或工作记录中采用以下格式：
 

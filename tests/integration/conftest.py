@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -38,6 +39,14 @@ def mysql_dsn() -> str:
     )
 
 
+@pytest.fixture
+def migrations_root() -> Path:
+    """Resolve migrations explicitly for host and non-editable test images."""
+
+    configured = os.getenv("RAG_MIGRATIONS_ROOT", "").strip()
+    return Path(configured) if configured else Path(__file__).resolve().parents[2]
+
+
 async def reset_mysql_metadata(engine: AsyncEngine) -> None:
     """Clear only test-owned business rows while preserving migration and tenant state."""
 
@@ -53,10 +62,11 @@ async def reset_mysql_metadata(engine: AsyncEngine) -> None:
 @pytest_asyncio.fixture
 async def mysql_repository(
     mysql_dsn: str,
+    migrations_root: Path,
 ) -> AsyncIterator[tuple[MySQLMetadataRepository, AsyncEngine]]:
     """Provide one real repository with a clean schema for each integration test."""
 
-    await asyncio.to_thread(run_migrations, mysql_dsn, "upgrade", "head")
+    await asyncio.to_thread(run_migrations, mysql_dsn, "upgrade", "head", migrations_root)
     engine = create_mysql_engine(mysql_dsn)
     await reset_mysql_metadata(engine)
     repository = MySQLMetadataRepository(

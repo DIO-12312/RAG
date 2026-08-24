@@ -207,7 +207,7 @@ Milestone E  ← Go 公网产品面与 Agent
 
 **阶段出口：** 四类文件可上传、查询 Job、混合检索、重排并返回 evidence；失败任务可合规重试，文档可立即逻辑删除并最终清理；评测达到 SPEC 初始阈值。该版本可用于单机、受控内部数据试用，不宣称完成全部并发和强杀恢复保证。
 
-## 8. Milestone D：可靠发布基线
+## 8. Milestone D：可靠发布基线（✅ 2026-08-25 已验收）
 
 **目的：** 补齐所有状态、投递、版本和并发不变量，通过 SPEC T1～T25。
 
@@ -241,7 +241,7 @@ Milestone E  ← Go 公网产品面与 Agent
 
 - 完成 T1～T25、覆盖率门槛、四类 E2E、固定 eval，以及 Docker `KILL` Worker 恢复演练。
 - 验证定时轮询、手动唤醒、两者并发及手动唤醒丢失后的定时兜底；确认所有路径都只通过 Outbox 查询和 Relay 发布。
-- PR 必跑 unit/contract/integration/E2E/resilience；夜间运行 eval 和耗时恢复测试。
+- PR 必跑无网络 unit/contract/functional/Fake resilience/offline eval/coverage；main push 或手动运行 Secret 驱动的真实 integration/model/E2E，夜间运行 Real Eval 和 Docker 恢复测试。
 - 对照 SPEC 附录 A 逐项验收，未达到的项目必须阻塞发布声明。
 
 **阶段出口：** SPEC T1～T25、断电恢复、覆盖率和附录 A 全部通过；可以作为单机生产试运行版本。Kubernetes、多租户和多实例高可用仍属于后续工作。
@@ -323,14 +323,15 @@ docs/plans/
 
 不要一次写完五份详细施工计划。完成并验收当前 Milestone 后，再结合真实代码结构编写下一份，避免后续计划基于尚不存在的实现细节失真。
 
-## 12. 当前起点
+## 12. 当前状态
 
-截至 2026-08-24，项目已沿 2.1 的无 Docker 开发通道完成以下实现边界：
+截至 2026-08-25，Milestone A～D 已沿同一套生产端口和状态语义完成实现与验收：
 
-- Milestone A 的本地工程基线、protobuf 契约、进程骨架与快速质量门禁已完成；Docker healthcheck 和真实 CI 运行仍未验收，因此 A 的正式阶段出口保持未完成。
-- Milestone B 的 Mock Functional 已完成：使用真实 gRPC/application/Outbox/Worker/pipeline 调用链和测试专用 Fake ports 跑通 TXT 异步摄取、Dense Retrieve 与 evidence 返回；真实 MySQL、Elasticsearch、NATS adapter integration 和 Compose E2E 仍未完成，因此不声明内部 Alpha 已通过。
-- Milestone C 的 Mock Functional 已完成：支持 TXT、Markdown、代码和文本 PDF，Dense + BM25 候选 + RRF、可降级 Rerank、ContextPlan、基础 RetryJob、DeleteDocument 和固定评测集；真实基础设施上的受控 MVP 验收仍未完成。
-- Milestone D 的 Mock Reliability 已完成：补齐 Finalizer 终态与 staging sweeper、并发去重、Retry 唯一性、CancelJob、generation fence、索引版本清理以及 T1～T25 Mock 故障矩阵；Fake 结果不替代 MySQL 行锁/事务、Elasticsearch mapping/KNN/BM25、JetStream durable/ACK/NAK/redelivery、Compose E2E 和 Docker `KILL` 恢复演练。
-- Milestone E 尚未开始；在 D 的真实基础设施发布门禁通过前，不进入 Go 产品控制面实施。
+- Milestone A 的跨平台 protobuf 检查、进程骨架、Compose health/migration 顺序和无网络快速门禁已完成。
+- Milestone B/C 的四格式 gRPC upload → async ingest → Dense/BM25/RRF Retrieve 已在真实 MySQL、Elasticsearch、NATS JetStream 和 OpenAI-compatible Embedding 上闭环。
+- Milestone D 的 T1～T25、Outbox/Finalizer/Worker 状态机、并发唯一性、generation fence、迟到版本防回退及 Docker `KILL` 恢复已完成真实复验。
+- 发布证据为：离线 190 项、88.01% 核心覆盖率；真实 adapter/model/E2E 27 项；Docker Resilience 8 项；真实固定 30 问评测 1 项，全部通过。
+- 验收模型为 `qwen3.7-text-embedding`、1024 维；基础设施版本为 Docker Engine 29.4.0、Compose 5.1.1、MySQL 8.4.6、Elasticsearch 8.19.3、NATS 2.11.8。
+- Milestone E 尚未开始。D 已不再阻塞 Go 控制面的规划，但开始 E 前仍须创建并验收单独的逐文件实施计划；本轮不进入 Go、Agent、SSE 或 Kubernetes 范围。
 
-当前准确定位是“Milestone D Mock Reliability 完成，真实可靠发布基线未验收”。真实基础设施方案已选定为纵向分阶段替换，设计基线见 [`superpowers/specs/2026-08-24-real-infrastructure-rag-design.md`](superpowers/specs/2026-08-24-real-infrastructure-rag-design.md)。下一步在该设计获用户审阅后创建单独的详细实施计划，按跨平台生成检查 → MySQL → OpenAI-compatible ModelGateway → Elasticsearch → NATS JetStream → 生产装配 → Compose E2E/Docker `KILL` 的顺序实现 concrete adapters、运行真实模型/integration/E2E/resilience/eval 并完成 D5；在此之前不得声明内部 Alpha、受控 MVP 或单机生产试运行版本已经正式通过。
+当前准确定位是“Milestone D 真实可靠发布基线通过，可用于单机生产试运行”。真实基础设施的已实施设计与证据见 [`superpowers/specs/2026-08-24-real-infrastructure-rag-design.md`](superpowers/specs/2026-08-24-real-infrastructure-rag-design.md)，逐提交执行记录见 [`plans/milestone-d-real-infrastructure.md`](plans/milestone-d-real-infrastructure.md)。

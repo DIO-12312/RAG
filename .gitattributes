@@ -3,3 +3,5 @@
 scripts/generate_proto.py text eol=lf
 scripts/check_generated.py text eol=lf
 src/rag_mvp/rpc/generated/* text eol=lf
+.githooks/* text eol=lf
+.github/workflows/*.yml text eol=lf

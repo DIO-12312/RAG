@@ -1,6 +1,6 @@
 # 真实基础设施 Docker RAG 设计
 
-> 状态：已批准，待实施
+> 状态：已实施并验收（2026-08-25）
 > 日期：2026-08-24
 > 权威上位规格：`docs/SPEC.md`
 > 路线图：`docs/PLAN.md`
@@ -73,7 +73,7 @@ Compose 最终包含以下服务：
 | `rag-worker` | 唯一 Task consumer；解析、切块、Embedding、索引、终态 | 是 |
 | `rag-test` | Compose `test` profile 内运行真实 integration/E2E/resilience | 是 |
 
-`.env` 仅由 Compose `env_file` 注入需要模型的容器，不复制到镜像，不挂载为可下载文件。日志和异常只能记录提供商状态码、稳定错误码、请求耗时和批次数，禁止记录 Authorization header、API Key、完整请求体或完整向量。
+`.env` 仅由 Compose 读取并通过变量插值把模型配置注入需要模型的容器，不复制到镜像，不挂载为可下载文件。日志和异常只能记录提供商状态码、稳定错误码、请求耗时和批次数，禁止记录 Authorization header、API Key、完整请求体或完整向量。
 
 ## 4. P0：跨平台 protobuf 检查修复
 
@@ -303,7 +303,7 @@ CreateDataset
 
 - pre-commit：保持无网络快速门禁，不消耗真实模型；
 - PR quick job：unit、contract、functional、Fake resilience、coverage；
-- PR Docker job：MySQL/ES/NATS integration、真实模型 integration、四格式 E2E；
+- main push/手动 Docker job：MySQL/ES/NATS integration、真实模型 integration、四格式 E2E；
 - nightly/release：Docker KILL、并发压力、T1～T25 真实矩阵和 Real Eval；
 - Docker/模型 job 没有 Secret 或基础设施启动失败时必须失败，不得报告为通过；
 - 测试日志作为 artifact 保存时先执行密钥扫描与脱敏。
@@ -339,3 +339,17 @@ CreateDataset
 10. Unit、contract、functional、integration、E2E、resilience、eval 和覆盖率门禁全部成功；
 11. 日志、镜像、Git history、测试 artifact 不包含 API Key；
 12. `docs/SPEC.md`、`docs/PLAN.md`、`tests/TEST.md` 与实际实现一致。
+
+### 12.1 实际验收证据
+
+上述 12 项已于 2026-08-25 全部满足：
+
+- 运行模型：`qwen3.7-text-embedding`，1024 维；未记录 API Key、模型 URL 或向量值；
+- 运行版本：Docker Engine 29.4.0、Docker Compose 5.1.1、MySQL 8.4.6、Elasticsearch 8.19.3、NATS 2.11.8；
+- 离线 unit/contract/functional/Fake resilience/offline eval：190 项通过，核心覆盖率 88.01%；
+- 真实 MySQL/ES/NATS adapter、真实模型与四格式 gRPC E2E：27 项通过；
+- Worker/Relay KILL、NATS 停启、并发 upload/Retry/rebuild/Delete：8 项通过；
+- 真实 gRPC/模型/ES 固定 30 问：1 项通过，Recall@6、MRR@6、locator accuracy 均达到 SPEC 门槛；
+- T1～T25 的 Mock/真实测试节点均由 `tests/fixtures/reliability_matrix.json` 映射，矩阵完整性测试通过。
+
+因此本设计的交付状态为“单机真实可靠发布基线通过”。多实例高可用、Kubernetes、Go 控制面、Agent/SSE、OCR 与 MinIO 仍不在本设计的已验收范围内。

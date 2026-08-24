@@ -923,9 +923,14 @@ git commit -m "test(resilience): 验证 Docker 强杀与真实投递恢复"
 
 **Files:**
 - Create: `tests/eval/test_real_retrieval_quality.py`
+- Create: `tests/eval/conftest.py`
 - Create: `.github/workflows/docker-quality.yml`
+- Modify: `.gitattributes`
 - Modify: `.github/workflows/quality.yml`
 - Modify: `.githooks/pre-commit`
+- Modify: `tests/contract/test_container_artifacts.py`
+- Modify: `tests/integration/conftest.py`
+- Modify: `tests/integration/test_mysql_migrations.py`
 - Modify: `docs/SPEC.md`
 - Modify: `docs/PLAN.md`
 - Modify: `docs/README.md`
@@ -938,11 +943,13 @@ git commit -m "test(resilience): 验证 Docker 强杀与真实投递恢复"
 - Produces PR quick job, secret-backed Docker integration/E2E job and nightly Docker resilience/eval job
 - Preserves no-network pre-commit behavior
 
-- [ ] **Step 1: Write failing real retrieval evaluation**
+- [x] **Step 1: Write failing real retrieval evaluation**
 
 Use the fixed 30-question corpus through gRPC/real ES/real model and compute existing `evaluate_rankings` metrics. Assert `Recall@6 >= 0.85`, `MRR@6 >= 0.70`, locator accuracy `== 1.0`; do not snapshot vectors or free text.
 
-- [ ] **Step 2: Run real eval and diagnose quality failures without weakening thresholds**
+RED：测试文件不存在时 pytest 以 `file or directory not found` 失败；首次执行测试后又发现兄弟目录的 E2E fixture 不会自动传播到 `tests/eval`，增加只复用 generated gRPC fixture 的 `eval/conftest.py` 后进入真实链路。
+
+- [x] **Step 2: Run real eval and diagnose quality failures without weakening thresholds**
 
 Run:
 
@@ -952,24 +959,30 @@ docker compose --profile test run --rm rag-test uv run pytest -m eval tests/eval
 
 If a query fails, inspect Dense/BM25/RRF stage scores and fixture relevance. Production ranking changes require a targeted algorithm test; fixture labels change only when demonstrably incorrect.
 
-- [ ] **Step 3: Add CI workflows and secret safety**
+GREEN：固定十文档、30 问真实评测 `1 passed`，未修改生产排序或降低门槛；测试失败消息保留各候选 Dense/BM25/RRF 分数和 locator 状态。
+
+- [x] **Step 3: Add CI workflows and secret safety**
 
 Docker job receives GitHub Secrets as environment values, runs `docker compose config --quiet`, adapter integration, model integration and E2E. Nightly job runs Docker resilience and real eval. Missing required Secret makes the selected job fail with a named configuration error.
 
-- [ ] **Step 4: Run complete local release gate**
+实现结果：PR/push quick workflow 和 pre-commit 显式排除真实 marker；Docker workflow 只在 main push、手动或夜间运行，不使用 `pull_request_target`。真实 CI 命令演练首先暴露容器内 migration root 未显式传给 integration fixture，修复为 `RAG_MIGRATIONS_ROOT=/app` 后真实组合门禁 `27 passed`。
+
+- [x] **Step 4: Run complete local release gate**
 
 ```powershell
 uv run ruff check src tests scripts migrations
 uv run ruff format --check src tests scripts migrations
 uv run mypy src scripts migrations
 uv run python scripts/check_generated.py
-uv run pytest tests/unit tests/contract tests/functional tests/resilience tests/eval --cov=rag_mvp.domain --cov=rag_mvp.application --cov=rag_mvp.ingestion --cov=rag_mvp.retrieval --cov-fail-under=85
-docker compose --profile test run --rm rag-test uv run pytest -m "integration or model_integration or e2e" tests/integration tests/e2e -q
-docker compose --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q
+uv run pytest -m "not e2e and not docker_resilience and not integration and not model_integration" tests/unit tests/contract tests/functional tests/resilience tests/eval --cov=rag_mvp.domain --cov=rag_mvp.application --cov=rag_mvp.ingestion --cov=rag_mvp.retrieval --cov-fail-under=85
+docker compose --profile test run --rm -e RAG_MIGRATIONS_ROOT=/app -e RAG_TEST_MYSQL_DSN=mysql+asyncmy://rag:rag@mysql:3306/rag -e RAG_TEST_ELASTICSEARCH_URL=http://elasticsearch:9200 -e RAG_TEST_NATS_URL=nats://nats:4222 rag-test uv run pytest -m "integration or model_integration or e2e" tests/integration tests/e2e -q
+docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q
 docker compose --profile test run --rm rag-test uv run pytest -m eval tests/eval/test_real_retrieval_quality.py -q
 ```
 
-- [ ] **Step 5: Reconcile documentation against actual evidence**
+GREEN：Ruff、format、mypy（80 source files）和 generated 检查通过；离线 190 项通过、9 项真实 marker 被排除、覆盖率 88.01%；真实 integration/model/E2E 27 项通过；Docker Resilience 8 项通过；Real Eval 1 项通过。
+
+- [x] **Step 5: Reconcile documentation against actual evidence**
 
 Only when every command above passes:
 
@@ -981,10 +994,12 @@ Only when every command above passes:
 
 If any required command remains unrun or failed, keep the release status unapproved and list the exact blocker.
 
-- [ ] **Step 6: Commit final gate**
+验收环境：`qwen3.7-text-embedding` / 1024 维；Docker Engine 29.4.0、Compose 5.1.1、MySQL 8.4.6、Elasticsearch 8.19.3、NATS 2.11.8。T1～T25 真实映射、SPEC 附录 A、PLAN 和设计状态均已按实际证据收敛，未记录 API Key 或模型 URL。
+
+- [x] **Step 6: Commit final gate**
 
 ```powershell
-git add .github/workflows/docker-quality.yml .github/workflows/quality.yml .githooks/pre-commit tests/eval/test_real_retrieval_quality.py tests/TEST.md docs/SPEC.md docs/PLAN.md docs/README.md docs/testing-guide.md docs/plans/milestone-d-real-infrastructure.md docs/superpowers/specs/2026-08-24-real-infrastructure-rag-design.md
+git add .gitattributes .github/workflows/docker-quality.yml .github/workflows/quality.yml .githooks/pre-commit tests/eval/conftest.py tests/eval/test_real_retrieval_quality.py tests/contract/test_container_artifacts.py tests/integration/conftest.py tests/integration/test_mysql_migrations.py tests/TEST.md docs/SPEC.md docs/PLAN.md docs/README.md docs/testing-guide.md docs/plans/milestone-d-real-infrastructure.md docs/superpowers/specs/2026-08-24-real-infrastructure-rag-design.md
 git commit -m "ci: 建立真实 RAG 发布验收门禁"
 ```
 
