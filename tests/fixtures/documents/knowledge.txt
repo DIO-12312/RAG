@@ -1,0 +1,3 @@
+The Orchid Harbor recovery protocol uses a cobalt checksum before restoring an archive.
+Operators verify the checksum twice and record the result in the harbor ledger.
+Recovery may continue only after both cobalt checksum readings agree.

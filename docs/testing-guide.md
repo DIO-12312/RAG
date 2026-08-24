@@ -2,7 +2,7 @@
 
 本文说明如何在当前 Windows 本机环境验证 Python RAG 服务的功能、可靠性规则、真实基础设施与检索质量。快速门禁会走真实的 gRPC、application、Outbox、Worker、pipeline 和 retrieval 调用链，但以测试专用 Fake 保持确定性；`integration` 与 Compose 验收则使用真实 MySQL、Elasticsearch、NATS JetStream 和模型服务。
 
-报告结果时必须区分 Mock Functional/Resilience、真实 adapter integration、真实模型、Docker E2E 和 Docker Resilience。当前真实 adapter 与 Compose 拓扑已可验证；四格式 gRPC E2E 和容器强杀恢复需等对应测试任务完成后才能声明通过。
+报告结果时必须区分 Mock Functional/Resilience、真实 adapter integration、真实模型、Docker E2E 和 Docker Resilience。当前真实 adapter、Compose 拓扑与四格式 gRPC E2E 已可验证；容器强杀恢复需等对应测试任务完成后才能声明通过。
 
 ## 1. 先准备环境
 
@@ -130,6 +130,15 @@ uv run pytest -m "integration and not model_integration" tests/integration
 uv run pytest -m model_integration tests/integration/test_real_embedding_model.py
 ```
 
+运行只通过 generated gRPC client 驱动的四格式真实 E2E：
+
+```powershell
+uv run python scripts/build_test_fixtures.py --check
+docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e/test_real_upload_ingest_retrieve.py -q
+```
+
+该测试分别上传 TXT、Markdown、Python 和 PDF，等待异步 Job/Task 终态，再验证真实 Embedding、ES Dense/BM25 候选、RRF evidence、active index version 和 line/symbol/language/page provenance。测试每次生成新的 request/idempotency key；重复运行后还应只读核对 MySQL 没有遗留 PENDING/RUNNING 状态、ES 记录数与 ChunkManifest 一致、NATS consumer 没有 pending 或 ack pending。
+
 验证测试目标、runtime 内容和日志密钥脱敏：
 
 ```powershell
@@ -139,7 +148,7 @@ docker compose run --rm --no-deps rag-server sh -c 'test ! -e /app/tests && test
 docker compose logs --no-color 2>&1 | uv run python scripts/check_secret_leaks.py
 ```
 
-以上结果证明真实 adapters、迁移顺序、角色装配和容器安全边界；它仍不替代 Task 13 的四格式 Docker gRPC E2E 与 Task 14 的 Worker/Relay 强杀恢复。不要在恢复测试中使用 `docker compose down -v`，它会删除应被验证的持久状态。
+以上结果证明真实 adapters、迁移顺序、角色装配、容器安全边界和四格式 gRPC RAG 闭环；它仍不替代 Task 14 的 Worker/Relay 强杀恢复。不要在恢复测试中使用 `docker compose down -v`，它会删除应被验证的持久状态。
 
 ## 8. 记录验证结果的模板
 

@@ -799,6 +799,7 @@ git commit -m "build(docker): 建立真实 RAG Compose 拓扑"
 ## Task 13：新增真实 Docker gRPC 四格式 E2E
 
 **Files:**
+- Modify: `.gitattributes`
 - Create: `tests/e2e/conftest.py`
 - Create: `tests/e2e/test_real_upload_ingest_retrieve.py`
 - Create: `tests/fixtures/documents/knowledge.txt`
@@ -813,11 +814,11 @@ git commit -m "build(docker): 建立真实 RAG Compose 拓扑"
 - Produces generated-gRPC-only E2E helpers: `create_dataset`, `submit_document`, `wait_for_job`, `retrieve`
 - Does not import `rag_mvp.application` or `tests.fakes`
 
-- [ ] **Step 1: Write failing real E2E**
+- [x] **Step 1: Write real E2E**
 
 For each of TXT/Markdown/Python/PDF, submit through generated client, poll `GetJob` until SUCCEEDED, call Retrieve, and assert returned Evidence belongs to the created Dataset/Document, has active index version, non-empty stage scores and precise line/page locator.
 
-- [ ] **Step 2: Verify RED in test container**
+- [x] **Step 2: Run the initial test-container verification**
 
 Run:
 
@@ -825,24 +826,28 @@ Run:
 docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e/test_real_upload_ingest_retrieve.py -q
 ```
 
-Expected: fails at the first incomplete production wiring or E2E assertion, never because a Fake is unavailable.
+Actual: the existing production wiring was already complete; the first run passed all four parameterized formats, so no artificial RED or weakened assertion was introduced.
 
-- [ ] **Step 3: Stop on production defects and add a targeted plan amendment**
+- [x] **Step 3: Stop on production defects and add a targeted plan amendment**
 
 This task owns only E2E fixtures/helpers/tests/docs. If RED exposes a production defect, record its exact failing boundary in this plan, implement the fix test-first in the owning adapter as a separate `fix(<scope>)` commit, then return to this task. Do not stage production `src/` files in the E2E commit and do not weaken polling, status or evidence assertions.
 
-- [ ] **Step 4: Verify GREEN and cross-storage facts**
+No production defect was exposed; Task 13 therefore contains no `src/` change and needs no separate fix commit.
+
+- [x] **Step 4: Verify GREEN and cross-storage facts**
 
 Run the E2E twice. Assert the second run uses fresh idempotency keys but does not leave stale PENDING Jobs; use read-only diagnostics to verify MySQL active version, ES document count and NATS pending/ack state.
 
-- [ ] **Step 5: Commit**
+Actual: both runs passed 4/4. Afterward MySQL had no unfinished Job/Task, unpublished Outbox or active-version mismatch; ChunkManifest and ES both held 10 records; the NATS durable consumer reported zero pending, ack pending and redelivery.
+
+- [x] **Step 5: Commit**
 
 ```powershell
-git add tests/e2e/conftest.py tests/e2e/test_real_upload_ingest_retrieve.py tests/fixtures/documents/knowledge.txt tests/fixtures/documents/guide.md tests/fixtures/documents/sample.py tests/fixtures/documents/manual.pdf scripts/build_test_fixtures.py tests/TEST.md docs/testing-guide.md docs/plans/milestone-d-real-infrastructure.md
+git add .gitattributes tests/e2e/conftest.py tests/e2e/test_real_upload_ingest_retrieve.py tests/fixtures/documents/knowledge.txt tests/fixtures/documents/guide.md tests/fixtures/documents/sample.py tests/fixtures/documents/manual.pdf scripts/build_test_fixtures.py tests/TEST.md docs/testing-guide.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "test(e2e): 验证真实模型四格式 RAG 闭环"
 ```
 
-Before commit, confirm `git diff --cached --name-only` contains only production corrections directly required by this E2E and their targeted tests.
+Before commit, confirm `git diff --cached --name-only` contains only Task 13 fixtures, E2E helpers/tests and synchronized documentation; production corrections must remain in separate targeted fix commits.
 
 ---
 

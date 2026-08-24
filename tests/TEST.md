@@ -24,6 +24,9 @@ tests/
 │  ├─ test_retry_job_contract.py
 │  ├─ test_search_engine_contract.py
 │  └─ test_task_queue_contract.py
+├─ e2e/                                     # 真实 Compose 与模型的 gRPC 业务闭环
+│  ├─ conftest.py                            # generated gRPC client、真实运行配置和轮询 helpers
+│  └─ test_real_upload_ingest_retrieve.py
 ├─ eval/                                    # 固定问题集的检索质量评测
 │  ├─ fixtures/
 │  │  └─ retrieval_quality.json
@@ -39,6 +42,11 @@ tests/
 │  ├─ storage.py
 │  └─ task_queue.py
 ├─ fixtures/                                # 可复用的输入与可靠性证据
+│  ├─ documents/
+│  │  ├─ guide.md
+│  │  ├─ knowledge.txt
+│  │  ├─ manual.pdf
+│  │  └─ sample.py
 │  ├─ golden_chunks/
 │  │  ├─ code.json
 │  │  ├─ markdown.json
@@ -114,6 +122,7 @@ tests/
 | Contract | protobuf、gRPC DTO、Port 抽象及各实现必须共同遵守的语义 | `uv run pytest tests/contract` | 使用确定性 Fake 或本地对象存储；真实 adapter 契约待补充 |
 | Functional | upload → Finalizer → Relay → Worker → Retrieve 的完整调用链 | `uv run pytest tests/functional` | 真实 gRPC/application 流程 + Fake Metadata/Queue/Search/Model |
 | Integration | migration 和真实基础设施 adapter 的协议、约束与幂等性 | `uv run pytest -m integration tests/integration` | 要求对应 Docker 服务健康；缺少基础设施时失败而非跳过 |
+| E2E | 四格式 upload → 异步摄取 → hybrid Retrieve 的容器业务闭环 | `docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e -q` | generated gRPC client + 真实 MySQL/ES/NATS/模型；禁止 Fake |
 | Resilience | failpoint、重投、取消、并发、generation fence 与恢复不变量 | `uv run pytest -m resilience tests/resilience` | Mock Reliability；不替代进程强杀和真实中间件恢复 |
 | Eval | 固定 30 问检索集的 Recall@6、MRR@6、locator accuracy | `uv run pytest -m eval tests/eval` | 确定性 Fake 检索与固定 fixture |
 
@@ -284,6 +293,14 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | `test_real_embedding_model.py` | `test_real_embedding_returns_finite_declared_dimension_and_stable_duplicates` | 真实 API 分批返回声明维度的有限向量，相同中文文本向量保持高度一致。 |
 | 同上 | `test_real_embedding_ranks_related_chinese_text_above_unrelated_text` | 真实模型对中文相关语句的余弦相似度高于无关语句。 |
 
+## E2E 测试函数
+
+E2E 测试只从 generated gRPC client 驱动已启动的 Compose 服务，不直接导入 application、adapter 或 Fake。`e2e/conftest.py` 提供真实 gRPC channel、Embedding 运行配置，以及 Dataset 创建、文档提交、Job 轮询和检索 helpers。
+
+| 文件 | 测试函数 | 职责 |
+| --- | --- | --- |
+| `test_real_upload_ingest_retrieve.py` | `test_real_upload_ingest_and_hybrid_retrieve_preserves_provenance` | 分别上传 TXT、Markdown、Python 和 PDF，等待真实异步摄取成功，再验证 Dense/BM25/RRF evidence、active index version 与 line/symbol/language/page provenance。 |
+
 ## Functional 测试函数
 
 Functional 测试负责验证跨层调用链。它们使用真实 gRPC、application、Outbox、Worker、pipeline 与 retrieval，只在基础设施 Port 上替换为 `tests/fakes/` 的确定性实现。
@@ -337,6 +354,7 @@ Eval 测试负责防止检索排序和 evidence 定位质量回退。不得以 L
 | `fakes/model.py` | 提供确定性 embedding 与 rerank 行为。 |
 | `fakes/storage.py`、`fakes/parser.py`、`fakes/chunker.py`、`fakes/clock.py` | 为单测提供可控的端口替身、时间和输入。 |
 | `fixtures/golden_chunks/*.json` | 四种文档格式的切块和 locator 基准。 |
+| `fixtures/documents/*` | 真实 Docker E2E 的 TXT、Markdown、Python 与确定性生成 PDF 输入；`scripts/build_test_fixtures.py --check` 防止 PDF 漂移。 |
 | `fixtures/reliability_matrix.json` | SPEC T1～T25 与 Mock 测试证据、真实复验状态的映射。 |
 | `eval/fixtures/retrieval_quality.json` | 固定问题、相关 chunk 与 locator 的检索质量基线。 |
 
