@@ -67,6 +67,21 @@ class RetryJobCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class DeleteDocumentCommand:
+    request_id: str
+    idempotency_key: str
+    document_id: str
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteDocumentResult:
+    document_id: str
+    job_id: str
+    reused: bool
+
+
+@dataclass(frozen=True, slots=True)
 class JobView:
     job_id: str
     document_id: str

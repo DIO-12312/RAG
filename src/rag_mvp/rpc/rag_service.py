@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from rag_mvp.application.document_service import DocumentService
 from rag_mvp.application.dto import (
     CreateDatasetCommand,
+    DeleteDocumentCommand,
     GetJobQuery,
     JobView,
     RetrieveQuery,
@@ -16,7 +17,7 @@ from rag_mvp.application.dto import (
 )
 from rag_mvp.application.job_service import JobService
 from rag_mvp.application.retrieval_service import RetrievalService
-from rag_mvp.domain.enums import JobStatus, JobType, TaskStatus
+from rag_mvp.domain.enums import DocumentStatus, JobStatus, JobType, TaskStatus
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.models import Evidence, Locator, ScoreBreakdown
 from rag_mvp.observability import emit_event
@@ -44,6 +45,12 @@ _JOB_TYPE: Mapping[JobType, rag_service_pb2.JobType] = {
     JobType.INGEST_DOCUMENT: rag_service_pb2.JOB_TYPE_INGEST_DOCUMENT,
     JobType.DELETE_DOCUMENT: rag_service_pb2.JOB_TYPE_DELETE_DOCUMENT,
     JobType.CLEANUP_INDEX_VERSION: rag_service_pb2.JOB_TYPE_CLEANUP_INDEX_VERSION,
+}
+_DOCUMENT_STATUS: Mapping[DocumentStatus, rag_service_pb2.DocumentStatus] = {
+    DocumentStatus.PENDING: rag_service_pb2.DOCUMENT_STATUS_PENDING,
+    DocumentStatus.READY: rag_service_pb2.DOCUMENT_STATUS_READY,
+    DocumentStatus.FAILED: rag_service_pb2.DOCUMENT_STATUS_FAILED,
+    DocumentStatus.DELETED: rag_service_pb2.DOCUMENT_STATUS_DELETED,
 }
 
 
@@ -350,6 +357,27 @@ class RagService:
         context: object,
     ) -> rag_service_pb2.DeleteDocumentResponse:
         del context
-        return rag_service_pb2.DeleteDocumentResponse(
-            error=_unavailable(request.context.request_id)
-        )
+        if self._documents is None:
+            return rag_service_pb2.DeleteDocumentResponse(
+                error=_unavailable(request.context.request_id)
+            )
+        try:
+            result = await self._documents.delete_document(
+                DeleteDocumentCommand(
+                    request_id=request.context.request_id,
+                    idempotency_key=request.context.idempotency_key,
+                    document_id=request.document_id,
+                    now=self._now(),
+                )
+            )
+            return rag_service_pb2.DeleteDocumentResponse(
+                result=rag_service_pb2.DeleteDocumentResult(
+                    document_id=result.document_id,
+                    job_id=result.job_id,
+                    document_status=_DOCUMENT_STATUS[DocumentStatus.DELETED],
+                )
+            )
+        except Exception as error:
+            return rag_service_pb2.DeleteDocumentResponse(
+                error=_unexpected(error, request.context.request_id)
+            )

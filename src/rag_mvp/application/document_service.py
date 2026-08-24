@@ -9,6 +9,8 @@ from time import perf_counter
 from rag_mvp.application.dto import (
     CreateDatasetCommand,
     CreateDatasetResult,
+    DeleteDocumentCommand,
+    DeleteDocumentResult,
     SubmitDocumentCommand,
     SubmitDocumentResult,
 )
@@ -16,7 +18,11 @@ from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.ids import config_digest, file_sha256
 from rag_mvp.domain.models import Dataset
 from rag_mvp.observability import emit_event
-from rag_mvp.ports.metadata import MetadataRepository, SubmitIngestion
+from rag_mvp.ports.metadata import (
+    DeleteDocumentRequest,
+    MetadataRepository,
+    SubmitIngestion,
+)
 from rag_mvp.ports.storage import ObjectStorage
 
 
@@ -183,3 +189,24 @@ class DocumentService:
                     "chunk overlap must be non-negative and smaller than chunk size",
                 )
             )
+
+    async def delete_document(self, command: DeleteDocumentCommand) -> DeleteDocumentResult:
+        if not command.idempotency_key:
+            raise DomainError(
+                DomainFailure("IDEMPOTENCY_KEY_REQUIRED", "idempotency key is required")
+            )
+        deleted = await self._metadata.delete_document(
+            DeleteDocumentRequest(
+                idempotency_key=command.idempotency_key,
+                document_id=command.document_id,
+                now=command.now,
+            )
+        )
+        emit_event(
+            "document_deleted",
+            request_id=command.request_id,
+            job_id=deleted.job_id,
+            document_id=deleted.document_id,
+            stage="delete_document",
+        )
+        return DeleteDocumentResult(deleted.document_id, deleted.job_id, deleted.reused)

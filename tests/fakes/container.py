@@ -9,6 +9,7 @@ from pathlib import Path
 from rag_mvp.adapters.chunkers.recursive import RecursiveChunker
 from rag_mvp.adapters.parsers.router import SourceParserRouter
 from rag_mvp.adapters.storage.local import LocalObjectStorage
+from rag_mvp.application.cleanup_service import CleanupService
 from rag_mvp.application.document_service import DocumentService
 from rag_mvp.application.ingestion_service import IngestionService
 from rag_mvp.application.job_service import JobService
@@ -33,6 +34,7 @@ class MockFunctionalHarness:
     model: FakeModelGateway
     search: FakeSearchEngine
     ingestion: IngestionService
+    cleanup: CleanupService
     rpc: RagService
 
     @classmethod
@@ -53,13 +55,14 @@ class MockFunctionalHarness:
                 search,
             ),
         )
+        cleanup = CleanupService(metadata, search, storage)
         rpc = RagService(
             documents=documents,
             jobs=JobService(metadata),
             retrieval=RetrievalService(metadata, search, model),
             now=lambda: now,
         )
-        return cls(now, metadata, storage, queue, model, search, ingestion, rpc)
+        return cls(now, metadata, storage, queue, model, search, ingestion, cleanup, rpc)
 
     async def run_ingestion_once(self) -> None:
         await finalize_once(self.metadata, self.storage, self.now, limit=100)
@@ -70,4 +73,5 @@ class MockFunctionalHarness:
             self.ingestion,
             "functional-worker",
             self.now,
+            cleanup=self.cleanup,
         )

@@ -6,13 +6,15 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 
-from rag_mvp.application.ingestion_service import IngestionService
+from rag_mvp.application.cleanup_service import CleanupService
+from rag_mvp.application.ingestion_service import IngestionExecution, IngestionService
 from rag_mvp.bootstrap.container import (
     Container,
     build_container,
     install_shutdown_handlers,
 )
 from rag_mvp.config import Settings, load_settings
+from rag_mvp.domain.enums import TaskType
 from rag_mvp.domain.errors import DomainFailure
 from rag_mvp.observability import emit_event
 from rag_mvp.ports.message_queue import TaskQueue
@@ -28,6 +30,7 @@ async def worker_once(
     *,
     max_deliveries: int = 3,
     after_complete: Callable[[], Awaitable[None]] | None = None,
+    cleanup: CleanupService | None = None,
 ) -> bool:
     """Consume one delivery and remain the sole owner of ACK/NAK decisions."""
 
@@ -37,7 +40,22 @@ async def worker_once(
     if delivery is None:
         return False
 
-    result = await ingestion.execute(delivery.task_id, delivery.delivery_sequence, now)
+    task = await metadata.get_task(delivery.task_id)
+    if task is not None and task.type is TaskType.CLEANUP_DOCUMENT:
+        if cleanup is None:
+            result = IngestionExecution(
+                claimed=True,
+                completed=False,
+                failure=DomainFailure(
+                    "CLEANUP_SERVICE_UNAVAILABLE",
+                    "cleanup service is not configured",
+                    retryable=True,
+                ),
+            )
+        else:
+            result = await cleanup.execute(delivery.task_id, delivery.delivery_sequence, now)
+    else:
+        result = await ingestion.execute(delivery.task_id, delivery.delivery_sequence, now)
     if not result.claimed:
         await queue.ack(delivery)
         emit_event(

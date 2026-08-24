@@ -30,6 +30,8 @@ from rag_mvp.domain.models import (
     Task,
 )
 from rag_mvp.ports.metadata import (
+    DeleteDocumentRequest,
+    DeleteDocumentResult,
     RetryJobRequest,
     RetryJobResult,
     SubmitIngestion,
@@ -57,6 +59,7 @@ class FakeMetadataRepository:
         self.chunk_manifests: dict[tuple[str, int], tuple[Chunk, ...]] = {}
         self._idempotency: dict[str, SubmitResult] = {}
         self._retry_idempotency: dict[str, RetryJobResult] = {}
+        self._delete_idempotency: dict[str, DeleteDocumentResult] = {}
         self.fail_next_submit = False
 
     async def create_dataset(self, dataset: Dataset) -> Dataset:
@@ -241,7 +244,9 @@ class FakeMetadataRepository:
                 return None
             job = self.jobs[task.job_id]
             document = self.documents[job.document_id]
-            if job.cancel_requested_at is not None or document.status is DocumentStatus.DELETED:
+            if job.cancel_requested_at is not None or (
+                document.status is DocumentStatus.DELETED and task.type is TaskType.INGEST_DOCUMENT
+            ):
                 return None
             claimed_task = replace(
                 task,
@@ -417,6 +422,121 @@ class FakeMetadataRepository:
             result = RetryJobResult(job_id, task_id, reused=False)
             self._retry_idempotency[request.idempotency_key] = result
             return result
+
+    async def delete_document(self, request: DeleteDocumentRequest) -> DeleteDocumentResult:
+        async with self._lock:
+            repeated = self._delete_idempotency.get(request.idempotency_key)
+            if repeated is not None:
+                return replace(repeated, reused=True)
+            document = self.documents.get(request.document_id)
+            if document is None:
+                raise DomainError(DomainFailure("DOCUMENT_NOT_FOUND", "document does not exist"))
+            if document.status is DocumentStatus.DELETED:
+                raise DomainError(
+                    DomainFailure("DOCUMENT_ALREADY_DELETED", "document is already deleted")
+                )
+
+            deleted_document = replace(
+                document,
+                status=DocumentStatus.DELETED,
+                lifecycle_generation=document.lifecycle_generation + 1,
+            )
+            self.documents[document.id] = deleted_document
+            for key, fingerprint in self.fingerprints.items():
+                if fingerprint.document_id == document.id:
+                    self.fingerprints[key] = replace(fingerprint, state=FingerprintState.RELEASED)
+
+            cancelled_failure = DomainFailure(
+                "DOCUMENT_DELETED", "document was deleted before ingestion completed"
+            )
+            cancelled_task_ids: set[str] = set()
+            for task_id, task in tuple(self.tasks.items()):
+                job = self.jobs[task.job_id]
+                if (
+                    job.document_id == document.id
+                    and task.type is TaskType.INGEST_DOCUMENT
+                    and task.status in {TaskStatus.PENDING, TaskStatus.RUNNING}
+                ):
+                    self.tasks[task_id] = replace(
+                        task, status=TaskStatus.CANCELLED, error=cancelled_failure
+                    )
+                    self.jobs[job.id] = replace(
+                        job, status=JobStatus.CANCELLED, error=cancelled_failure
+                    )
+                    cancelled_task_ids.add(task_id)
+            for event_id, event in tuple(self.outbox.items()):
+                if event.task_id in cancelled_task_ids and event.status in {
+                    OutboxStatus.WAITING_OBJECT,
+                    OutboxStatus.READY_TO_PUBLISH,
+                }:
+                    self.outbox[event_id] = replace(event, status=OutboxStatus.CANCELLED)
+
+            job_id = new_id()
+            task_id = new_id()
+            job = Job(
+                id=job_id,
+                type=JobType.DELETE_DOCUMENT,
+                document_id=document.id,
+                config_digest="0" * 64,
+                index_version=document.active_version or 1,
+                document_generation=deleted_document.lifecycle_generation,
+                status=JobStatus.PENDING,
+                progress=0.0,
+                created_at=request.now,
+            )
+            task = Task(
+                id=task_id,
+                job_id=job_id,
+                type=TaskType.CLEANUP_DOCUMENT,
+                status=TaskStatus.PENDING,
+                attempt=0,
+                last_delivery_sequence=None,
+                checkpoint=None,
+                created_at=request.now,
+            )
+            event = OutboxEvent(
+                id=new_id(),
+                task_id=task_id,
+                status=OutboxStatus.READY_TO_PUBLISH,
+                attempt=0,
+                staging_key=None,
+                created_at=request.now,
+            )
+            self.jobs[job_id] = job
+            self.tasks[task_id] = task
+            self.outbox[event.id] = event
+            result = DeleteDocumentResult(document.id, job_id, task_id, reused=False)
+            self._delete_idempotency[request.idempotency_key] = result
+            return result
+
+    async def complete_cleanup(self, task_id: str, now: datetime) -> bool:
+        del now
+        async with self._lock:
+            task = self.tasks.get(task_id)
+            if (
+                task is None
+                or task.status is not TaskStatus.RUNNING
+                or task.type is not TaskType.CLEANUP_DOCUMENT
+            ):
+                return False
+            job = self.jobs[task.job_id]
+            document = self.documents[job.document_id]
+            if (
+                document.status is not DocumentStatus.DELETED
+                or document.lifecycle_generation != job.document_generation
+            ):
+                return False
+            self.chunk_manifests = {
+                key: chunks for key, chunks in self.chunk_manifests.items() if key[0] != document.id
+            }
+            self.index_builds = {
+                key: build for key, build in self.index_builds.items() if key[0] != document.id
+            }
+            self.tasks[task.id] = replace(
+                task, status=TaskStatus.SUCCEEDED, checkpoint="cleanup_complete"
+            )
+            self.jobs[job.id] = replace(job, status=JobStatus.SUCCEEDED, progress=1.0)
+            return True
 
     async def visible_document_versions(self, document_ids: Sequence[str]) -> Mapping[str, int]:
         return {

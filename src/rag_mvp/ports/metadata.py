@@ -54,6 +54,21 @@ class RetryJobResult:
     reused: bool
 
 
+@dataclass(frozen=True, slots=True)
+class DeleteDocumentRequest:
+    idempotency_key: str
+    document_id: str
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteDocumentResult:
+    document_id: str
+    job_id: str
+    task_id: str
+    reused: bool
+
+
 class MetadataRepository(Protocol):
     """Persist authoritative RAG metadata and conditional state changes."""
 
@@ -90,5 +105,9 @@ class MetadataRepository(Protocol):
     async def fail_task(self, task_id: str, failure: DomainFailure, now: datetime) -> bool: ...
 
     async def retry_job(self, request: RetryJobRequest) -> RetryJobResult: ...
+
+    async def delete_document(self, request: DeleteDocumentRequest) -> DeleteDocumentResult: ...
+
+    async def complete_cleanup(self, task_id: str, now: datetime) -> bool: ...
 
     async def visible_document_versions(self, document_ids: Sequence[str]) -> Mapping[str, int]: ...
