@@ -38,7 +38,7 @@
 - Produces: `generated_files_match(checked_in: Path, regenerated: Path) -> bool`
 - Preserves: `scripts/check_generated.py` CLI exit code and existing `GENERATED_FILES`
 
-- [ ] **Step 1: Write the failing line-ending regression tests**
+- [x] **Step 1: Write the failing line-ending regression tests**
 
 ```python
 def test_generated_comparison_ignores_only_line_endings(tmp_path: Path) -> None:
@@ -57,13 +57,13 @@ def test_generated_comparison_rejects_content_changes(tmp_path: Path) -> None:
     assert not generated_files_match(checked, regenerated)
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest tests/unit/test_generated_comparison.py -q`
 
 Expected: collection/import fails because `generated_files_match` does not exist.
 
-- [ ] **Step 3: Implement normalized comparison and LF attributes**
+- [x] **Step 3: Implement normalized comparison and LF attributes**
 
 ```python
 def normalized_generated_text(path: Path) -> str:
@@ -83,7 +83,7 @@ scripts/check_generated.py text eol=lf
 src/rag_mvp/rpc/generated/* text eol=lf
 ```
 
-- [ ] **Step 4: Verify GREEN and no weakened content check**
+- [x] **Step 4: Verify GREEN and no weakened content check**
 
 Run:
 
@@ -96,10 +96,10 @@ uv run mypy scripts
 
 Expected: all commands exit 0 on the current CRLF checkout.
 
-- [ ] **Step 5: Update `tests/TEST.md` and commit**
+- [x] **Step 5: Update `tests/TEST.md` and commit**
 
 ```powershell
-git add .gitattributes scripts/check_generated.py tests/unit/test_generated_comparison.py tests/TEST.md
+git add .gitattributes scripts/check_generated.py tests/unit/test_generated_comparison.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "fix(build): 修复跨平台 protobuf 同步检查"
 ```
 
@@ -171,7 +171,7 @@ uv run mypy src scripts
 - [ ] **Step 5: Update test index and commit**
 
 ```powershell
-git add pyproject.toml uv.lock tests/unit/test_config.py tests/TEST.md
+git add pyproject.toml uv.lock tests/unit/test_config.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "build(deps): 增加真实 RAG 基础设施依赖"
 ```
 
@@ -260,7 +260,7 @@ uv run mypy src
 - [ ] **Step 5: Commit only configuration/domain changes**
 
 ```powershell
-git add .env.example src/rag_mvp/config.py src/rag_mvp/domain/models.py src/rag_mvp/application/document_service.py tests/unit/test_config.py tests/unit/domain/test_models.py tests/unit/application/test_document_service.py tests/fakes/container.py tests/TEST.md
+git add .env.example src/rag_mvp/config.py src/rag_mvp/domain/models.py src/rag_mvp/application/document_service.py tests/unit/test_config.py tests/unit/domain/test_models.py tests/unit/application/test_document_service.py tests/fakes/container.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "feat(config): 固定租户与 embedding 运行配置"
 ```
 
@@ -337,7 +337,7 @@ uv run pytest tests/unit/test_import_boundaries.py -q
 - [ ] **Step 6: Update test index and commit**
 
 ```powershell
-git add alembic.ini migrations/env.py migrations/script.py.mako migrations/versions/0001_core_schema.py pyproject.toml src/rag_mvp/adapters/metadata/tables.py src/rag_mvp/adapters/metadata/database.py src/rag_mvp/adapters/metadata/migrate.py tests/unit/adapters/test_mysql_schema.py tests/integration/conftest.py tests/integration/test_mysql_migrations.py tests/TEST.md
+git add alembic.ini migrations/env.py migrations/script.py.mako migrations/versions/0001_core_schema.py pyproject.toml src/rag_mvp/adapters/metadata/tables.py src/rag_mvp/adapters/metadata/database.py src/rag_mvp/adapters/metadata/migrate.py tests/unit/adapters/test_mysql_schema.py tests/integration/conftest.py tests/integration/test_mysql_migrations.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "feat(mysql): 建立核心 schema 与迁移"
 ```
 
@@ -395,7 +395,7 @@ uv run mypy src
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add src/rag_mvp/adapters/metadata/mysql.py src/rag_mvp/adapters/metadata/mappers.py tests/integration/test_mysql_submission.py tests/contract/test_metadata_repository_contract.py tests/TEST.md
+git add src/rag_mvp/adapters/metadata/mysql.py src/rag_mvp/adapters/metadata/mappers.py tests/integration/test_mysql_submission.py tests/contract/test_metadata_repository_contract.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "feat(mysql): 实现上传去重与原子任务事务"
 ```
 
@@ -450,7 +450,7 @@ uv run mypy src
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add src/rag_mvp/adapters/metadata/mysql.py tests/integration/test_mysql_outbox_worker.py tests/contract/test_metadata_repository_contract.py tests/TEST.md
+git add src/rag_mvp/adapters/metadata/mysql.py tests/integration/test_mysql_outbox_worker.py tests/contract/test_metadata_repository_contract.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "feat(mysql): 实现 Outbox 与 Worker 条件状态"
 ```
 
@@ -504,7 +504,7 @@ uv run mypy src
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add src/rag_mvp/adapters/metadata/mysql.py tests/integration/test_mysql_lifecycle.py tests/integration/test_mysql_concurrency.py tests/contract/test_retry_job_contract.py tests/contract/test_delete_document_contract.py tests/TEST.md
+git add src/rag_mvp/adapters/metadata/mysql.py tests/integration/test_mysql_lifecycle.py tests/integration/test_mysql_concurrency.py tests/contract/test_retry_job_contract.py tests/contract/test_delete_document_contract.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "feat(mysql): 实现文档生命周期与并发栅栏"
 ```
 
@@ -562,7 +562,7 @@ Expected: single, batch, finite 1024-dimension and Chinese relative-similarity t
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add src/rag_mvp/adapters/model/openai_compatible.py tests/unit/adapters/test_openai_compatible_model.py tests/integration/test_real_embedding_model.py tests/contract/test_model_gateway_contract.py tests/TEST.md
+git add src/rag_mvp/adapters/model/openai_compatible.py tests/unit/adapters/test_openai_compatible_model.py tests/integration/test_real_embedding_model.py tests/contract/test_model_gateway_contract.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "feat(model): 接入真实 OpenAI 兼容 embedding"
 ```
 
@@ -610,7 +610,7 @@ Assert idempotent upsert, Dense relevant hit, BM25 exact term, Dataset isolation
 ```powershell
 uv run ruff check src/rag_mvp/adapters/search_engine tests/unit/adapters tests/integration/test_elasticsearch_adapter.py
 uv run mypy src
-git add src/rag_mvp/adapters/search_engine/elasticsearch.py src/rag_mvp/adapters/search_engine/mapping.py tests/unit/adapters/test_elasticsearch_mapping.py tests/integration/test_elasticsearch_adapter.py tests/contract/test_search_engine_contract.py tests/TEST.md
+git add src/rag_mvp/adapters/search_engine/elasticsearch.py src/rag_mvp/adapters/search_engine/mapping.py tests/unit/adapters/test_elasticsearch_mapping.py tests/integration/test_elasticsearch_adapter.py tests/contract/test_search_engine_contract.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "feat(search): 实现 ES 稠密与 BM25 检索"
 ```
 
@@ -660,7 +660,7 @@ Assert durable redelivery after missing ACK, NAK delay, ACK removal and duplicat
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add src/rag_mvp/adapters/message_queue/nats_jetstream.py tests/unit/adapters/test_nats_delivery_mapping.py tests/integration/test_nats_jetstream_adapter.py tests/contract/test_task_queue_contract.py tests/TEST.md
+git add src/rag_mvp/adapters/message_queue/nats_jetstream.py tests/unit/adapters/test_nats_delivery_mapping.py tests/integration/test_nats_jetstream_adapter.py tests/contract/test_task_queue_contract.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "feat(queue): 实现 JetStream 持久任务队列"
 ```
 
@@ -716,7 +716,7 @@ uv run mypy src
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add src/rag_mvp/bootstrap/container.py src/rag_mvp/rpc/server.py src/rag_mvp/ingestion/worker.py src/rag_mvp/outbox/main.py src/rag_mvp/outbox/finalizer.py src/rag_mvp/outbox/relay.py src/rag_mvp/outbox/sweeper.py src/rag_mvp/dev/cli.py tests/unit/test_container_roles.py tests/unit/test_process_lifecycle.py tests/TEST.md
+git add src/rag_mvp/bootstrap/container.py src/rag_mvp/rpc/server.py src/rag_mvp/ingestion/worker.py src/rag_mvp/outbox/main.py src/rag_mvp/outbox/finalizer.py src/rag_mvp/outbox/relay.py src/rag_mvp/outbox/sweeper.py src/rag_mvp/dev/cli.py tests/unit/test_container_roles.py tests/unit/test_process_lifecycle.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "feat(bootstrap): 装配真实 RAG 进程依赖"
 ```
 
@@ -770,7 +770,7 @@ Assert `/app/tests` and `/app/.env` do not exist. Pipe `docker compose logs --no
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add Dockerfile .dockerignore docker-compose.yml scripts/docker_healthcheck.py scripts/check_secret_leaks.py tests/contract/test_container_artifacts.py docs/README.md docs/testing-guide.md tests/TEST.md
+git add Dockerfile .dockerignore docker-compose.yml scripts/docker_healthcheck.py scripts/check_secret_leaks.py tests/contract/test_container_artifacts.py docs/README.md docs/testing-guide.md tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "build(docker): 建立真实 RAG Compose 拓扑"
 ```
 
@@ -818,7 +818,7 @@ Run the E2E twice. Assert the second run uses fresh idempotency keys but does no
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add tests/e2e/conftest.py tests/e2e/test_real_upload_ingest_retrieve.py tests/fixtures/documents/knowledge.txt tests/fixtures/documents/guide.md tests/fixtures/documents/sample.py tests/fixtures/documents/manual.pdf scripts/build_test_fixtures.py tests/TEST.md docs/testing-guide.md
+git add tests/e2e/conftest.py tests/e2e/test_real_upload_ingest_retrieve.py tests/fixtures/documents/knowledge.txt tests/fixtures/documents/guide.md tests/fixtures/documents/sample.py tests/fixtures/documents/manual.pdf scripts/build_test_fixtures.py tests/TEST.md docs/testing-guide.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "test(e2e): 验证真实模型四格式 RAG 闭环"
 ```
 
@@ -877,7 +877,7 @@ Expected: all scenarios converge; no Document resurrection, duplicate active ret
 - [ ] **Step 6: Update T1～T25 real evidence and commit**
 
 ```powershell
-git add src/rag_mvp/ingestion/failpoints.py src/rag_mvp/config.py src/rag_mvp/bootstrap/container.py tests/resilience/docker/conftest.py tests/resilience/docker/test_worker_kill_recovery.py tests/resilience/docker/test_relay_nats_recovery.py tests/resilience/docker/test_real_concurrency_fences.py tests/unit/ingestion/test_failpoints.py tests/fixtures/reliability_matrix.json tests/TEST.md docs/testing-guide.md
+git add src/rag_mvp/ingestion/failpoints.py src/rag_mvp/config.py src/rag_mvp/bootstrap/container.py tests/resilience/docker/conftest.py tests/resilience/docker/test_worker_kill_recovery.py tests/resilience/docker/test_relay_nats_recovery.py tests/resilience/docker/test_real_concurrency_fences.py tests/unit/ingestion/test_failpoints.py tests/fixtures/reliability_matrix.json tests/TEST.md docs/testing-guide.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "test(resilience): 验证 Docker 强杀与真实投递恢复"
 ```
 

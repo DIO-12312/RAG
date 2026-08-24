@@ -1,0 +1,4 @@
+*.proto text eol=lf
+scripts/generate_proto.py text eol=lf
+scripts/check_generated.py text eol=lf
+src/rag_mvp/rpc/generated/* text eol=lf

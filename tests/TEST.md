@@ -82,6 +82,7 @@ tests/
    │  ├─ test_provenance.py
    │  └─ test_rerank.py
    ├─ test_config.py
+   ├─ test_generated_comparison.py
    ├─ test_import_boundaries.py
    ├─ test_observability.py
    └─ test_process_lifecycle.py
@@ -155,6 +156,8 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_production_rejects_grpc_reflection` | 生产环境禁止 gRPC Reflection。 |
 | 同上 | `test_production_rejects_development_mysql_credentials` | 生产环境拒绝开发 MySQL 凭据。 |
 | 同上 | `test_test_markers_are_registered` | pytest 标记已在配置中注册。 |
+| `test_generated_comparison.py` | `test_generated_comparison_ignores_only_line_endings` | protobuf 生成物同步检查忽略 Windows/Unix 换行符差异。 |
+| 同上 | `test_generated_comparison_rejects_content_changes` | protobuf 生成物同步检查仍拒绝真实文本变化。 |
 | `test_import_boundaries.py` | `test_final_layer_packages_exist` | 规定的分层包存在。 |
 | 同上 | `test_source_imports_respect_layer_boundaries` | source import 遵守 domain/application/adapter 分层。 |
 | 同上 | `test_production_source_never_imports_test_fakes` | 生产源码不得导入 `tests/fakes`。 |
