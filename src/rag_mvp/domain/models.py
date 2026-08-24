@@ -42,11 +42,13 @@ class Dataset:
     embedding_dimension: int
     created_at: datetime
     search_schema_version: int = 1
+    tenant_id: str = "default_tenant"
 
     def __post_init__(self) -> None:
         _require_text(self.id, "id")
         _require_text(self.name, "name")
         _require_text(self.embedding_model, "embedding_model")
+        _require_text(self.tenant_id, "tenant_id")
         if self.embedding_dimension < 1:
             raise ValueError("embedding_dimension must be at least 1")
         if self.search_schema_version < 1:

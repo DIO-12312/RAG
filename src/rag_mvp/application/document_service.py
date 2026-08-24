@@ -33,12 +33,26 @@ class DocumentService:
         storage: ObjectStorage,
         *,
         max_upload_bytes: int,
+        default_tenant_id: str = "default_tenant",
+        embedding_model: str | None = None,
+        embedding_dimension: int | None = None,
     ) -> None:
         if max_upload_bytes < 1:
             raise ValueError("max_upload_bytes must be at least 1")
         self._metadata = metadata
         self._storage = storage
         self._max_upload_bytes = max_upload_bytes
+        if not default_tenant_id.strip():
+            raise ValueError("default_tenant_id must not be empty")
+        if (embedding_model is None) != (embedding_dimension is None):
+            raise ValueError("embedding model and dimension must be configured together")
+        if embedding_model is not None and not embedding_model.strip():
+            raise ValueError("embedding_model must not be empty")
+        if embedding_dimension is not None and embedding_dimension < 1:
+            raise ValueError("embedding_dimension must be at least 1")
+        self._default_tenant_id = default_tenant_id
+        self._embedding_model = embedding_model
+        self._embedding_dimension = embedding_dimension
 
     async def create_dataset(self, command: CreateDatasetCommand) -> CreateDatasetResult:
         started_at = perf_counter()
@@ -55,6 +69,16 @@ class DocumentService:
                     "embedding model and positive dimension are required",
                 )
             )
+        if self._embedding_model is not None and (
+            command.embedding_model != self._embedding_model
+            or command.embedding_dimension != self._embedding_dimension
+        ):
+            raise DomainError(
+                DomainFailure(
+                    "EMBEDDING_CONFIG_MISMATCH",
+                    "dataset embedding configuration must match the running model gateway",
+                )
+            )
         dataset_id = command.dataset_id or str(
             uuid.uuid5(uuid.NAMESPACE_URL, f"rag-dataset:{command.idempotency_key}")
         )
@@ -65,6 +89,7 @@ class DocumentService:
                 embedding_model=command.embedding_model,
                 embedding_dimension=command.embedding_dimension,
                 created_at=command.now,
+                tenant_id=self._default_tenant_id,
             )
         )
         result = CreateDatasetResult(

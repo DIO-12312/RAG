@@ -39,7 +39,14 @@ async def _service(
 ) -> tuple[DocumentService, FakeMetadataRepository, FakeObjectStorage]:
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()
-    service = DocumentService(repository, storage, max_upload_bytes=max_upload_bytes)
+    service = DocumentService(
+        repository,
+        storage,
+        max_upload_bytes=max_upload_bytes,
+        default_tenant_id="default_tenant",
+        embedding_model="fake-embedding",
+        embedding_dimension=8,
+    )
     await service.create_dataset(
         CreateDatasetCommand(
             request_id="trace-create",
@@ -52,6 +59,32 @@ async def _service(
         )
     )
     return service, repository, storage
+
+
+@pytest.mark.asyncio
+async def test_create_dataset_rejects_runtime_embedding_mismatch() -> None:
+    service = DocumentService(
+        FakeMetadataRepository(),
+        FakeObjectStorage(),
+        max_upload_bytes=1024,
+        default_tenant_id="default_tenant",
+        embedding_model="production-embedding",
+        embedding_dimension=1024,
+    )
+
+    with pytest.raises(DomainError) as error:
+        await service.create_dataset(
+            CreateDatasetCommand(
+                request_id="trace-create",
+                idempotency_key="create-mismatch",
+                name="Docs",
+                embedding_model="other-embedding",
+                embedding_dimension=768,
+                now=datetime.now(UTC),
+            )
+        )
+
+    assert error.value.failure.code == "EMBEDDING_CONFIG_MISMATCH"
 
 
 @pytest.mark.asyncio

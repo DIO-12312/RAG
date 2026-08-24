@@ -199,7 +199,7 @@ git commit -m "build(deps): 增加真实 RAG 基础设施依赖"
 - Changes: `Dataset(..., tenant_id: str)`
 - Changes: `DocumentService(..., default_tenant_id: str, embedding_model: str, embedding_dimension: int)`
 
-- [ ] **Step 1: Write failing config and Dataset tests**
+- [x] **Step 1: Write failing config and Dataset tests**
 
 Tests must assert:
 
@@ -217,7 +217,7 @@ assert Dataset(..., tenant_id="default_tenant").tenant_id == "default_tenant"
 
 An otherwise valid `Settings(_env_file=None)` without model variables must remain constructible for Outbox and pure unit tests, while `settings.require_embedding_profile()` must fail with a stable configuration error. `DocumentService.create_dataset` must reject a requested model/dimension mismatch with `EMBEDDING_CONFIG_MISMATCH`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -227,7 +227,7 @@ uv run pytest tests/unit/test_config.py tests/unit/domain/test_models.py tests/u
 
 Expected: missing Settings fields, missing `tenant_id`, and old DocumentService constructor fail.
 
-- [ ] **Step 3: Implement validated settings and domain fields**
+- [x] **Step 3: Implement validated settings and domain fields**
 
 Exact production defaults/constraints:
 
@@ -247,7 +247,7 @@ nats_max_deliver: int = Field(default=3, ge=1)
 
 Set `populate_by_name=True` in `SettingsConfigDict` so explicit test construction and environment aliases both work. `require_embedding_profile()` rejects partial/missing provider config and is called only by Server/Worker builders; Outbox never receives the API Key. `SecretStr` must never be interpolated by `repr(settings)` or structured logs. Add `EMBEDDING_MODEL_DIMENSION=` and non-secret tuning keys to `.env.example`; do not edit or stage `.env`.
 
-- [ ] **Step 4: Verify all Fake tests remain deterministic**
+- [x] **Step 4: Verify all Fake tests remain deterministic**
 
 Run:
 
@@ -257,7 +257,7 @@ uv run ruff check src tests
 uv run mypy src
 ```
 
-- [ ] **Step 5: Commit only configuration/domain changes**
+- [x] **Step 5: Commit only configuration/domain changes**
 
 ```powershell
 git add .env.example src/rag_mvp/config.py src/rag_mvp/domain/models.py src/rag_mvp/application/document_service.py tests/unit/test_config.py tests/unit/domain/test_models.py tests/unit/application/test_document_service.py tests/fakes/container.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md

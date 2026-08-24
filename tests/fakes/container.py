@@ -44,7 +44,14 @@ class MockFunctionalHarness:
         queue = FakeTaskQueue()
         model = FakeModelGateway(8)
         search = FakeSearchEngine()
-        documents = DocumentService(metadata, storage, max_upload_bytes=4 * 1024 * 1024)
+        documents = DocumentService(
+            metadata,
+            storage,
+            max_upload_bytes=4 * 1024 * 1024,
+            default_tenant_id="default_tenant",
+            embedding_model="fake",
+            embedding_dimension=8,
+        )
         ingestion = IngestionService(
             metadata,
             IngestionPipeline(

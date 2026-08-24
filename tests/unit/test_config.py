@@ -56,6 +56,37 @@ def test_settings_can_be_constructed_explicitly_for_tests(tmp_path: Path) -> Non
     assert settings.grpc_address == "127.0.0.1:50052"
 
 
+def test_settings_builds_a_normalized_secret_embedding_profile() -> None:
+    api_key = "integration-secret-value"
+    settings = Settings(
+        _env_file=None,
+        embedding_model_url="https://model.example/v1/",
+        embedding_model_name="embedding-model",
+        embedding_model_api_key=api_key,
+        embedding_model_dimension=1024,
+    )
+
+    profile = settings.require_embedding_profile()
+
+    assert profile.endpoint == "https://model.example/v1/embeddings"
+    assert profile.model == "embedding-model"
+    assert profile.dimension == 1024
+    assert profile.api_key.get_secret_value() == api_key
+    assert api_key not in repr(settings)
+    assert api_key not in repr(profile)
+
+
+def test_embedding_profile_rejects_missing_or_partial_configuration() -> None:
+    with pytest.raises(ValueError, match="embedding model configuration"):
+        Settings(_env_file=None).require_embedding_profile()
+
+    with pytest.raises(ValueError, match="embedding model configuration"):
+        Settings(
+            _env_file=None,
+            embedding_model_url="https://model.example/v1",
+        ).require_embedding_profile()
+
+
 def test_production_rejects_grpc_reflection() -> None:
     with pytest.raises(ValidationError, match="reflection"):
         Settings(

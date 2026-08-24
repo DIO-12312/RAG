@@ -19,6 +19,19 @@ def test_dataset_requires_embedding_dimension_and_model() -> None:
         )
 
 
+def test_dataset_preserves_tenant_boundary() -> None:
+    dataset = Dataset(
+        id="dataset-1",
+        name="Docs",
+        embedding_model="model",
+        embedding_dimension=1024,
+        created_at=datetime.now(UTC),
+        tenant_id="default_tenant",
+    )
+
+    assert dataset.tenant_id == "default_tenant"
+
+
 def test_document_versions_and_generation_are_non_negative() -> None:
     with pytest.raises(ValueError, match="next_index_version"):
         Document(

@@ -104,7 +104,8 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
-| `application/test_document_service.py` | `test_submit_writes_staging_and_atomically_creates_waiting_work` | 上传先写 staging，再原子创建 Document、Job、Task 和 WAITING Outbox。 |
+| `application/test_document_service.py` | `test_create_dataset_rejects_runtime_embedding_mismatch` | Dataset 声明的 Embedding 模型或维度与运行配置不一致时返回稳定错误。 |
+| 同上 | `test_submit_writes_staging_and_atomically_creates_waiting_work` | 上传先写 staging，再原子创建 Document、Job、Task 和 WAITING Outbox。 |
 | 同上 | `test_same_file_different_key_reuses_canonical_job_and_cleans_loser_staging` | 相同内容不同幂等键复用 canonical Job，并删除未被引用的 staging。 |
 | 同上 | `test_same_idempotency_key_with_different_bytes_is_rejected_without_overwrite` | 同一幂等键不同字节被稳定拒绝，已有对象不被覆盖。 |
 | 同上 | `test_sha_and_size_validation_happen_before_metadata_creation` | 大小和 SHA 校验必须先于元数据创建。 |
@@ -119,6 +120,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_chunk_id_matches_ragflow_xxhash64_rule` | `chunk_id` 遵循 RAGFlow xxHash64 规则。 |
 | 同上 | `test_physical_es_id_preserves_document_version_and_chunk` | ES 物理 ID 同时包含 document、version、chunk。 |
 | `domain/test_models.py` | `test_dataset_requires_embedding_dimension_and_model` | Dataset 必须具有 embedding 模型及维度。 |
+| 同上 | `test_dataset_preserves_tenant_boundary` | Dataset 显式保留所属 tenant，防止后续持久化丢失租户边界。 |
 | 同上 | `test_document_versions_and_generation_are_non_negative` | Document 版本号和 generation 不允许为负。 |
 | 同上 | `test_job_progress_is_normalized` | Job 进度被规范化到有效范围。 |
 | 同上 | `test_task_delivery_counters_cannot_be_negative` | Task 投递计数不允许为负。 |
@@ -153,6 +155,8 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_rerank_rejects_invalid_top_n` | 非法 Top-N 参数被拒绝。 |
 | `test_config.py` | `test_package_import_has_no_runtime_side_effects` | 包导入不建立运行时外部连接。 |
 | 同上 | `test_settings_can_be_constructed_explicitly_for_tests` | 测试可显式构造 Settings。 |
+| 同上 | `test_settings_builds_a_normalized_secret_embedding_profile` | 完整模型配置生成规范化 `/embeddings` endpoint，并在对象表示中隐藏 API Key。 |
+| 同上 | `test_embedding_profile_rejects_missing_or_partial_configuration` | Server/Worker 获取模型配置时拒绝缺失或不完整的 provider 设置。 |
 | 同上 | `test_production_rejects_grpc_reflection` | 生产环境禁止 gRPC Reflection。 |
 | 同上 | `test_production_rejects_development_mysql_credentials` | 生产环境拒绝开发 MySQL 凭据。 |
 | 同上 | `test_test_markers_are_registered` | pytest 的快速、真实模型、E2E、Mock/Docker 恢复和评测标记均已注册。 |
