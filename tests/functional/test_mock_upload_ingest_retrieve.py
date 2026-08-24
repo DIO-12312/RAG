@@ -119,5 +119,5 @@ async def test_mock_grpc_upload_async_ingest_and_dense_retrieve(tmp_path) -> Non
         cancel = await stub.CancelJob(rag_service_pb2.CancelJobRequest())
         delete = await stub.DeleteDocument(rag_service_pb2.DeleteDocumentRequest())
         assert retry.error.code == "IDEMPOTENCY_KEY_REQUIRED"
-        assert cancel.error.code == "FEATURE_NOT_AVAILABLE"
+        assert cancel.error.code == "IDEMPOTENCY_KEY_REQUIRED"
         assert delete.error.code == "IDEMPOTENCY_KEY_REQUIRED"

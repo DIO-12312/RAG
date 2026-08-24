@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from rag_mvp.application.dto import GetJobQuery, JobView, RetryJobCommand
+from rag_mvp.application.dto import CancelJobCommand, GetJobQuery, JobView, RetryJobCommand
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.models import Job, Task
-from rag_mvp.ports.metadata import MetadataRepository, RetryJobRequest
+from rag_mvp.ports.metadata import CancelJobRequest, MetadataRepository, RetryJobRequest
 
 
 class JobService:
@@ -48,6 +48,24 @@ class JobService:
         if job is None or task is None:
             raise DomainError(
                 DomainFailure("RETRY_STATE_NOT_FOUND", "retry state is unavailable", retryable=True)
+            )
+        return self._view(job, task)
+
+    async def cancel_job(self, command: CancelJobCommand) -> JobView:
+        if not command.idempotency_key:
+            raise DomainError(
+                DomainFailure("IDEMPOTENCY_KEY_REQUIRED", "idempotency key is required")
+            )
+        cancelled = await self._metadata.cancel_job(
+            CancelJobRequest(command.idempotency_key, command.job_id, command.now)
+        )
+        job = await self._metadata.get_job(cancelled.job_id)
+        task = await self._metadata.get_task_for_job(cancelled.job_id)
+        if job is None or task is None:
+            raise DomainError(
+                DomainFailure(
+                    "CANCEL_STATE_NOT_FOUND", "cancel state is unavailable", retryable=True
+                )
             )
         return self._view(job, task)
 

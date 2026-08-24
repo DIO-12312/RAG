@@ -30,6 +30,8 @@ from rag_mvp.domain.models import (
     Task,
 )
 from rag_mvp.ports.metadata import (
+    CancelJobRequest,
+    CancelJobResult,
     DeleteDocumentRequest,
     DeleteDocumentResult,
     RetryJobRequest,
@@ -60,6 +62,7 @@ class FakeMetadataRepository:
         self._idempotency: dict[str, SubmitResult] = {}
         self._retry_idempotency: dict[str, RetryJobResult] = {}
         self._delete_idempotency: dict[str, DeleteDocumentResult] = {}
+        self._cancel_idempotency: dict[str, CancelJobResult] = {}
         self.fail_next_submit = False
 
     async def create_dataset(self, dataset: Dataset) -> Dataset:
@@ -347,9 +350,13 @@ class FakeMetadataRepository:
                 return False
             job = self.jobs[task.job_id]
             document = self.documents[job.document_id]
+            if job.cancel_requested_at is not None:
+                failure = DomainFailure("JOB_CANCELLED", "ingestion was cancelled")
+                self.tasks[task.id] = replace(task, status=TaskStatus.CANCELLED, error=failure)
+                self.jobs[job.id] = replace(job, status=JobStatus.CANCELLED, error=failure)
+                return False
             if (
-                job.cancel_requested_at is not None
-                or document.status is DocumentStatus.DELETED
+                document.status is DocumentStatus.DELETED
                 or document.lifecycle_generation != job.document_generation
             ):
                 return False
@@ -495,6 +502,46 @@ class FakeMetadataRepository:
                     break
             result = RetryJobResult(job_id, task_id, reused=False)
             self._retry_idempotency[request.idempotency_key] = result
+            return result
+
+    async def cancel_job(self, request: CancelJobRequest) -> CancelJobResult:
+        async with self._lock:
+            repeated = self._cancel_idempotency.get(request.idempotency_key)
+            if repeated is not None:
+                return replace(repeated, reused=True)
+            job = self.jobs.get(request.job_id)
+            if job is None:
+                raise DomainError(DomainFailure("JOB_NOT_FOUND", "job does not exist"))
+            if job.type is not JobType.INGEST_DOCUMENT:
+                raise DomainError(
+                    DomainFailure(
+                        "JOB_TYPE_NOT_CANCELLABLE", "only ingestion jobs can be cancelled"
+                    )
+                )
+            if job.status in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}:
+                raise DomainError(
+                    DomainFailure("JOB_ALREADY_TERMINAL", "terminal jobs cannot be cancelled")
+                )
+            task = next(task for task in self.tasks.values() if task.job_id == job.id)
+            if job.status is JobStatus.PENDING:
+                failure = DomainFailure("JOB_CANCELLED", "ingestion was cancelled")
+                self.jobs[job.id] = replace(
+                    job,
+                    status=JobStatus.CANCELLED,
+                    cancel_requested_at=request.now,
+                    error=failure,
+                )
+                self.tasks[task.id] = replace(task, status=TaskStatus.CANCELLED, error=failure)
+                for event_id, event in tuple(self.outbox.items()):
+                    if event.task_id == task.id and event.status in {
+                        OutboxStatus.WAITING_OBJECT,
+                        OutboxStatus.READY_TO_PUBLISH,
+                    }:
+                        self.outbox[event_id] = replace(event, status=OutboxStatus.CANCELLED)
+            else:
+                self.jobs[job.id] = replace(job, cancel_requested_at=request.now)
+            result = CancelJobResult(job.id, reused=False)
+            self._cancel_idempotency[request.idempotency_key] = result
             return result
 
     async def delete_document(self, request: DeleteDocumentRequest) -> DeleteDocumentResult:

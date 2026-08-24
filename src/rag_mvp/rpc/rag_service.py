@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from rag_mvp.application.document_service import DocumentService
 from rag_mvp.application.dto import (
+    CancelJobCommand,
     CreateDatasetCommand,
     DeleteDocumentCommand,
     GetJobQuery,
@@ -325,7 +326,29 @@ class RagService:
         context: object,
     ) -> rag_service_pb2.CancelJobResponse:
         del context
-        return rag_service_pb2.CancelJobResponse(error=_unavailable(request.context.request_id))
+        if self._jobs is None:
+            return rag_service_pb2.CancelJobResponse(error=_unavailable(request.context.request_id))
+        try:
+            view = await self._jobs.cancel_job(
+                CancelJobCommand(
+                    request_id=request.context.request_id,
+                    idempotency_key=request.context.idempotency_key,
+                    job_id=request.job_id,
+                    now=self._now(),
+                )
+            )
+            return rag_service_pb2.CancelJobResponse(
+                result=rag_service_pb2.CancelJobResult(
+                    job_id=view.job_id,
+                    job_status=_JOB_STATUS[view.status],
+                    task_status=_TASK_STATUS[view.task_status],
+                    cancel_requested=view.cancel_requested,
+                )
+            )
+        except Exception as error:
+            return rag_service_pb2.CancelJobResponse(
+                error=_unexpected(error, request.context.request_id)
+            )
 
     async def Retrieve(
         self,

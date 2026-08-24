@@ -69,6 +69,19 @@ class DeleteDocumentResult:
     reused: bool
 
 
+@dataclass(frozen=True, slots=True)
+class CancelJobRequest:
+    idempotency_key: str
+    job_id: str
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class CancelJobResult:
+    job_id: str
+    reused: bool
+
+
 class MetadataRepository(Protocol):
     """Persist authoritative RAG metadata and conditional state changes."""
 
@@ -115,5 +128,7 @@ class MetadataRepository(Protocol):
     async def delete_document(self, request: DeleteDocumentRequest) -> DeleteDocumentResult: ...
 
     async def complete_cleanup(self, task_id: str, now: datetime) -> bool: ...
+
+    async def cancel_job(self, request: CancelJobRequest) -> CancelJobResult: ...
 
     async def visible_document_versions(self, document_ids: Sequence[str]) -> Mapping[str, int]: ...

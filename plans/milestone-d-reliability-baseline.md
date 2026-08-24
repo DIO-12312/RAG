@@ -1,6 +1,6 @@
 # Milestone D：可靠性基线（Mock Reliability）实施计划
 
-> 状态：实施中（D1～D2 已完成）
+> 状态：实施中（D1～D3 已完成）
 > 范围：在测试专用 Fake ports 上完成 Python 状态机、并发栅栏和故障恢复逻辑；真实 MySQL 行锁/事务、ES/NATS 与 Docker KILL 验收仍明确延期。
 > 对应规格：T1～T25、`SPEC.md` 2.2、2.5、4.4～4.6、5.5
 
@@ -40,6 +40,6 @@
 
 - [x] D1 Finalizer 终态与 staging 恢复通过并提交。
 - [x] D2 并发 fingerprint/Retry/rebuild 唯一性通过并提交。
-- [ ] D3 CancelJob 与已发布 delivery 竞态通过并提交。
+- [x] D3 CancelJob 与已发布 delivery 竞态通过并提交。
 - [ ] D4 generation fence、不可见版本清理和总门禁通过并提交。
 - [ ] 未将 Fake 结果表述为真实 MySQL/ES/NATS/Compose 发布验收。
