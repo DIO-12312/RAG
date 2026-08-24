@@ -70,3 +70,6 @@ temp/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+
+tests/object

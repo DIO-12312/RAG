@@ -1,8 +1,8 @@
 # Milestone A：工程基线实施计划
 
-> 状态：本地实现门禁通过；Docker/CI 发布出口延期，已按 `PLAN.md` 2.1 进入 Mock Functional 开发通道
-> 对应路线图：`PLAN.md` A1～A5  
-> 对应规格：`SPEC.md` 3.1、4.1～4.7、5.1～5.2、5.4、5.7、Phase 0（P0-1～P0-3）  
+> 状态：本地实现门禁通过；Docker/CI 发布出口延期，已按 `docs/PLAN.md` 2.1 进入 Mock Functional 开发通道
+> 对应路线图：`docs/PLAN.md` A1～A5
+> 对应规格：`docs/SPEC.md` 3.1、4.1～4.7、5.1～5.2、5.4、5.7、Phase 0（P0-1～P0-3）
 > 范围：只建立可生成、检查、测试和启动的 Python RAG 工程基线，不实现 Document、Job、Task、Outbox、摄取或检索业务行为。
 
 ## 1. 目标与阶段边界
@@ -22,7 +22,7 @@ Milestone A 完成后，仓库应具备以下能力：
 - 不实现对象上传、Outbox、JetStream 发布/消费、Worker pipeline、Elasticsearch 索引或模型调用。
 - 不实现 HTTP/FastAPI adapter、Chat、Prompt、Citation 编号、Agent Loop、MCP、会话或 SSE。
 - 不开放任何业务 RPC；空服务对格式正确但尚未开放的调用统一返回 `BusinessError(code="FEATURE_NOT_AVAILABLE")`。RPC 传输层异常只用于畸形请求、deadline、不可用和未处理异常。
-- 不实施 `PLAN.md` Milestone B～E。
+- 不实施 `docs/PLAN.md` Milestone B～E。
 
 ## 2. 目标文件树
 
@@ -39,7 +39,7 @@ RAG/
 │  └─ workflows/
 │     └─ quality.yml
 ├─ LICENSE
-├─ README.md
+├─ docs/README.md
 ├─ docker-compose.yml
 ├─ pyproject.toml
 ├─ uv.lock
@@ -135,7 +135,7 @@ RAG/
 - `src/rag_mvp/__init__.py`：包版本常量，不触发配置加载或连接。
 - `.gitignore`：忽略 `.env`、虚拟环境、缓存、覆盖率、构建产物、日志和 `data/`；不得忽略生成的 protobuf Python 文件。
 - `.env.example`：仅含无密钥的本地默认值与占位符。
-- `README.md`：环境安装、proto 生成、质量检查、Compose 和三个进程入口命令。
+- `docs/README.md`：环境安装、proto 生成、质量检查、Compose 和三个进程入口命令。
 - `LICENSE`：Apache-2.0 许可证文本；不得拷贝 RAGFlow 源码。
 - `tests/conftest.py` 及测试层目录。
 
@@ -454,7 +454,7 @@ uv run pytest tests/unit tests/contract
 
 ## 8. 实施顺序与复选框
 
-每项严格执行“失败测试 → 最小实现 → 通过验证”。Docker/CI 发布出口仍待验收，但可按 `PLAN.md` 2.1 继续 Mock Functional 模块：
+每项严格执行“失败测试 → 最小实现 → 通过验证”。Docker/CI 发布出口仍待验收，但可按 `docs/PLAN.md` 2.1 继续 Mock Functional 模块：
 
 - [x] A1.1 创建 `pyproject.toml`、基础测试目录和预期失败的包/config 测试。
 - [x] A1.2 创建包、Settings、README、ignore、license，并生成 `uv.lock`。
@@ -512,4 +512,4 @@ uv run pytest tests/unit tests/contract
 - [x] `git status --short` 已检查；`references/` 未读取、未修改、未暂存。
 - [x] 未实现或暗中引入 Milestone B～E 行为。
 
-本地实现门禁通过后，可依据真实代码结构编写 `plans/milestone-b-internal-alpha.md`；Docker/CI 清单未完成前，Milestone A 不得标记为正式阶段出口已通过。
+本地实现门禁通过后，可依据真实代码结构编写 `docs/plans/milestone-b-internal-alpha.md`；Docker/CI 清单未完成前，Milestone A 不得标记为正式阶段出口已通过。

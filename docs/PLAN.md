@@ -8,19 +8,18 @@
 
 **技术栈：** Python 3.12+、uv、gRPC/Protocol Buffers、MySQL 8/InnoDB、Elasticsearch、NATS JetStream、Ruff、mypy、pytest、Docker Compose；后续 Go 控制面使用 Go module 与同一份 protobuf。
 
-**权威规格：** [`SPEC.md`](SPEC.md)；仓库协作约束见 [`AGENTS.md`](AGENTS.md)。
+**权威规格：** [`SPEC.md`](SPEC.md)；仓库协作约束见 [`../AGENTS.md`](../AGENTS.md)。
 
 ## 1. 文档层次与编号规则
 
 ```text
-SPEC.md
-  └─ 定义最终架构、领域语义、RPC 契约、状态机和测试不变量
-
-PLAN.md
-  └─ 定义交付顺序、Milestone、工作包、依赖和阶段出口
-
-plans/milestone-<x>-*.md
-  └─ 执行前创建；定义逐文件、逐测试、逐提交的实施步骤
+docs/
+├─ SPEC.md
+│  └─ 定义最终架构、领域语义、RPC 契约、状态机和测试不变量
+├─ PLAN.md
+│  └─ 定义交付顺序、Milestone、工作包、依赖和阶段出口
+└─ plans/milestone-<x>-*.md
+   └─ 执行前创建；定义逐文件、逐测试、逐提交的实施步骤
 ```
 
 - SPEC 中继续使用 `Phase 0～4` 和 `P0-1～P4-4`，其编号不变。
@@ -299,10 +298,10 @@ RAG/
 
 ## 11. 详细实施计划规则
 
-每个 Milestone 开始前，在 `plans/` 创建一个独立文件：
+每个 Milestone 开始前，在 `docs/plans/` 创建一个独立文件：
 
 ```text
-plans/
+docs/plans/
 ├─ milestone-a-engineering-baseline.md
 ├─ milestone-b-internal-alpha.md
 ├─ milestone-c-rag-mvp.md
@@ -323,4 +322,12 @@ plans/
 
 ## 12. 当前起点
 
-`plans/milestone-a-engineering-baseline.md` 已实施，快速门禁通过；Docker/CI 发布出口因本机环境限制延期。项目已获准使用 2.1 的 Mock Functional 通道推进 Python RAG：下一步编写并执行 `plans/milestone-b-internal-alpha.md`，本地以真实调用链 + Fake ports 跑通 TXT 异步摄取和 Dense Retrieve；真实基础设施验收继续保留为发布阻塞项。
+截至 2026-08-24，项目已沿 2.1 的无 Docker 开发通道完成以下实现边界：
+
+- Milestone A 的本地工程基线、protobuf 契约、进程骨架与快速质量门禁已完成；Docker healthcheck 和真实 CI 运行仍未验收，因此 A 的正式阶段出口保持未完成。
+- Milestone B 的 Mock Functional 已完成：使用真实 gRPC/application/Outbox/Worker/pipeline 调用链和测试专用 Fake ports 跑通 TXT 异步摄取、Dense Retrieve 与 evidence 返回；真实 MySQL、Elasticsearch、NATS adapter integration 和 Compose E2E 仍未完成，因此不声明内部 Alpha 已通过。
+- Milestone C 的 Mock Functional 已完成：支持 TXT、Markdown、代码和文本 PDF，Dense + BM25 候选 + RRF、可降级 Rerank、ContextPlan、基础 RetryJob、DeleteDocument 和固定评测集；真实基础设施上的受控 MVP 验收仍未完成。
+- Milestone D 的 Mock Reliability 已完成：补齐 Finalizer 终态与 staging sweeper、并发去重、Retry 唯一性、CancelJob、generation fence、索引版本清理以及 T1～T25 Mock 故障矩阵；Fake 结果不替代 MySQL 行锁/事务、Elasticsearch mapping/KNN/BM25、JetStream durable/ACK/NAK/redelivery、Compose E2E 和 Docker `KILL` 恢复演练。
+- Milestone E 尚未开始；在 D 的真实基础设施发布门禁通过前，不进入 Go 产品控制面实施。
+
+当前准确定位是“Milestone D Mock Reliability 完成，真实可靠发布基线未验收”。下一步应先为真实基础设施补充单独的详细实施计划，按 MySQL → Elasticsearch → NATS JetStream → Compose E2E/Docker `KILL` 的顺序实现 concrete adapters、运行 integration/resilience 验证并完成 D5；在此之前不得声明内部 Alpha、受控 MVP 或单机生产试运行版本已经正式通过。

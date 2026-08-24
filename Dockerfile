@@ -12,7 +12,8 @@ COPY --from=uv /uv /uvx /bin/
 
 WORKDIR /app
 
-COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY pyproject.toml uv.lock LICENSE ./
+COPY docs/README.md ./docs/README.md
 COPY src ./src
 
 RUN uv sync --frozen --no-dev && \
@@ -24,4 +25,3 @@ RUN uv sync --frozen --no-dev && \
 USER rag
 
 CMD ["rag-server"]
-

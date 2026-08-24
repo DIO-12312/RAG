@@ -79,7 +79,8 @@ uv run rag-dev --help
 
 ## 设计文档
 
-- `SPEC.md`：权威架构、状态机、RPC 与测试不变量。
-- `PLAN.md`：Milestone 和交付顺序。
-- `plans/`：当前 Milestone 的逐文件实施计划。
-- `AGENTS.md`：仓库协作与可靠性约束。
+- [`SPEC.md`](SPEC.md)：权威架构、状态机、RPC 与测试不变量。
+- [`PLAN.md`](PLAN.md)：Milestone 和交付顺序。
+- [`plans/`](plans/)：当前 Milestone 的逐文件实施计划。
+- [`testing-guide.md`](testing-guide.md)：本机 Mock 功能、可靠性和评测验证指南。
+- [`../AGENTS.md`](../AGENTS.md)：仓库协作与可靠性约束。

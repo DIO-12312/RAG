@@ -401,8 +401,14 @@ Go 是唯一公网入口和 Agent 决策者；Python 是私网 RAG 服务。Go �
 ```text
 python-rag-mvp/
 ├─ pyproject.toml
-├─ README.md
-├─ SPEC.md
+├─ AGENTS.md
+├─ LICENSE
+├─ docs/
+│  ├─ README.md
+│  ├─ SPEC.md
+│  ├─ PLAN.md
+│  ├─ testing-guide.md
+│  └─ plans/
 ├─ .githooks/
 │  └─ pre-commit                        # 本地提交门禁：lint、类型检查和快速测试
 ├─ .env.example

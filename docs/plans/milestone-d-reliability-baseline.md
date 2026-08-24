@@ -2,7 +2,7 @@
 
 > 状态：Mock Reliability 已完成；真实基础设施发布验收延期
 > 范围：在测试专用 Fake ports 上完成 Python 状态机、并发栅栏和故障恢复逻辑；真实 MySQL 行锁/事务、ES/NATS 与 Docker KILL 验收仍明确延期。
-> 对应规格：T1～T25、`SPEC.md` 2.2、2.5、4.4～4.6、5.5
+> 对应规格：T1～T25、`docs/SPEC.md` 2.2、2.5、4.4～4.6、5.5
 
 ## D1：Finalizer、Relay 与 staging 恢复
 

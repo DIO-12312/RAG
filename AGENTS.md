@@ -2,9 +2,9 @@
 
 ## 规格优先
 
-- 实现、架构或接口变更前先阅读根目录的 `SPEC.md`。
-- 当实现与 `SPEC.md` 不一致时，先指出差异；未经明确要求，不要悄悄改变既定架构。
-- 改动架构、RPC 契约、状态机、存储或消息语义时，同步更新 `SPEC.md` 和相关测试。
+- 实现、架构或接口变更前先阅读 `docs/SPEC.md`。
+- 当实现与 `docs/SPEC.md` 不一致时，先指出差异；未经明确要求，不要悄悄改变既定架构。
+- 改动架构、RPC 契约、状态机、存储或消息语义时，同步更新 `docs/SPEC.md` 和相关测试。
 
 ## 职责边界
 
@@ -26,7 +26,7 @@
 - `CancelJob` 仅支持摄取 Job：PENDING 时撤销未发布 Outbox，RUNNING 时只设置 cancel 请求并由 Worker checkpoint 收敛；不得取消删除 Job，也不得让已取消摄取切换 `active_version`。
 - `DeleteDocument` 必须在 Document 行锁内设为 `DELETED` 并递增 `lifecycle_generation`。Worker 认领/完成均须条件验证 Task、cancel 状态和 generation fence；失配时只能取消并创建 `CLEANUP_INDEX_VERSION` 系统 Job，绝不能重新激活 Document。
 - Delete 同时必须将该 Document 的 IngestionFingerprint 置为 `RELEASED`、取消所有未终态摄取 Task 与未发布 Outbox；Finalizer 仅可在 Outbox=WAITING 且 Document 未删除时置 READY，条件失配后必须补偿删除刚提升的正式对象。
-- `chunk_id` 必须遵循 `SPEC.md` 中的 RAGFlow xxHash64 规则。ES 物理 `_id` 必须包含 `document_id`、`index_version` 和 `chunk_id`，以保留新旧索引版本。
+- `chunk_id` 必须遵循 `docs/SPEC.md` 中的 RAGFlow xxHash64 规则。ES 物理 `_id` 必须包含 `document_id`、`index_version` 和 `chunk_id`，以保留新旧索引版本。
 - 删除先在 MySQL 中逻辑删除并立刻使文档不可检索；ES 和对象文件由可重试清理 Task 异步清除。
 - 上传字节先写入由 `idempotency_key` 派生的 staging object；Finalizer 成功后才提升为正式对象并解锁 Outbox 发布。未被 MySQL 引用的中断/失败 staging object 必须由 TTL sweeper 清理；不得清理 `WAITING_OBJECT` 所引用的对象，不能假设对象存储与 MySQL 有跨库事务。
 - 新文档上传在 MySQL 事务内以唯一 `(dataset_id, file_sha256, config_digest)` 的 `IngestionFingerprint` 锁定 canonical Job；并发同内容上传必须复用而不是创建第二个摄取，未被选中的 staging object 立即清理。`FAILED_RETRYABLE` 必须返回 canonical Job，只有 `RELEASED` 可重新占用创建新 Document。
@@ -53,6 +53,7 @@
 ## 可靠性与测试
 
 - 新的领域规则、状态迁移、ID 或 digest 规则必须有 unit test。
+- 新增、删除、移动或重命名 `tests/` 下的测试文件、`test_*` 函数、fixture、marker 或 Fake port 时，必须在同一改动中同步更新 `tests/TEST.md` 的目录树、测试职责表和运行边界；未同步更新不视为测试工作完成。
 - 修改 MySQL、Elasticsearch、NATS adapter 时必须增加或运行对应 integration/contract test。
 - 修改 Worker、ACK/NAK、重试、取消或版本切换时必须运行 resilience 测试，覆盖 redelivery、强杀恢复和幂等性。
 - 修改 Task 创建、Outbox Relay 或 NATS 发布确认时，必须覆盖“Relay 发布成功后进程崩溃、标记 OutboxEvent 前重启”的重复投递场景。
@@ -74,7 +75,7 @@
 - 默认情况下，除非用户明确要求，不要自行执行 `git commit`；任何时候执行 `git push` 都必须再次取得用户明确授权。
 - **Phase 小模块提交例外：** 执行已经验收的详细实施计划时，每完成一个可独立验收的小模块并通过与其改动相称的检查后，必须立即自行执行一次 `git commit`，无需再次询问用户。这里的“小模块”以已验收计划中的工作包为准，例如 `A1`、`A2` 或 `P0-1`、`P0-2`；不是单个文件、单条命令或尚未形成可验证闭环的中间步骤。
 - 不得把多个已经分别完成的小模块积攒到同一个提交。若一个工作包过大，详细实施计划必须先把它拆成可独立理解、回滚和验证的子模块，再开始实现。
-- 小模块只有在实现、对应测试、必要生成物以及应同步更新的 `SPEC.md`/计划文档全部完成后才算完成。存在失败的必跑检查、未解决的规格差异或尚未收敛的中间状态时，不得为了满足提交频率而提前提交。
+- 小模块只有在实现、对应测试、必要生成物以及应同步更新的 `docs/SPEC.md`/计划文档全部完成后才算完成。存在失败的必跑检查、未解决的规格差异或尚未收敛的中间状态时，不得为了满足提交频率而提前提交。
 - 提交前必须检查 `git status`，只暂存当前小模块拥有的文件，保留用户和其他工作的未相关改动；提交后在进度更新或交接消息中报告 commit hash、提交包含的模块以及实际运行和未运行的验证项。
 - 使用 Conventional Commits 格式：`<type>(<scope>): <简短中文描述>`；没有明确 scope 时使用 `<type>: <简短中文描述>`。
 - 一个提交只表达一个可独立理解、回滚和验证的目的；不要把功能、重构、格式化和无关文档混在同一提交中。

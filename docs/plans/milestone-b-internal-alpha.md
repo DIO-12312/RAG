@@ -1,8 +1,8 @@
 # Milestone B：Mock Functional 异步检索闭环实施计划
 
 > 状态：Mock Functional 已完成；真实基础设施验收延期
-> 对应路线图：`PLAN.md` B1～B6、2.1 无 Docker开发通道
-> 对应规格：`SPEC.md` 2.1～2.5、4.1～4.7、5.2～5.7、P1-1～P1-5、P2-1～P2-2、P3-1～P3-3
+> 对应路线图：`docs/PLAN.md` B1～B6、2.1 无 Docker开发通道
+> 对应规格：`docs/SPEC.md` 2.1～2.5、4.1～4.7、5.2～5.7、P1-1～P1-5、P2-1～P2-2、P3-1～P3-3
 > 范围：用真实 gRPC/application/Outbox/Worker/pipeline/retrieval 调用链和测试专用 Fake ports 跑通 TXT upload → async ingest → Dense retrieve。真实 MySQL/Elasticsearch/NATS adapter 与 Compose 验收延期，不据此声明内部 Alpha 发布出口通过。
 
 ## 1. 不变量与边界
@@ -267,9 +267,9 @@ tests/functional/test_mock_dedup_and_redelivery.py
 tests/unit/test_observability.py
 .githooks/pre-commit
 .github/workflows/quality.yml
-README.md
-PLAN.md
-plans/milestone-b-internal-alpha.md
+docs/README.md
+docs/PLAN.md
+docs/plans/milestone-b-internal-alpha.md
 ```
 
 Functional harness 以 in-process gRPC channel 调用：CreateDataset → 流式 SubmitDocument → Finalizer tick → Relay tick → Worker tick → GetJob → Retrieve。测试必须断言：
