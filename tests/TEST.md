@@ -52,8 +52,9 @@ tests/
 │  ├─ test_mock_retry_job.py
 │  └─ test_mock_upload_ingest_retrieve.py
 ├─ integration/                             # 依赖真实 Docker 基础设施的 adapter 验证
-│  ├─ conftest.py                            # host/container MySQL 测试 DSN
+│  ├─ conftest.py                            # MySQL DSN、迁移、清库和 Repository fixture
 │  ├─ test_mysql_migrations.py
+│  ├─ test_mysql_outbox_worker.py
 │  └─ test_mysql_submission.py
 ├─ resilience/                              # 故障、竞态、重投与恢复矩阵
 │  ├─ test_cancel_races.py
@@ -198,7 +199,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_open_methods_work_through_generated_grpc_transport` | 已开放方法可经生成的 gRPC transport 调用。 |
 | `test_metadata_repository_contract.py` | `test_submit_atomically_creates_task_and_waiting_outbox_and_deduplicates` | 提交原子创建 Task/WAITING Outbox，并分别验证同 key 与同 fingerprint 去重。 |
 | 同上 | `test_submit_failure_does_not_leave_partial_metadata` | 提交失败不留下部分元数据。 |
-| 同上 | `test_finalizer_transition_and_task_claim_are_conditional` | Finalizer 转换和 Task 认领必须为条件更新。 |
+| 同上 | `test_finalizer_transition_and_task_claim_are_conditional` | Finalizer/Relay 转换为条件更新；Task 按 delivery sequence 去重并允许更高序号重投。 |
 | 同上 | `test_complete_and_fail_are_conditional_and_visibility_uses_active_version` | 完成/失败为条件更新，检索可见性复核 active version。 |
 | `test_model_gateway_contract.py` | `test_fake_model_is_deterministic_and_dimensionally_stable` | Fake Model 的 embedding 确定且维度稳定。 |
 | `test_object_storage_contract.py` | `test_object_storage_write_promote_read_and_delete_are_idempotent` | ObjectStorage 的写、提升、读、删具备幂等语义。 |
@@ -225,6 +226,10 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
 | `test_mysql_migrations.py` | `test_upgrade_head_is_idempotent_and_creates_innodb_schema` | 对真实 MySQL 连续升级两次，验证 revision、默认租户、InnoDB 表和关键唯一约束。 |
+| `test_mysql_outbox_worker.py` | `test_outbox_transitions_delivery_dedup_and_atomic_completion` | 验证 WAITING→READY→PUBLISHED、delivery 去重，以及 manifest/version/Job/Task 原子完成。 |
+| 同上 | `test_finalizer_exhaustion_atomically_fails_and_releases_fingerprint` | Finalizer 耗尽后原子写 Task/Job FAILED、Outbox CANCELLED、Fingerprint RELEASED。 |
+| 同上 | `test_deleted_generation_fence_prevents_object_ready_and_task_claim` | Document 删除/generation 失配时禁止对象就绪和 Task 认领。 |
+| 同上 | `test_fail_task_persists_retryability_and_terminal_state_once` | Worker 失败只落一次终态，并按正式对象是否存在设置 Fingerprint 可重试状态。 |
 | `test_mysql_submission.py` | `test_concurrent_same_fingerprint_creates_one_canonical_task_and_outbox` | 并发同内容上传只保留一个 canonical Document/Job/Task/Outbox，并记录两个幂等结果。 |
 | 同上 | `test_exception_before_commit_rolls_back_all_submission_rows` | Outbox INSERT 前异常使 Document/Fingerprint/Job/Task/Outbox/IndexBuild/幂等记录全部回滚。 |
 | 同上 | `test_same_idempotency_key_replays_result_and_rejects_changed_command` | 同 key 同命令回放首次结果，同 key 不同命令返回稳定冲突且不产生额外状态。 |

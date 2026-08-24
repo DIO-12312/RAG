@@ -3,61 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from rag_mvp.adapters.metadata.database import create_mysql_engine, create_session_factory
-from rag_mvp.adapters.metadata.migrate import run_migrations
 from rag_mvp.adapters.metadata.mysql import MySQLMetadataRepository
 from rag_mvp.domain.errors import DomainError
 from rag_mvp.domain.models import Dataset
 from rag_mvp.ports.metadata import SubmitIngestion
-
-MUTABLE_TABLES = (
-    "chunk_manifests",
-    "index_builds",
-    "outbox_events",
-    "ingestion_fingerprints",
-    "tasks",
-    "jobs",
-    "documents",
-    "idempotency_records",
-    "datasets",
-)
-
-
-async def _reset_metadata(engine: AsyncEngine) -> None:
-    async with engine.connect() as connection:
-        await connection.execute(text("SET FOREIGN_KEY_CHECKS=0"))
-        try:
-            for table_name in MUTABLE_TABLES:
-                await connection.execute(text(f"TRUNCATE TABLE {table_name}"))
-        finally:
-            await connection.execute(text("SET FOREIGN_KEY_CHECKS=1"))
-
-
-@pytest_asyncio.fixture
-async def mysql_repository(
-    mysql_dsn: str,
-) -> AsyncIterator[tuple[MySQLMetadataRepository, AsyncEngine]]:
-    await asyncio.to_thread(run_migrations, mysql_dsn, "upgrade", "head")
-    engine = create_mysql_engine(mysql_dsn)
-    await _reset_metadata(engine)
-    repository = MySQLMetadataRepository(
-        create_session_factory(engine),
-        default_tenant_id="default_tenant",
-    )
-    try:
-        yield repository, engine
-    finally:
-        await _reset_metadata(engine)
-        await engine.dispose()
 
 
 def _dataset(now: datetime) -> Dataset:

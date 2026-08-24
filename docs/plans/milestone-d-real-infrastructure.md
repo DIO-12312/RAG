@@ -408,6 +408,8 @@ git commit -m "feat(mysql): 实现上传去重与原子任务事务"
 **Files:**
 - Modify: `src/rag_mvp/adapters/metadata/mysql.py`
 - Create: `tests/integration/test_mysql_outbox_worker.py`
+- Modify: `tests/integration/conftest.py`
+- Modify: `tests/integration/test_mysql_submission.py`（复用共享 MySQL fixture）
 - Modify: `tests/contract/test_metadata_repository_contract.py`
 - Modify: `tests/TEST.md`
 
@@ -415,8 +417,9 @@ git commit -m "feat(mysql): 实现上传去重与原子任务事务"
 - Implements: `list_waiting_outbox`, `mark_object_ready`, `record_finalization_failure`, `waiting_staging_keys`
 - Implements: `list_ready_outbox`, `mark_outbox_published`
 - Implements: `claim_task`, `complete_ingestion`, `fail_task`
+- Implements: `visible_document_versions`（用于复核完成后的 active version；Task 7 继续覆盖生命周期竞态）
 
-- [ ] **Step 1: Write failing condition-update tests**
+- [x] **Step 1: Write failing condition-update tests**
 
 Test these database-visible outcomes:
 
@@ -431,17 +434,17 @@ assert visible_versions == {document_id: 1}
 
 Finalizer exhaustion must atomically write Job/Task FAILED, Outbox CANCELLED and Fingerprint RELEASED.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest -m integration tests/integration/test_mysql_outbox_worker.py -q`
 
 Expected: methods are missing or return incorrect state.
 
-- [ ] **Step 3: Implement lock/condition semantics**
+- [x] **Step 3: Implement lock/condition semantics**
 
 Use short transactions. `claim_task` compares consumer sequence against `last_delivery_sequence`; `complete_ingestion` rechecks cancellation, Document status and generation before manifest/version activation.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 ```powershell
 uv run pytest -m integration tests/integration/test_mysql_outbox_worker.py -q
@@ -449,10 +452,10 @@ uv run pytest tests/unit/outbox tests/unit/ingestion tests/contract/test_metadat
 uv run mypy src
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
-git add src/rag_mvp/adapters/metadata/mysql.py tests/integration/test_mysql_outbox_worker.py tests/contract/test_metadata_repository_contract.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
+git add src/rag_mvp/adapters/metadata/mysql.py tests/integration/conftest.py tests/integration/test_mysql_submission.py tests/integration/test_mysql_outbox_worker.py tests/contract/test_metadata_repository_contract.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "feat(mysql): 实现 Outbox 与 Worker 条件状态"
 ```
 
@@ -469,7 +472,7 @@ git commit -m "feat(mysql): 实现 Outbox 与 Worker 条件状态"
 - Modify: `tests/TEST.md`
 
 **Interfaces:**
-- Implements: `retry_job`, `cancel_job`, `delete_document`, `complete_cleanup`, `visible_document_versions`
+- Implements: `retry_job`, `cancel_job`, `delete_document`, `complete_cleanup`; hardens `visible_document_versions` across lifecycle races
 
 - [ ] **Step 1: Write failing real lifecycle/concurrency tests**
 

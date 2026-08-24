@@ -109,9 +109,13 @@ async def test_finalizer_transition_and_task_claim_are_conditional() -> None:
 
     claim = await repository.claim_task(submitted.task_id, delivery_sequence=1, now=now)
     duplicate_claim = await repository.claim_task(submitted.task_id, delivery_sequence=1, now=now)
+    redelivery_claim = await repository.claim_task(submitted.task_id, delivery_sequence=2, now=now)
     assert claim is not None
     assert claim.task.status is TaskStatus.RUNNING
     assert duplicate_claim is None
+    assert redelivery_claim is not None
+    assert redelivery_claim.task.attempt == 2
+    assert redelivery_claim.task.last_delivery_sequence == 2
     assert await repository.get_dataset("dataset-1") is not None
     assert await repository.get_document(submitted.document_id) is not None
     assert await repository.get_job(submitted.job_id) is not None
