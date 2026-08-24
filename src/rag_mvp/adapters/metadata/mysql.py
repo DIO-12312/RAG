@@ -8,9 +8,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -46,9 +47,22 @@ from rag_mvp.domain.enums import (
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.ids import new_id
 from rag_mvp.domain.models import Chunk, Dataset, Document, Job, OutboxEvent, Task
-from rag_mvp.ports.metadata import SubmitIngestion, SubmitResult, TaskClaim
+from rag_mvp.ports.metadata import (
+    CancelJobRequest,
+    CancelJobResult,
+    DeleteDocumentRequest,
+    DeleteDocumentResult,
+    RetryJobRequest,
+    RetryJobResult,
+    SubmitIngestion,
+    SubmitResult,
+    TaskClaim,
+)
 
 SUBMIT_OPERATION = "SUBMIT_INGESTION"
+RETRY_OPERATION = "RETRY_JOB"
+CANCEL_OPERATION = "CANCEL_JOB"
+DELETE_OPERATION = "DELETE_DOCUMENT"
 MYSQL_DUPLICATE_KEY = 1062
 
 
@@ -363,12 +377,24 @@ class MySQLMetadataRepository:
         session: AsyncSession,
         idempotency_key: str,
     ) -> IdempotencyRecordTable | None:
+        return await self._locked_operation_idempotency(
+            session,
+            SUBMIT_OPERATION,
+            idempotency_key,
+        )
+
+    @staticmethod
+    async def _locked_operation_idempotency(
+        session: AsyncSession,
+        operation: str,
+        idempotency_key: str,
+    ) -> IdempotencyRecordTable | None:
         return cast(
             IdempotencyRecordTable | None,
             await session.scalar(
                 select(IdempotencyRecordTable)
                 .where(
-                    IdempotencyRecordTable.operation_type == SUBMIT_OPERATION,
+                    IdempotencyRecordTable.operation_type == operation,
                     IdempotencyRecordTable.idempotency_key == idempotency_key,
                 )
                 .with_for_update()
@@ -400,15 +426,31 @@ class MySQLMetadataRepository:
         result: SubmitResult,
         now: datetime,
     ) -> IdempotencyRecordTable:
-        return IdempotencyRecordTable(
-            operation_type=SUBMIT_OPERATION,
-            idempotency_key=idempotency_key,
-            request_digest=request_digest,
-            result_json={
+        return MySQLMetadataRepository._new_operation_idempotency_record(
+            SUBMIT_OPERATION,
+            idempotency_key,
+            request_digest,
+            {
                 "document_id": result.document_id,
                 "job_id": result.job_id,
                 "task_id": result.task_id,
             },
+            now,
+        )
+
+    @staticmethod
+    def _new_operation_idempotency_record(
+        operation: str,
+        idempotency_key: str,
+        request_digest: str,
+        result_json: dict[str, object],
+        now: datetime,
+    ) -> IdempotencyRecordTable:
+        return IdempotencyRecordTable(
+            operation_type=operation,
+            idempotency_key=idempotency_key,
+            request_digest=request_digest,
+            result_json=result_json,
             created_at=now,
         )
 
@@ -610,6 +652,7 @@ class MySQLMetadataRepository:
             aggregate.job.status = JobStatus.FAILED
             aggregate.job.error = encoded_failure
             aggregate.job.retryable = False
+            aggregate.job.active_retry_parent_id = None
             aggregate.job.updated_at = now
             if (
                 aggregate.document.active_version is None
@@ -708,6 +751,7 @@ class MySQLMetadataRepository:
             if aggregate.job.status != JobStatus.RUNNING:
                 return False
             if aggregate.job.cancel_requested_at is not None:
+                await self._cancel_running_ingestion(session, aggregate, now)
                 return False
             if aggregate.document.status == DocumentStatus.DELETED:
                 return False
@@ -767,6 +811,7 @@ class MySQLMetadataRepository:
             aggregate.task.updated_at = now
             aggregate.job.status = JobStatus.SUCCEEDED
             aggregate.job.progress = Decimal("1")
+            aggregate.job.active_retry_parent_id = None
             aggregate.job.updated_at = now
             await session.execute(
                 update(IngestionFingerprintTable)
@@ -792,6 +837,7 @@ class MySQLMetadataRepository:
             aggregate.job.status = JobStatus.FAILED
             aggregate.job.error = encoded_failure
             aggregate.job.retryable = failure.retryable
+            aggregate.job.active_retry_parent_id = None
             aggregate.job.updated_at = now
             if (
                 aggregate.document.active_version is None
@@ -820,6 +866,399 @@ class MySQLMetadataRepository:
             )
             return True
 
+    async def retry_job(self, request: RetryJobRequest) -> RetryJobResult:
+        request_digest = self._command_digest(RETRY_OPERATION, request.job_id)
+        async with self._session_factory() as session, session.begin():
+            idempotent = await self._locked_operation_idempotency(
+                session,
+                RETRY_OPERATION,
+                request.idempotency_key,
+            )
+            if idempotent is not None:
+                self._validate_operation_record(idempotent, request_digest)
+                return RetryJobResult(
+                    job_id=str(idempotent.result_json["job_id"]),
+                    task_id=str(idempotent.result_json["task_id"]),
+                    reused=True,
+                )
+
+            original = await self._lock_job_aggregate(session, request.job_id)
+            if original is None:
+                raise DomainError(DomainFailure("JOB_NOT_FOUND", "job does not exist"))
+            if original.job.status != JobStatus.FAILED:
+                raise DomainError(
+                    DomainFailure("JOB_NOT_FAILED", "only failed jobs can be retried")
+                )
+            if not original.job.retryable:
+                raise DomainError(
+                    DomainFailure("JOB_NOT_RETRYABLE", "job failure is not retryable")
+                )
+            if original.document.object_key is None:
+                raise DomainError(
+                    DomainFailure(
+                        "RETRY_OBJECT_MISSING",
+                        "retry requires a finalized source object",
+                    )
+                )
+
+            active_child = cast(
+                JobTable | None,
+                await session.scalar(
+                    select(JobTable)
+                    .where(
+                        JobTable.active_retry_parent_id == original.job.id,
+                        JobTable.status.in_((JobStatus.PENDING, JobStatus.RUNNING)),
+                    )
+                    .with_for_update()
+                ),
+            )
+            if active_child is not None:
+                child_task = cast(
+                    TaskTable | None,
+                    await session.scalar(
+                        select(TaskTable)
+                        .where(TaskTable.job_id == active_child.id)
+                        .order_by(TaskTable.created_at, TaskTable.id)
+                        .limit(1)
+                    ),
+                )
+                if child_task is None:
+                    raise RuntimeError("active retry job has no task")
+                result = RetryJobResult(active_child.id, child_task.id, reused=True)
+                session.add(
+                    self._new_operation_idempotency_record(
+                        RETRY_OPERATION,
+                        request.idempotency_key,
+                        request_digest,
+                        {"job_id": result.job_id, "task_id": result.task_id},
+                        request.now,
+                    )
+                )
+                return result
+
+            if original.job.retry_count >= request.max_user_retries:
+                raise DomainError(
+                    DomainFailure(
+                        "MAX_USER_RETRIES_EXCEEDED",
+                        "job reached its user retry limit",
+                    )
+                )
+
+            retry_count = original.job.retry_count + 1
+            child = JobTable(
+                id=new_id(),
+                type=original.job.type,
+                document_id=original.document.id,
+                config_digest=original.job.config_digest,
+                index_version=original.job.index_version,
+                document_generation=original.job.document_generation,
+                status=JobStatus.PENDING,
+                progress=Decimal("0"),
+                error=None,
+                retryable=False,
+                retry_count=retry_count,
+                cancel_requested_at=None,
+                retry_of_job_id=original.job.id,
+                active_retry_parent_id=original.job.id,
+                is_system=False,
+                created_at=request.now,
+                updated_at=request.now,
+            )
+            child_task = await self._add_job_task_outbox(
+                session,
+                child,
+                TaskType(original.task.type),
+                OutboxStatus.READY_TO_PUBLISH,
+                request.now,
+            )
+            original.job.retry_count = retry_count
+            original.job.updated_at = request.now
+            await session.execute(
+                update(IngestionFingerprintTable)
+                .where(IngestionFingerprintTable.document_id == original.document.id)
+                .values(
+                    job_id=child.id,
+                    state=FingerprintState.PENDING,
+                    updated_at=request.now,
+                )
+            )
+            index_build_result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    update(IndexBuildTable)
+                    .where(
+                        IndexBuildTable.document_id == original.document.id,
+                        IndexBuildTable.index_version == original.job.index_version,
+                    )
+                    .values(
+                        job_id=child.id,
+                        status=IndexBuildStatus.BUILDING,
+                        updated_at=request.now,
+                    )
+                ),
+            )
+            if index_build_result.rowcount != 1:
+                raise RuntimeError("retry index build does not exist")
+            result = RetryJobResult(child.id, child_task.id, reused=False)
+            session.add(
+                self._new_operation_idempotency_record(
+                    RETRY_OPERATION,
+                    request.idempotency_key,
+                    request_digest,
+                    {"job_id": result.job_id, "task_id": result.task_id},
+                    request.now,
+                )
+            )
+            return result
+
+    async def cancel_job(self, request: CancelJobRequest) -> CancelJobResult:
+        request_digest = self._command_digest(CANCEL_OPERATION, request.job_id)
+        async with self._session_factory() as session, session.begin():
+            idempotent = await self._locked_operation_idempotency(
+                session,
+                CANCEL_OPERATION,
+                request.idempotency_key,
+            )
+            if idempotent is not None:
+                self._validate_operation_record(idempotent, request_digest)
+                return CancelJobResult(str(idempotent.result_json["job_id"]), reused=True)
+
+            aggregate = await self._lock_job_aggregate(session, request.job_id)
+            if aggregate is None:
+                raise DomainError(DomainFailure("JOB_NOT_FOUND", "job does not exist"))
+            if aggregate.job.type != JobType.INGEST_DOCUMENT:
+                raise DomainError(
+                    DomainFailure(
+                        "JOB_TYPE_NOT_CANCELLABLE",
+                        "only ingestion jobs can be cancelled",
+                    )
+                )
+            if aggregate.job.status not in {JobStatus.PENDING, JobStatus.RUNNING}:
+                raise DomainError(
+                    DomainFailure("JOB_ALREADY_TERMINAL", "terminal jobs cannot be cancelled")
+                )
+
+            if aggregate.job.status == JobStatus.PENDING:
+                failure = DomainFailure("JOB_CANCELLED", "ingestion was cancelled")
+                encoded_failure = failure_to_json(failure)
+                aggregate.job.status = JobStatus.CANCELLED
+                aggregate.job.cancel_requested_at = request.now
+                aggregate.job.error = encoded_failure
+                aggregate.job.active_retry_parent_id = None
+                aggregate.job.updated_at = request.now
+                aggregate.task.status = TaskStatus.CANCELLED
+                aggregate.task.error = encoded_failure
+                aggregate.task.updated_at = request.now
+                await session.execute(
+                    update(OutboxEventTable)
+                    .where(
+                        OutboxEventTable.task_id == aggregate.task.id,
+                        OutboxEventTable.status.in_(
+                            (OutboxStatus.WAITING_OBJECT, OutboxStatus.READY_TO_PUBLISH)
+                        ),
+                    )
+                    .values(status=OutboxStatus.CANCELLED, updated_at=request.now)
+                )
+                await session.execute(
+                    update(IndexBuildTable)
+                    .where(
+                        IndexBuildTable.document_id == aggregate.document.id,
+                        IndexBuildTable.index_version == aggregate.job.index_version,
+                        IndexBuildTable.status == IndexBuildStatus.BUILDING,
+                    )
+                    .values(status=IndexBuildStatus.ABANDONED, updated_at=request.now)
+                )
+                await session.execute(
+                    update(IngestionFingerprintTable)
+                    .where(IngestionFingerprintTable.job_id == aggregate.job.id)
+                    .values(state=FingerprintState.RELEASED, updated_at=request.now)
+                )
+            else:
+                aggregate.job.cancel_requested_at = request.now
+                aggregate.job.updated_at = request.now
+
+            result = CancelJobResult(aggregate.job.id, reused=False)
+            session.add(
+                self._new_operation_idempotency_record(
+                    CANCEL_OPERATION,
+                    request.idempotency_key,
+                    request_digest,
+                    {"job_id": result.job_id},
+                    request.now,
+                )
+            )
+            return result
+
+    async def delete_document(self, request: DeleteDocumentRequest) -> DeleteDocumentResult:
+        request_digest = self._command_digest(DELETE_OPERATION, request.document_id)
+        async with self._session_factory() as session, session.begin():
+            idempotent = await self._locked_operation_idempotency(
+                session,
+                DELETE_OPERATION,
+                request.idempotency_key,
+            )
+            if idempotent is not None:
+                self._validate_operation_record(idempotent, request_digest)
+                return DeleteDocumentResult(
+                    document_id=str(idempotent.result_json["document_id"]),
+                    job_id=str(idempotent.result_json["job_id"]),
+                    task_id=str(idempotent.result_json["task_id"]),
+                    reused=True,
+                )
+
+            document = await self._lock_document(session, request.document_id)
+            if document is None:
+                raise DomainError(DomainFailure("DOCUMENT_NOT_FOUND", "document does not exist"))
+            if document.status == DocumentStatus.DELETED:
+                raise DomainError(
+                    DomainFailure(
+                        "DOCUMENT_ALREADY_DELETED",
+                        "document is already deleted",
+                    )
+                )
+
+            document.status = DocumentStatus.DELETED
+            document.lifecycle_generation += 1
+            document.updated_at = request.now
+            await session.execute(
+                update(IngestionFingerprintTable)
+                .where(IngestionFingerprintTable.document_id == document.id)
+                .values(state=FingerprintState.RELEASED, updated_at=request.now)
+            )
+
+            ingest_rows = (
+                await session.execute(
+                    select(JobTable, TaskTable)
+                    .join(TaskTable, TaskTable.job_id == JobTable.id)
+                    .where(
+                        JobTable.document_id == document.id,
+                        JobTable.type == JobType.INGEST_DOCUMENT,
+                        JobTable.status.in_((JobStatus.PENDING, JobStatus.RUNNING)),
+                        TaskTable.status.in_((TaskStatus.PENDING, TaskStatus.RUNNING)),
+                    )
+                    .with_for_update()
+                )
+            ).all()
+            cancelled_task_ids: list[str] = []
+            failure = DomainFailure(
+                "DOCUMENT_DELETED",
+                "document was deleted before ingestion completed",
+            )
+            encoded_failure = failure_to_json(failure)
+            for job, task in ingest_rows:
+                job.status = JobStatus.CANCELLED
+                job.error = encoded_failure
+                job.active_retry_parent_id = None
+                job.updated_at = request.now
+                task.status = TaskStatus.CANCELLED
+                task.error = encoded_failure
+                task.updated_at = request.now
+                cancelled_task_ids.append(task.id)
+            if cancelled_task_ids:
+                await session.execute(
+                    update(OutboxEventTable)
+                    .where(
+                        OutboxEventTable.task_id.in_(cancelled_task_ids),
+                        OutboxEventTable.status.in_(
+                            (OutboxStatus.WAITING_OBJECT, OutboxStatus.READY_TO_PUBLISH)
+                        ),
+                    )
+                    .values(status=OutboxStatus.CANCELLED, updated_at=request.now)
+                )
+                await session.execute(
+                    update(IndexBuildTable)
+                    .where(
+                        IndexBuildTable.document_id == document.id,
+                        IndexBuildTable.status == IndexBuildStatus.BUILDING,
+                    )
+                    .values(status=IndexBuildStatus.ABANDONED, updated_at=request.now)
+                )
+
+            cleanup_job = JobTable(
+                id=new_id(),
+                type=JobType.DELETE_DOCUMENT,
+                document_id=document.id,
+                config_digest="0" * 64,
+                index_version=document.active_version or 1,
+                document_generation=document.lifecycle_generation,
+                status=JobStatus.PENDING,
+                progress=Decimal("0"),
+                error=None,
+                retryable=False,
+                retry_count=0,
+                cancel_requested_at=None,
+                retry_of_job_id=None,
+                active_retry_parent_id=None,
+                is_system=False,
+                created_at=request.now,
+                updated_at=request.now,
+            )
+            cleanup_task = await self._add_job_task_outbox(
+                session,
+                cleanup_job,
+                TaskType.CLEANUP_DOCUMENT,
+                OutboxStatus.READY_TO_PUBLISH,
+                request.now,
+            )
+            result = DeleteDocumentResult(
+                document_id=document.id,
+                job_id=cleanup_job.id,
+                task_id=cleanup_task.id,
+                reused=False,
+            )
+            session.add(
+                self._new_operation_idempotency_record(
+                    DELETE_OPERATION,
+                    request.idempotency_key,
+                    request_digest,
+                    {
+                        "document_id": result.document_id,
+                        "job_id": result.job_id,
+                        "task_id": result.task_id,
+                    },
+                    request.now,
+                )
+            )
+            return result
+
+    async def complete_cleanup(self, task_id: str, now: datetime) -> bool:
+        async with self._session_factory() as session, session.begin():
+            aggregate = await self._lock_task_aggregate(session, task_id)
+            if aggregate is None or aggregate.task.status != TaskStatus.RUNNING:
+                return False
+            if aggregate.task.type not in {
+                TaskType.CLEANUP_DOCUMENT,
+                TaskType.CLEANUP_INDEX_VERSION,
+            }:
+                return False
+            if aggregate.job.status != JobStatus.RUNNING:
+                return False
+            if aggregate.document.lifecycle_generation != aggregate.job.document_generation:
+                return False
+            if (
+                aggregate.task.type == TaskType.CLEANUP_DOCUMENT
+                and aggregate.document.status != DocumentStatus.DELETED
+            ):
+                return False
+
+            manifest_delete = ChunkManifestTable.document_id == aggregate.document.id
+            build_delete = IndexBuildTable.document_id == aggregate.document.id
+            if aggregate.task.type == TaskType.CLEANUP_INDEX_VERSION:
+                manifest_delete &= ChunkManifestTable.index_version == aggregate.job.index_version
+                build_delete &= IndexBuildTable.index_version == aggregate.job.index_version
+            await session.execute(delete(ChunkManifestTable).where(manifest_delete))
+            await session.execute(delete(IndexBuildTable).where(build_delete))
+            if aggregate.task.type == TaskType.CLEANUP_DOCUMENT:
+                aggregate.document.object_key = None
+                aggregate.document.updated_at = now
+            aggregate.task.status = TaskStatus.SUCCEEDED
+            aggregate.task.checkpoint = "cleanup_complete"
+            aggregate.task.updated_at = now
+            aggregate.job.status = JobStatus.SUCCEEDED
+            aggregate.job.progress = Decimal("1")
+            aggregate.job.updated_at = now
+            return True
+
     async def visible_document_versions(self, document_ids: Sequence[str]) -> Mapping[str, int]:
         if not document_ids:
             return {}
@@ -835,6 +1274,179 @@ class MySQLMetadataRepository:
                 )
             )
             return {document_id: cast(int, version) for document_id, version in rows}
+
+    async def _add_job_task_outbox(
+        self,
+        session: AsyncSession,
+        job: JobTable,
+        task_type: TaskType,
+        outbox_status: OutboxStatus,
+        now: datetime,
+    ) -> TaskTable:
+        session.add(job)
+        await session.flush()
+        task = TaskTable(
+            id=new_id(),
+            job_id=job.id,
+            type=task_type,
+            status=TaskStatus.PENDING,
+            attempt=0,
+            last_delivery_sequence=None,
+            checkpoint=None,
+            error=None,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(task)
+        await session.flush()
+        session.add(
+            OutboxEventTable(
+                id=new_id(),
+                task_id=task.id,
+                status=outbox_status,
+                attempt=0,
+                staging_key=None,
+                published_at=None,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        return task
+
+    async def _cancel_running_ingestion(
+        self,
+        session: AsyncSession,
+        aggregate: _LockedTaskAggregate,
+        now: datetime,
+    ) -> None:
+        failure = DomainFailure("JOB_CANCELLED", "ingestion was cancelled")
+        encoded_failure = failure_to_json(failure)
+        aggregate.task.status = TaskStatus.CANCELLED
+        aggregate.task.error = encoded_failure
+        aggregate.task.updated_at = now
+        aggregate.job.status = JobStatus.CANCELLED
+        aggregate.job.error = encoded_failure
+        aggregate.job.active_retry_parent_id = None
+        aggregate.job.updated_at = now
+        await session.execute(
+            update(IngestionFingerprintTable)
+            .where(IngestionFingerprintTable.job_id == aggregate.job.id)
+            .values(state=FingerprintState.RELEASED, updated_at=now)
+        )
+        await session.execute(
+            update(IndexBuildTable)
+            .where(
+                IndexBuildTable.document_id == aggregate.document.id,
+                IndexBuildTable.index_version == aggregate.job.index_version,
+                IndexBuildTable.status == IndexBuildStatus.BUILDING,
+            )
+            .values(status=IndexBuildStatus.ABANDONED, updated_at=now)
+        )
+        await self._schedule_version_cleanup(session, aggregate, now)
+
+    async def _schedule_version_cleanup(
+        self,
+        session: AsyncSession,
+        aggregate: _LockedTaskAggregate,
+        now: datetime,
+    ) -> None:
+        existing = await session.scalar(
+            select(JobTable.id).where(
+                JobTable.document_id == aggregate.document.id,
+                JobTable.index_version == aggregate.job.index_version,
+                JobTable.type == JobType.CLEANUP_INDEX_VERSION,
+                JobTable.status.in_((JobStatus.PENDING, JobStatus.RUNNING)),
+            )
+        )
+        if existing is not None:
+            return
+        cleanup_job = JobTable(
+            id=new_id(),
+            type=JobType.CLEANUP_INDEX_VERSION,
+            document_id=aggregate.document.id,
+            config_digest=aggregate.job.config_digest,
+            index_version=aggregate.job.index_version,
+            document_generation=aggregate.document.lifecycle_generation,
+            status=JobStatus.PENDING,
+            progress=Decimal("0"),
+            error=None,
+            retryable=False,
+            retry_count=0,
+            cancel_requested_at=None,
+            retry_of_job_id=None,
+            active_retry_parent_id=None,
+            is_system=True,
+            created_at=now,
+            updated_at=now,
+        )
+        await self._add_job_task_outbox(
+            session,
+            cleanup_job,
+            TaskType.CLEANUP_INDEX_VERSION,
+            OutboxStatus.READY_TO_PUBLISH,
+            now,
+        )
+
+    async def _lock_document(
+        self,
+        session: AsyncSession,
+        document_id: str,
+    ) -> DocumentTable | None:
+        return cast(
+            DocumentTable | None,
+            await session.scalar(
+                select(DocumentTable)
+                .join(DatasetTable, DatasetTable.id == DocumentTable.dataset_id)
+                .where(
+                    DocumentTable.id == document_id,
+                    DatasetTable.tenant_id == self._default_tenant_id,
+                )
+                .with_for_update()
+            ),
+        )
+
+    async def _lock_job_aggregate(
+        self,
+        session: AsyncSession,
+        job_id: str,
+    ) -> _LockedTaskAggregate | None:
+        task_id = await session.scalar(
+            select(TaskTable.id)
+            .join(JobTable, JobTable.id == TaskTable.job_id)
+            .join(DocumentTable, DocumentTable.id == JobTable.document_id)
+            .join(DatasetTable, DatasetTable.id == DocumentTable.dataset_id)
+            .where(
+                JobTable.id == job_id,
+                DatasetTable.tenant_id == self._default_tenant_id,
+            )
+            .order_by(TaskTable.created_at, TaskTable.id)
+            .limit(1)
+        )
+        if task_id is None:
+            return None
+        return await self._lock_task_aggregate(session, task_id)
+
+    @staticmethod
+    def _command_digest(operation: str, target_id: str) -> str:
+        payload = json.dumps(
+            {"operation": operation, "target_id": target_id},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _validate_operation_record(
+        record: IdempotencyRecordTable,
+        request_digest: str,
+    ) -> None:
+        if record.request_digest != request_digest:
+            raise DomainError(
+                DomainFailure(
+                    "IDEMPOTENCY_KEY_REUSED",
+                    "idempotency key was already used for another operation target",
+                )
+            )
 
     async def _lock_task_aggregate(
         self,

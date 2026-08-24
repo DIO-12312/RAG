@@ -474,7 +474,7 @@ git commit -m "feat(mysql): 实现 Outbox 与 Worker 条件状态"
 **Interfaces:**
 - Implements: `retry_job`, `cancel_job`, `delete_document`, `complete_cleanup`; hardens `visible_document_versions` across lifecycle races
 
-- [ ] **Step 1: Write failing real lifecycle/concurrency tests**
+- [x] **Step 1: Write failing real lifecycle/concurrency tests**
 
 Required assertions:
 
@@ -490,15 +490,15 @@ assert await repository.visible_document_versions([document_id]) == {}
 assert not await repository.complete_ingestion(old_task_id, chunks, now)
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest -m integration tests/integration/test_mysql_lifecycle.py tests/integration/test_mysql_concurrency.py -q`
 
-- [ ] **Step 3: Implement row-lock and unique-constraint paths**
+- [x] **Step 3: Implement row-lock and unique-constraint paths**
 
 Retry locks original Job and reuses active child. Delete locks Document, increments generation, releases fingerprint, cancels ingest/Outbox, and atomically creates cleanup Job/Task/READY Outbox. Cleanup checks generation before success.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 ```powershell
 uv run pytest -m integration tests/integration/test_mysql_lifecycle.py tests/integration/test_mysql_concurrency.py -q
@@ -506,7 +506,7 @@ uv run pytest tests/contract/test_retry_job_contract.py tests/contract/test_dele
 uv run mypy src
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/rag_mvp/adapters/metadata/mysql.py tests/integration/test_mysql_lifecycle.py tests/integration/test_mysql_concurrency.py tests/contract/test_retry_job_contract.py tests/contract/test_delete_document_contract.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md

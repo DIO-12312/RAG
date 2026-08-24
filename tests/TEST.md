@@ -53,6 +53,8 @@ tests/
 │  └─ test_mock_upload_ingest_retrieve.py
 ├─ integration/                             # 依赖真实 Docker 基础设施的 adapter 验证
 │  ├─ conftest.py                            # MySQL DSN、迁移、清库和 Repository fixture
+│  ├─ test_mysql_concurrency.py
+│  ├─ test_mysql_lifecycle.py
 │  ├─ test_mysql_migrations.py
 │  ├─ test_mysql_outbox_worker.py
 │  └─ test_mysql_submission.py
@@ -225,6 +227,13 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
+| `test_mysql_concurrency.py` | `test_concurrent_retry_keys_reuse_one_active_child_job` | 八个并发 Retry key 只创建并复用一个活跃子 Job/Task，重试计数只增加一次。 |
+| 同上 | `test_concurrent_rebuilds_allocate_distinct_index_versions` | 四个并发重建在 Document 行锁下分配互不重复的 index version，旧 active version 保持可见。 |
+| 同上 | `test_delete_and_finalizer_race_never_leaves_ingest_outbox_ready` | 删除与 Finalizer 并发时，摄取 Outbox 最终必为 CANCELLED，且仅删除清理 Outbox 可发布。 |
+| `test_mysql_lifecycle.py` | `test_pending_cancel_is_immediate_idempotent_and_withdraws_outbox` | PENDING 取消原子终止 Job/Task、撤销未发布 Outbox，并支持同 key 幂等回放。 |
+| 同上 | `test_running_cancel_converges_at_completion_without_activating_version` | RUNNING 取消先记录请求，再由完成 checkpoint 收敛为 CANCELLED、放弃索引版本并创建清理任务。 |
+| 同上 | `test_delete_hides_immediately_cancels_ingest_and_cleanup_honors_generation` | 删除立即隐藏文档、阻断旧摄取完成，并由 generation 匹配的清理 Task 收敛终态。 |
+| 同上 | `test_new_delete_key_for_deleted_document_is_rejected` | 已删除 Document 只允许原幂等 key 回放，新 key 返回稳定冲突。 |
 | `test_mysql_migrations.py` | `test_upgrade_head_is_idempotent_and_creates_innodb_schema` | 对真实 MySQL 连续升级两次，验证 revision、默认租户、InnoDB 表和关键唯一约束。 |
 | `test_mysql_outbox_worker.py` | `test_outbox_transitions_delivery_dedup_and_atomic_completion` | 验证 WAITING→READY→PUBLISHED、delivery 去重，以及 manifest/version/Job/Task 原子完成。 |
 | 同上 | `test_finalizer_exhaustion_atomically_fails_and_releases_fingerprint` | Finalizer 耗尽后原子写 Task/Job FAILED、Outbox CANCELLED、Fingerprint RELEASED。 |
