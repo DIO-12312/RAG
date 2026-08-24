@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Mapping, Sequence
 from time import perf_counter
 
 from rag_mvp.application.dto import RetrieveQuery
@@ -9,9 +11,10 @@ from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.observability import emit_event
 from rag_mvp.ports.metadata import MetadataRepository
 from rag_mvp.ports.model import ModelGateway
-from rag_mvp.ports.search_engine import SearchEngine, SearchRequest
+from rag_mvp.ports.search_engine import SearchCandidate, SearchEngine, SearchRequest
 from rag_mvp.retrieval.context_builder import ContextPlan, build_context_plan
-from rag_mvp.retrieval.provenance import dense_evidence
+from rag_mvp.retrieval.hybrid import reciprocal_rank_fusion
+from rag_mvp.retrieval.provenance import hybrid_evidence
 
 
 class RetrievalService:
@@ -56,25 +59,37 @@ class RetrievalService:
                 )
             )
 
-        candidates = await self._search.dense_search(
-            SearchRequest(
-                dataset_id=query.dataset_id,
-                top_k=query.top_k,
-                query_vector=vectors[0],
-                filters=query.filters,
-            )
+        candidate_limit = min(max(query.top_k * 4, 20), 100)
+        dense_candidates, sparse_candidates = await asyncio.gather(
+            self._search.dense_search(
+                SearchRequest(
+                    dataset_id=query.dataset_id,
+                    top_k=candidate_limit,
+                    query_vector=vectors[0],
+                    filters=query.filters,
+                )
+            ),
+            self._search.sparse_search(
+                SearchRequest(
+                    dataset_id=query.dataset_id,
+                    top_k=candidate_limit,
+                    query=query.query,
+                    filters=query.filters,
+                )
+            ),
         )
         visible_versions = await self._metadata.visible_document_versions(
-            tuple(dict.fromkeys(candidate.chunk.document_id for candidate in candidates))
+            tuple(
+                dict.fromkeys(
+                    candidate.chunk.document_id
+                    for candidate in (*dense_candidates, *sparse_candidates)
+                )
+            )
         )
-        visible = [
-            candidate
-            for candidate in candidates
-            if candidate.dataset_id == query.dataset_id
-            and visible_versions.get(candidate.chunk.document_id) == candidate.chunk.index_version
-        ]
-        visible.sort(key=lambda item: (-item.score, item.record_id))
-        evidence = tuple(dense_evidence(candidate) for candidate in visible[: query.top_k])
+        visible_dense = self._visible(dense_candidates, query.dataset_id, visible_versions)
+        visible_sparse = self._visible(sparse_candidates, query.dataset_id, visible_versions)
+        fused = reciprocal_rank_fusion(visible_dense, visible_sparse, rrf_k=60)
+        evidence = tuple(hybrid_evidence(candidate) for candidate in fused[: query.top_k])
         result = build_context_plan(evidence, max_context_tokens=query.max_context_tokens)
         emit_event(
             "retrieval_completed",
@@ -84,3 +99,16 @@ class RetrievalService:
             duration_ms=(perf_counter() - started_at) * 1000,
         )
         return result
+
+    @staticmethod
+    def _visible(
+        candidates: Sequence[SearchCandidate],
+        dataset_id: str,
+        visible_versions: Mapping[str, int],
+    ) -> tuple[SearchCandidate, ...]:
+        return tuple(
+            candidate
+            for candidate in candidates
+            if candidate.dataset_id == dataset_id
+            and visible_versions.get(candidate.chunk.document_id) == candidate.chunk.index_version
+        )

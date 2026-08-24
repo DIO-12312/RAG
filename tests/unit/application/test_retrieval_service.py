@@ -73,6 +73,8 @@ async def test_dense_retrieve_filters_stale_versions_and_preserves_scores() -> N
 
     assert [item.content_with_weight for item in result.evidence] == ["active retrieval"]
     assert result.evidence[0].scores.dense_score == pytest.approx(1.0)
+    assert result.evidence[0].scores.sparse_score is not None
+    assert result.evidence[0].scores.fusion_score is not None
     assert result.evidence[0].index_version == 2
 
 
