@@ -588,19 +588,19 @@ git commit -m "feat(model): 接入真实 OpenAI 兼容 embedding"
 - Produces: `ensure_index() -> None`, `close() -> None`
 - Implements all five existing `SearchEngine` methods
 
-- [ ] **Step 1: Write failing mapping and document-codec tests**
+- [x] **Step 1: Write failing mapping and document-codec tests**
 
 Assert `dense_vector.dims`, cosine similarity, keyword/text/flattened fields and round-trip `IndexedChunk → ES source → SearchCandidate` without score loss.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest tests/unit/adapters/test_elasticsearch_mapping.py -q`
 
-- [ ] **Step 3: Implement mapping, Bulk upsert and separate searches**
+- [x] **Step 3: Implement mapping, Bulk upsert and separate searches**
 
 Dense request must contain KNN plus `dataset_id`/metadata filters; sparse request must use BM25 match plus the same filters. Both sort equal scores by `_id`. Adapter must not import or call RRF.
 
-- [ ] **Step 4: Start ES and run real integration contract**
+- [x] **Step 4: Start ES and run real integration contract**
 
 ```powershell
 docker compose up -d elasticsearch
@@ -610,7 +610,7 @@ uv run pytest tests/contract/test_search_engine_contract.py -q
 
 Assert idempotent upsert, Dense relevant hit, BM25 exact term, Dataset isolation, metadata filter, version delete and full document delete.
 
-- [ ] **Step 5: Verify boundaries and commit**
+- [x] **Step 5: Verify boundaries and commit**
 
 ```powershell
 uv run ruff check src/rag_mvp/adapters/search_engine tests/unit/adapters tests/integration/test_elasticsearch_adapter.py
