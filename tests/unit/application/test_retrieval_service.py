@@ -16,6 +16,12 @@ from tests.fakes.model import FakeModelGateway
 from tests.fakes.search_engine import FakeSearchEngine
 
 
+class FailingRerankModel(FakeModelGateway):
+    async def rerank(self, query: str, passages: list[str]) -> list[float]:
+        del query, passages
+        raise ConnectionError("reranker unavailable")
+
+
 def _chunk(document_id: str, version: int, content: str, *, team: str = "search") -> Chunk:
     return Chunk(
         id=f"chunk-{version}",
@@ -84,7 +90,6 @@ async def test_dense_retrieve_filters_stale_versions_and_preserves_scores() -> N
     [
         ("", "dataset-1", False, "QUERY_REQUIRED"),
         ("query", "missing", False, "DATASET_NOT_FOUND"),
-        ("query", "dataset-1", True, "FEATURE_NOT_AVAILABLE"),
     ],
 )
 async def test_retrieve_rejects_invalid_or_unavailable_requests(
@@ -109,3 +114,35 @@ async def test_retrieve_rejects_invalid_or_unavailable_requests(
         )
 
     assert error.value.failure.code == code
+
+
+@pytest.mark.asyncio
+async def test_rerank_failure_degrades_to_rrf_evidence() -> None:
+    now = datetime.now(UTC)
+    repository = FakeMetadataRepository()
+    model = FailingRerankModel(8)
+    search = FakeSearchEngine()
+    await repository.create_dataset(Dataset("dataset-1", "Docs", "fake", 8, now))
+    repository.documents["document-1"] = Document(
+        id="document-1",
+        dataset_id="dataset-1",
+        source_name="guide.txt",
+        file_sha256="0" * 64,
+        status=DocumentStatus.READY,
+        active_version=1,
+        next_index_version=2,
+        lifecycle_generation=0,
+        created_at=now,
+        object_key="objects/document-1/source",
+    )
+    chunk = _chunk("document-1", 1, "active retrieval")
+    vector = (await model.embed(["retrieval"]))[0]
+    await search.upsert_chunks((IndexedChunk("record-1", "dataset-1", chunk, vector),))
+
+    result = await RetrievalService(repository, search, model).retrieve(
+        RetrieveQuery("request", "dataset-1", "retrieval", 5, {}, 100, True)
+    )
+
+    assert [item.chunk_id for item in result.evidence] == [chunk.id]
+    assert result.evidence[0].scores.fusion_score is not None
+    assert result.evidence[0].scores.rerank_score is None

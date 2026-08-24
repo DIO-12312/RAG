@@ -8,13 +8,15 @@ from time import perf_counter
 
 from rag_mvp.application.dto import RetrieveQuery
 from rag_mvp.domain.errors import DomainError, DomainFailure
+from rag_mvp.domain.models import Evidence
 from rag_mvp.observability import emit_event
 from rag_mvp.ports.metadata import MetadataRepository
 from rag_mvp.ports.model import ModelGateway
 from rag_mvp.ports.search_engine import SearchCandidate, SearchEngine, SearchRequest
 from rag_mvp.retrieval.context_builder import ContextPlan, build_context_plan
-from rag_mvp.retrieval.hybrid import reciprocal_rank_fusion
-from rag_mvp.retrieval.provenance import hybrid_evidence
+from rag_mvp.retrieval.hybrid import HybridCandidate, reciprocal_rank_fusion
+from rag_mvp.retrieval.provenance import hybrid_evidence, reranked_evidence
+from rag_mvp.retrieval.rerank import apply_rerank_scores
 
 
 class RetrievalService:
@@ -38,14 +40,6 @@ class RetrievalService:
             raise DomainError(
                 DomainFailure("INVALID_CONTEXT_BUDGET", "context token budget must be positive")
             )
-        if query.enable_rerank:
-            raise DomainError(
-                DomainFailure(
-                    "FEATURE_NOT_AVAILABLE",
-                    "reranking is not available in the current milestone",
-                )
-            )
-
         dataset = await self._metadata.get_dataset(query.dataset_id)
         if dataset is None:
             raise DomainError(DomainFailure("DATASET_NOT_FOUND", "dataset does not exist"))
@@ -89,16 +83,47 @@ class RetrievalService:
         visible_dense = self._visible(dense_candidates, query.dataset_id, visible_versions)
         visible_sparse = self._visible(sparse_candidates, query.dataset_id, visible_versions)
         fused = reciprocal_rank_fusion(visible_dense, visible_sparse, rrf_k=60)
-        evidence = tuple(hybrid_evidence(candidate) for candidate in fused[: query.top_k])
+        evidence = await self._evidence(query, fused)
         result = build_context_plan(evidence, max_context_tokens=query.max_context_tokens)
         emit_event(
             "retrieval_completed",
             request_id=query.request_id,
             dataset_id=query.dataset_id,
-            stage="dense_retrieve",
+            stage="hybrid_retrieve",
             duration_ms=(perf_counter() - started_at) * 1000,
         )
         return result
+
+    async def _evidence(
+        self, query: RetrieveQuery, fused: Sequence[HybridCandidate]
+    ) -> tuple[Evidence, ...]:
+        if not query.enable_rerank:
+            return tuple(hybrid_evidence(candidate) for candidate in fused[: query.top_k])
+
+        candidates = tuple(fused[:20])
+        try:
+            scores = await self._model.rerank(
+                query.query,
+                [candidate.chunk.content_with_weight for candidate in candidates],
+            )
+        except DomainError as error:
+            if not error.failure.retryable:
+                raise
+            return tuple(hybrid_evidence(candidate) for candidate in fused[: query.top_k])
+        except (ConnectionError, TimeoutError):
+            return tuple(hybrid_evidence(candidate) for candidate in fused[: query.top_k])
+
+        try:
+            ranked = apply_rerank_scores(candidates, scores, top_n=query.top_k)
+        except ValueError as error:
+            raise DomainError(
+                DomainFailure(
+                    "RERANK_SCORE_MISMATCH",
+                    str(error),
+                    retryable=True,
+                )
+            ) from error
+        return tuple(reranked_evidence(candidate) for candidate in ranked)
 
     @staticmethod
     def _visible(

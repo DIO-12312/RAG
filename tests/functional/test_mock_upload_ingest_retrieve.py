@@ -90,6 +90,16 @@ async def test_mock_grpc_upload_async_ingest_and_dense_retrieve(tmp_path) -> Non
                 max_context_tokens=1000,
             )
         )
+        reranked = await stub.Retrieve(
+            rag_service_pb2.RetrieveRequest(
+                request_id="request-rerank",
+                dataset_id=created.result.dataset_id,
+                query="Evidence 来源",
+                top_k=6,
+                enable_rerank=True,
+                max_context_tokens=1000,
+            )
+        )
 
         assert succeeded.result.status == rag_service_pb2.JOB_STATUS_SUCCEEDED
         assert succeeded.result.task_status == rag_service_pb2.TASK_STATUS_SUCCEEDED
@@ -102,6 +112,7 @@ async def test_mock_grpc_upload_async_ingest_and_dense_retrieve(tmp_path) -> Non
         assert evidence.locator.end_line == 2
         assert evidence.scores.HasField("dense_score")
         assert evidence.index_version == 1
+        assert reranked.result.evidence[0].scores.HasField("rerank_score")
 
         retry = await stub.RetryJob(rag_service_pb2.RetryJobRequest())
         cancel = await stub.CancelJob(rag_service_pb2.CancelJobRequest())
