@@ -333,4 +333,4 @@ docs/plans/
 - Milestone D 的 Mock Reliability 已完成：补齐 Finalizer 终态与 staging sweeper、并发去重、Retry 唯一性、CancelJob、generation fence、索引版本清理以及 T1～T25 Mock 故障矩阵；Fake 结果不替代 MySQL 行锁/事务、Elasticsearch mapping/KNN/BM25、JetStream durable/ACK/NAK/redelivery、Compose E2E 和 Docker `KILL` 恢复演练。
 - Milestone E 尚未开始；在 D 的真实基础设施发布门禁通过前，不进入 Go 产品控制面实施。
 
-当前准确定位是“Milestone D Mock Reliability 完成，真实可靠发布基线未验收”。下一步应先为真实基础设施补充单独的详细实施计划，按 MySQL → Elasticsearch → NATS JetStream → Compose E2E/Docker `KILL` 的顺序实现 concrete adapters、运行 integration/resilience 验证并完成 D5；在此之前不得声明内部 Alpha、受控 MVP 或单机生产试运行版本已经正式通过。
+当前准确定位是“Milestone D Mock Reliability 完成，真实可靠发布基线未验收”。真实基础设施方案已选定为纵向分阶段替换，设计基线见 [`superpowers/specs/2026-08-24-real-infrastructure-rag-design.md`](superpowers/specs/2026-08-24-real-infrastructure-rag-design.md)。下一步在该设计获用户审阅后创建单独的详细实施计划，按跨平台生成检查 → MySQL → OpenAI-compatible ModelGateway → Elasticsearch → NATS JetStream → 生产装配 → Compose E2E/Docker `KILL` 的顺序实现 concrete adapters、运行真实模型/integration/E2E/resilience/eval 并完成 D5；在此之前不得声明内部 Alpha、受控 MVP 或单机生产试运行版本已经正式通过。

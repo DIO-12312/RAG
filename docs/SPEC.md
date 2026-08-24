@@ -213,6 +213,8 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 | Rerank | 默认关闭、可选开启 | `rerank_top_n=6`，输入最多 20 个候选。 |
 | 上下文预算 | Evidence 截断器 | `max_context_tokens=4_000`，预留模型回答 token。 |
 
+MVP 的一个运行实例只配置一个 Embedding 模型、一个声明维度和一套 ES vector mapping。`CreateDataset` 仍保存 `embedding_model` 与 `embedding_dimension`，但二者必须与当前运行实例的 ModelGateway 配置一致；不一致时返回稳定 `EMBEDDING_CONFIG_MISMATCH`，不得创建 Dataset。真实 API 返回的每个向量都必须与声明维度一致。若需要使用不同模型或维度，应启动使用独立 ES index/schema 的另一部署；同一 index 不得混写不同维度。
+
 ### 3.4 不直接复制 RAGFlow 的部分
 
 RAGFlow 需要复杂文档理解、多个检索引擎、对象存储、模型提供商、双语言后端、Agent Canvas 和大量连接器，因此使用了更复杂的 Quart/Peewee、Redis、MinIO、ES/Infinity、深度解析及多层任务体系。本项目借鉴其领域边界、幂等摄取、混合检索和引用血缘，不复制其产品规模和双实现负担。
@@ -271,9 +273,11 @@ tests/
 | Contract | `pytest tests/contract` | in-memory / 临时目录 | 各端口的语义一致性 | 每次提交 |
 | Functional | `pytest tests/functional` | 测试专用 Fake ports、临时目录、进程内 gRPC | 无 Docker 的 upload → outbox → worker → retrieve 功能闭环；不计作真实 E2E | 每次提交 |
 | Integration | `pytest -m integration` | MySQL、Elasticsearch、NATS、Compose | 真实 adapter、mapping 与 stream 配置 | PR |
-| E2E | `pytest -m e2e` | gRPC、Worker、Outbox Relay、MySQL、Elasticsearch、NATS、fake embedding/rerank | 上传到可追溯 evidence 闭环 | PR/夜间 |
-| Resilience | `pytest -m resilience` | 可控 queue/DB | crash/redelivery、幂等、取消 | PR |
+| E2E | `pytest -m e2e tests/e2e` | 完整 Compose、真实 OpenAI-compatible Embedding API | 四格式 gRPC upload → async ingest → hybrid retrieve；禁止 Fake ports | PR/发布前 |
+| Mock Resilience | `pytest -m resilience tests/resilience` | 可控 Fake queue/DB | 快速验证 crash/redelivery、幂等、取消和状态栅栏 | PR |
 | Eval | `pytest -m eval` | 固定 embedding 或受控模型 | Recall@K、MRR、evidence/来源定位准确率 | 夜间/发布前 |
+| Model Integration | `pytest -m model_integration` | Docker 网络、真实 OpenAI-compatible Embedding API 与 Secret | 鉴权、单条/批量、顺序、维度、有限数值、相对语义和密钥脱敏 | PR/发布前 |
+| Docker Resilience | `pytest -m docker_resilience` | 完整 Compose、可控 failpoint 与容器 KILL 权限 | Worker/Relay 强杀、NATS 暂停恢复、并发与最终一致性 | 夜间/发布前 |
 
 ### 4.4 必测领域不变量
 
@@ -647,7 +651,9 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 
 ### 5.7 配置与可观测性
 
-`Settings` 只从环境变量/`.env` 读取：MySQL DSN、对象目录、Elasticsearch URL/索引名、NATS URL/stream/consumer、模型 URL/名称/API Key、chunk 参数、`ack_wait`、`max_deliver`、重试退避和日志级别。API Key 只存在环境变量或密钥管理系统，禁止写入 Dataset、Job、日志或 trace。
+`Settings` 只从环境变量/`.env` 读取：MySQL DSN、对象目录、Elasticsearch URL/索引名、NATS URL/stream/consumer、模型 URL/名称/API Key/声明维度、chunk 参数、`ack_wait`、`max_deliver`、重试退避和日志级别。生产容器要求 `EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_MODEL_API_KEY` 与 `EMBEDDING_MODEL_DIMENSION`；维度不得在代码中按供应商写死。API Key 只存在环境变量或密钥管理系统，禁止写入 Dataset、Job、日志、trace、镜像或测试 artifact。
+
+真实模型 integration 和 Docker E2E 被显式选择时，缺少模型配置必须使门禁失败，不得静默 skip 或回退 Fake。Unit、快速 Contract 与 pre-commit 继续使用确定性 Fake，避免将外部网络抖动和费用引入每次提交；Fake 结果仍不能替代真实发布验收。
 
 每个 Job 与检索请求写结构化日志：`request_id/job_id/document_id/dataset_id/stage/duration_ms/model/index_version/error_code`。MVP 先输出 JSON 日志和 DB 简单审计记录；未来 Go 层接入 OpenTelemetry/Langfuse 时，Python 通过 trace context 继续传播。
 
