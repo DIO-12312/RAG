@@ -1,0 +1,7 @@
+{
+  "source_name": "greeter.py",
+  "symbols": [
+    {"name": "Greeter", "start_line": 1, "end_line": 3},
+    {"name": "helper", "start_line": 5, "end_line": 6}
+  ]
+}

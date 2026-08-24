@@ -1,0 +1,6 @@
+{
+  "pages": [
+    {"page_number": 1, "contains": "First page evidence"},
+    {"page_number": 2, "contains": "Second page provenance"}
+  ]
+}

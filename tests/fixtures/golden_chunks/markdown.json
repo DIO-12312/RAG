@@ -1,0 +1,7 @@
+{
+  "input": "# Intro\nAlpha\n\n## Details\nBeta",
+  "sections": [
+    {"title": "Intro", "start_line": 1, "end_line": 2},
+    {"title": "Details", "start_line": 4, "end_line": 5}
+  ]
+}

@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from rag_mvp.adapters.chunkers.recursive import RecursiveChunker
-from rag_mvp.adapters.parsers.text import TextParser
+from rag_mvp.adapters.parsers.router import SourceParserRouter
 from rag_mvp.adapters.storage.local import LocalObjectStorage
 from rag_mvp.application.document_service import DocumentService
 from rag_mvp.application.ingestion_service import IngestionService
@@ -47,7 +47,7 @@ class MockFunctionalHarness:
             metadata,
             IngestionPipeline(
                 storage,
-                TextParser(),
+                SourceParserRouter(),
                 RecursiveChunker(800, 120),
                 model,
                 search,
