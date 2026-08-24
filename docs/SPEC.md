@@ -149,6 +149,8 @@ service RagService {
 
 Object Finalizer 将 staging object 幂等提升为正式 `object_key` 后，必须在同一条件更新中验证 `OutboxEvent.status=WAITING_OBJECT AND Document.status!=DELETED AND Document.lifecycle_generation=Job.document_generation`，才置为 `READY_TO_PUBLISH`。条件失败时 Finalizer 立即删除刚提升的正式对象，并保持/标记 Outbox 为 `CANCELLED`；Relay **只能**发布 READY 事件，因此 Worker 不会在正式对象可读前、或 Document 已删除后收到任务。中断或事务失败且未被 MySQL 引用的 staging object 由 TTL sweeper 清理；`WAITING_OBJECT` 所引用的 staging object 只由 Finalizer 重试或终态补偿任务处理，不能被 TTL 误删。
 
+Outbox Relay 必须同时支持两种触发方式：一是按固定间隔轮询 MySQL 中的 `READY_TO_PUBLISH` 事件，作为进程重启、唤醒丢失和临时故障后的最终兜底；二是由 Finalizer 成功、RetryJob/Delete/Cleanup Task 创建或运维调试发起一次手动/即时唤醒，降低正常路径延迟。两种触发都只能唤醒同一个 Relay 扫描逻辑，随后仍须查询 MySQL 决定发布哪些 `task_id`，禁止应用服务因手动触发而直接发布 NATS。手动唤醒是 best-effort，丢失时由下一轮定时轮询补偿；并发扫描允许产生重复发布，但必须由条件状态更新和 Worker 幂等收敛。
+
 未给 `target_document_id` 是新文档模式：按前述 `IngestionFingerprint` 状态复用 canonical Job 或在 RELEASED 后创建新 Document。给出 `target_document_id` 是重建模式：必须属于该 Dataset，系统在 `SELECT ... FOR UPDATE` 的 Document 行锁内分配唯一的新 `index_version`，并创建对应 Job；新版本完整后才切换 `active_version`。相同 `idempotency_key` 的完整提交必须返回第一次的 `document_id/job_id`，不得新建 Document、Job 或 Task。`CreateDataset`、`DeleteDocument`、`RetryJob` 与 `CancelJob` 也必须携带 `idempotency_key`；`request_id` 用于日志与 trace，不承担去重语义。Worker 的内部状态迁移记录 `operation_id`，不伪装为客户端请求。
 
 `Job.status` 与 `Task.status` 统一为 `PENDING → RUNNING → SUCCEEDED | FAILED | CANCELLED`。Job 是用户可查询的聚合状态：首个 Task 投递后仍为 `PENDING`，任一必要 Task 运行时为 `RUNNING`，全部必要 Task 成功后才为 `SUCCEEDED`。`FAILED` 必须返回稳定的业务错误码、可读错误信息和 `retryable`；`RetryJob` 是唯一的 Job 重试命令，且总是生成新 Job，重复上传不会产生未定义的 `SKIPPED` 状态。MVP 的 `tenant_id` 固定为服务端注入的 `default_tenant`，不接受客户端任意指定。
@@ -288,7 +290,7 @@ tests/
 | T9 | 原文件、Chunk 正文、模型或切块配置变化会分别改变 `file_sha256`、`content_sha256` 或 `config_digest`。 | 参数化 hash 测试，禁止使用未定义的“content digest”术语。 |
 | T10 | 任务取消不能将状态覆盖为成功。 | 在 pipeline checkpoint 之间发 cancel。 |
 | T11 | Chunk ID 与 RAGFlow 规则一致。 | 固定 `content_with_weight` 与 `document_id`，断言 xxh64 十六进制结果；同文档相同文本应得到同 ID。 |
-| T12 | Task 与 OutboxEvent 原子创建；Relay 发布失败不丢 Task。 | 注入 NATS 发布失败，断言同一事务中 Task/Outbox 存在；Relay 恢复后最终发布，重复投递仍由 Worker 幂等收敛。 |
+| T12 | Task 与 OutboxEvent 原子创建；Relay 发布失败不丢 Task。 | 注入 NATS 发布失败，断言同一事务中 Task/Outbox 存在；定时轮询或手动唤醒后 Relay 最终发布，重复投递仍由 Worker 幂等收敛。 |
 | T13 | 删除 Job 的逻辑删除先于清理；重试 Job 不覆盖旧 active version。 | Delete 返回后立即检索为空；失败重试期间旧成功版本仍可见（未删除场景）。 |
 | T14 | 未完成上传或 MySQL 提交失败不产生可见 Document，staging object 最终被清理。 | 中断客户端流与注入事务失败；断言无 Document/Job/Task，并在 TTL sweeper 后断言 staging key 消失。 |
 | T15 | Outbox 只能在正式对象可读后发布。 | Finalizer 前运行 Relay，断言无 NATS 消息；Finalizer 成功后才允许投递；模拟 Finalizer 崩溃后可恢复。 |

@@ -140,6 +140,7 @@ Milestone E  ← Go 公网产品面与 Agent
 - gRPC 流上传写入由 `idempotency_key` 派生的 staging object，并校验大小与 SHA-256。
 - MySQL 事务原子创建 Document/Job/Task/Fingerprint/`WAITING_OBJECT` Outbox。
 - Finalizer 仅在正式对象可读且条件匹配时置 READY；Relay 只发布 READY 的 `task_id`。
+- Relay 同时支持固定间隔轮询和手动/即时唤醒；两者只触发同一个 READY Outbox 扫描，手动唤醒丢失时由定时轮询兜底，应用服务不得直接发布 NATS。
 - Finalizer 超过上限必须收敛到 `FAILED(OBJECT_FINALIZATION_FAILED)`，不能永久 PENDING。
 
 ### B4：Worker 与 TXT Pipeline
@@ -213,8 +214,9 @@ Milestone E  ← Go 公网产品面与 Agent
 ### D1：Outbox、Finalizer 与投递恢复
 
 - 完整 staging sweeper 引用保护、Finalizer 指数退避/终态补偿、Relay publish-confirm 恢复。
+- 实现 Relay 的定时轮询与手动/即时唤醒双触发；两种触发共用扫描和条件标记逻辑，手动触发不绕过 Outbox。
 - 覆盖 Finalizer 强杀、Relay 发布后标记前强杀、NATS 暂时不可用和 MAX_DELIVERIES advisory 补偿。
-- 对应重点测试：T2、T3、T4、T12、T14、T15、T18。
+- 对应重点测试：T2、T3、T4、T12、T14、T15、T18，并增加双触发并发和唤醒丢失后的轮询兜底测试。
 
 ### D2：Fingerprint 与 Retry 并发一致性
 
@@ -238,6 +240,7 @@ Milestone E  ← Go 公网产品面与 Agent
 ### D5：发布验收、CI 与恢复演练
 
 - 完成 T1～T25、覆盖率门槛、四类 E2E、固定 eval，以及 Docker `KILL` Worker 恢复演练。
+- 验证定时轮询、手动唤醒、两者并发及手动唤醒丢失后的定时兜底；确认所有路径都只通过 Outbox 查询和 Relay 发布。
 - PR 必跑 unit/contract/integration/E2E/resilience；夜间运行 eval 和耗时恢复测试。
 - 对照 SPEC 附录 A 逐项验收，未达到的项目必须阻塞发布声明。
 
