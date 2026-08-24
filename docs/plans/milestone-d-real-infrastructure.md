@@ -674,8 +674,11 @@ git commit -m "feat(queue): 实现 JetStream 持久任务队列"
 ## Task 11：装配真实 Server、Worker 与 Outbox 循环
 
 **Files:**
+- Modify: `.env.example`
 - Modify: `src/rag_mvp/bootstrap/container.py`
+- Modify: `src/rag_mvp/config.py`
 - Modify: `src/rag_mvp/rpc/server.py`
+- Modify: `src/rag_mvp/rpc/rag_service.py`
 - Modify: `src/rag_mvp/ingestion/worker.py`
 - Modify: `src/rag_mvp/outbox/main.py`
 - Modify: `src/rag_mvp/outbox/finalizer.py`
@@ -683,8 +686,12 @@ git commit -m "feat(queue): 实现 JetStream 持久任务队列"
 - Modify: `src/rag_mvp/outbox/sweeper.py`
 - Modify: `src/rag_mvp/dev/cli.py`
 - Create: `tests/unit/test_container_roles.py`
+- Create: `tests/unit/test_dev_cli.py`
+- Modify: `tests/unit/test_config.py`
 - Modify: `tests/unit/test_process_lifecycle.py`
+- Modify: `tests/contract/test_grpc_application_contract.py`
 - Modify: `tests/TEST.md`
+- Modify: `docs/SPEC.md`
 
 **Interfaces:**
 - Produces: `async build_server_container(settings) -> Container`
@@ -692,24 +699,26 @@ git commit -m "feat(queue): 实现 JetStream 持久任务队列"
 - Produces: `async build_outbox_container(settings) -> Container`
 - Changes: `run_worker` loops `worker_once` with bounded idle wait until stop
 - Changes: Finalizer/Relay/Sweeper loops receive concrete ports and configured intervals
+- Changes: RagService submission digest and Worker Pipeline share parser/chunk/model Settings
+- Changes: dev CLI exposes every generated RagService operation without direct application imports
 
-- [ ] **Step 1: Write failing role-composition tests**
+- [x] **Step 1: Write failing role-composition tests**
 
 Use injected adapter factories to assert each role only builds allowed dependencies, RagService has all application services, close is reverse-order and idempotent, and imports still cause no network connections.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest tests/unit/test_container_roles.py tests/unit/test_process_lifecycle.py -q`
 
-- [ ] **Step 3: Implement role-specific async composition**
+- [x] **Step 3: Implement role-specific async composition**
 
 Do not import `tests.fakes`. Server gets Document/Job/Retrieval; Worker gets queue/metadata/ingestion/cleanup; Outbox gets metadata/storage/queue. Parser Router includes four production parsers.
 
-- [ ] **Step 4: Implement production loops and graceful shutdown**
+- [x] **Step 4: Implement production loops and graceful shutdown**
 
 Loops must use `asyncio.wait_for(stop_event.wait(), timeout=interval)` instead of unbounded sleep, so SIGTERM exits promptly. ACK/NAK remains only in `worker_once`.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 ```powershell
 uv run pytest tests/unit/test_container_roles.py tests/unit/test_process_lifecycle.py tests/unit/test_import_boundaries.py -q
@@ -718,10 +727,10 @@ uv run ruff check src tests
 uv run mypy src
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
-git add src/rag_mvp/bootstrap/container.py src/rag_mvp/rpc/server.py src/rag_mvp/ingestion/worker.py src/rag_mvp/outbox/main.py src/rag_mvp/outbox/finalizer.py src/rag_mvp/outbox/relay.py src/rag_mvp/outbox/sweeper.py src/rag_mvp/dev/cli.py tests/unit/test_container_roles.py tests/unit/test_process_lifecycle.py tests/TEST.md docs/plans/milestone-d-real-infrastructure.md
+git add .env.example src/rag_mvp/bootstrap/container.py src/rag_mvp/config.py src/rag_mvp/rpc/server.py src/rag_mvp/rpc/rag_service.py src/rag_mvp/ingestion/worker.py src/rag_mvp/outbox/main.py src/rag_mvp/outbox/finalizer.py src/rag_mvp/outbox/relay.py src/rag_mvp/outbox/sweeper.py src/rag_mvp/dev/cli.py tests/unit/test_container_roles.py tests/unit/test_dev_cli.py tests/unit/test_config.py tests/unit/test_process_lifecycle.py tests/contract/test_grpc_application_contract.py tests/TEST.md docs/SPEC.md docs/plans/milestone-d-real-infrastructure.md
 git commit -m "feat(bootstrap): 装配真实 RAG 进程依赖"
 ```
 

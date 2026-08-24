@@ -97,6 +97,8 @@ tests/
    │  ├─ test_provenance.py
    │  └─ test_rerank.py
    ├─ test_config.py
+   ├─ test_container_roles.py
+   ├─ test_dev_cli.py
    ├─ test_generated_comparison.py
    ├─ test_import_boundaries.py
    ├─ test_observability.py
@@ -191,10 +193,15 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_settings_can_be_constructed_explicitly_for_tests` | 测试可显式构造 Settings。 |
 | 同上 | `test_settings_builds_a_normalized_secret_embedding_profile` | 完整模型配置生成规范化 `/embeddings` endpoint，并在对象表示中隐藏 API Key。 |
 | 同上 | `test_embedding_profile_rejects_missing_or_partial_configuration` | Server/Worker 获取模型配置时拒绝缺失或不完整的 provider 设置。 |
+| 同上 | `test_parser_and_chunk_runtime_settings_reject_inconsistent_values` | parser 版本和 chunk overlap/size 的运行配置必须自洽。 |
 | 同上 | `test_production_rejects_grpc_reflection` | 生产环境禁止 gRPC Reflection。 |
 | 同上 | `test_production_rejects_development_mysql_credentials` | 生产环境拒绝开发 MySQL 凭据。 |
 | 同上 | `test_test_markers_are_registered` | pytest 的快速、真实模型、E2E、Mock/Docker 恢复和评测标记均已注册。 |
 | 同上 | `test_runtime_adapter_dependencies_are_importable` | MySQL、ES、NATS、模型 HTTP adapter 的运行依赖可导入。 |
+| `test_container_roles.py` | `test_role_factories_build_only_allowed_dependencies_and_services` | Server、Worker、Outbox 只装配各自允许的 adapter 与 application service。 |
+| 同上 | `test_container_close_is_reverse_order_and_idempotent` | 容器资源按创建逆序关闭，重复关闭不重复执行。 |
+| `test_dev_cli.py` | `test_mutating_commands_require_request_and_idempotency_keys` | gRPC 调试 CLI 的变更命令强制要求 request/idempotency key。 |
+| 同上 | `test_submit_document_streams_one_header_then_bounded_data_frames` | 调试 CLI 按一个 header 加有界 data 帧流式上传文件。 |
 | `test_generated_comparison.py` | `test_generated_comparison_ignores_only_line_endings` | protobuf 生成物同步检查忽略 Windows/Unix 换行符差异。 |
 | 同上 | `test_generated_comparison_rejects_content_changes` | protobuf 生成物同步检查仍拒绝真实文本变化。 |
 | `test_import_boundaries.py` | `test_final_layer_packages_exist` | 规定的分层包存在。 |
@@ -202,7 +209,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_production_source_never_imports_test_fakes` | 生产源码不得导入 `tests/fakes`。 |
 | 同上 | `test_all_declared_ports_are_protocols` | 所有 Port 均以 Protocol 声明。 |
 | `test_observability.py` | `test_rag_event_always_contains_correlation_and_stage_fields` | 结构化事件包含关联 ID 与阶段字段。 |
-| `test_process_lifecycle.py` | `test_empty_background_process_stops_without_external_connections` | 空 Worker/Outbox 进程可在无外部连接时正常退出。 |
+| `test_process_lifecycle.py` | `test_empty_background_process_stops_without_external_connections` | Worker/Outbox 即使处于长轮询等待，也可由 stop event 立即退出且不连接外部服务。 |
 | 同上 | `test_grpc_server_starts_and_stops_cleanly` | gRPC Server 可启动并优雅停止。 |
 | 同上 | `test_all_unopened_rpc_methods_return_feature_not_available` | 未开放 RPC 返回 `FEATURE_NOT_AVAILABLE`。 |
 
@@ -215,7 +222,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | `test_delete_document_contract.py` | `test_delete_atomically_hides_document_cancels_ingest_and_creates_cleanup` | 删除原子隐藏文档、取消摄取并创建清理任务。 |
 | 同上 | `test_new_delete_request_for_deleted_document_is_rejected` | 已删除文档的新删除请求返回稳定错误。 |
 | `test_generated_code.py` | `test_generated_python_is_in_sync_with_proto` | Python protobuf 生成物与 `.proto` 保持同步。 |
-| `test_grpc_application_contract.py` | `test_open_rpc_methods_convert_application_results` | 已开放 RPC 正确转换 application 结果。 |
+| `test_grpc_application_contract.py` | `test_open_rpc_methods_convert_application_results` | 已开放 RPC 正确转换 application 结果，上传摘要使用注入的 parser/chunk/model 配置。 |
 | 同上 | `test_rpc_maps_domain_failures_and_keeps_future_methods_closed` | 领域错误映射正确，未来方法保持关闭。 |
 | 同上 | `test_submit_document_rejects_data_before_header` | 上传流首帧必须为 header。 |
 | 同上 | `test_open_methods_work_through_generated_grpc_transport` | 已开放方法可经生成的 gRPC transport 调用。 |

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from contextlib import suppress
+from datetime import UTC, datetime
 
 from rag_mvp.ports.message_queue import TaskQueue
 from rag_mvp.ports.metadata import MetadataRepository
@@ -28,7 +29,17 @@ async def relay_once(
     return published
 
 
-async def run_relay(stop_event: asyncio.Event) -> None:
-    """Wait for shutdown; process wiring is introduced by the functional container."""
+async def run_relay(
+    metadata: MetadataRepository,
+    queue: TaskQueue,
+    stop_event: asyncio.Event,
+    *,
+    interval_seconds: float,
+    limit: int,
+) -> None:
+    """Relay bounded READY batches and remain promptly interruptible while idle."""
 
-    await stop_event.wait()
+    while not stop_event.is_set():
+        await relay_once(metadata, queue, datetime.now(UTC), limit=limit)
+        with suppress(TimeoutError):
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)

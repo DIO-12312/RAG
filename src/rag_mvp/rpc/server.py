@@ -9,12 +9,11 @@ from grpc_reflection.v1alpha import reflection
 
 from rag_mvp.bootstrap.container import (
     Container,
-    build_container,
+    build_server_container,
     install_shutdown_handlers,
 )
 from rag_mvp.config import Settings, load_settings
 from rag_mvp.rpc.generated import rag_service_pb2, rag_service_pb2_grpc
-from rag_mvp.rpc.rag_service import RagService
 
 
 async def serve(
@@ -25,9 +24,10 @@ async def serve(
     """Start the private gRPC server and stop it gracefully."""
 
     server = grpc.aio.server()
-    rag_service_pb2_grpc.add_RagServiceServicer_to_server(  # type: ignore[no-untyped-call]
-        container.rag_service or RagService(), server
-    )
+    service = container.rag_service
+    if service is None:
+        raise RuntimeError("server container does not have RagService")
+    rag_service_pb2_grpc.add_RagServiceServicer_to_server(service, server)  # type: ignore[no-untyped-call]
 
     if settings.grpc_reflection:
         service_name = rag_service_pb2.DESCRIPTOR.services_by_name["RagService"].full_name
@@ -49,7 +49,7 @@ async def serve(
 
 async def _run() -> None:
     settings = load_settings()
-    container = build_container(settings)
+    container = await build_server_container(settings)
     stop_event = asyncio.Event()
     install_shutdown_handlers(stop_event)
     try:

@@ -178,11 +178,25 @@ class RagService:
         jobs: JobService | None = None,
         retrieval: RetrievalService | None = None,
         now: Callable[[], datetime] | None = None,
+        parser_version: str = "source-router-v1",
+        chunk_size: int = 800,
+        chunk_overlap: int = 120,
+        embedding_model: str | None = None,
     ) -> None:
+        if not parser_version.strip():
+            raise ValueError("parser_version must not be empty")
+        if chunk_size < 1:
+            raise ValueError("chunk_size must be at least 1")
+        if chunk_overlap < 0 or chunk_overlap >= chunk_size:
+            raise ValueError("chunk_overlap must be non-negative and smaller than chunk_size")
         self._documents = documents
         self._jobs = jobs
         self._retrieval = retrieval
         self._now = now or (lambda: datetime.now(UTC))
+        self._parser_version = parser_version
+        self._chunk_size = chunk_size
+        self._chunk_overlap = chunk_overlap
+        self._embedding_model = embedding_model
 
     async def CreateDataset(
         self,
@@ -266,10 +280,10 @@ class RagService:
                     target_document_id=(
                         header.target_document_id if header.HasField("target_document_id") else None
                     ),
-                    parser_version="text-v1",
-                    chunk_size=800,
-                    chunk_overlap=120,
-                    embedding_model=None,
+                    parser_version=self._parser_version,
+                    chunk_size=self._chunk_size,
+                    chunk_overlap=self._chunk_overlap,
+                    embedding_model=self._embedding_model,
                     now=self._now(),
                 )
             )

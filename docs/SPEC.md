@@ -442,9 +442,10 @@ python-rag-mvp/
 │  │  ├─ retrieval_service.py          # 调用 Dense/Sparse 端口、active-version 复核、调用 retrieval 算法
 │  │  └─ dto.py                        # application 输入/输出 DTO；不复用 protobuf DTO
 │  ├─ outbox/
-│  │  ├─ main.py                       # Outbox Relay + Object Finalizer 独立进程入口
+│  │  ├─ main.py                       # Object Finalizer + Relay + staging Sweeper 独立进程入口
 │  │  ├─ finalizer.py                  # 提升 staging object；仅在成功后将 OutboxEvent 置为 READY_TO_PUBLISH
-│  │  └─ relay.py                      # 只轮询 READY_TO_PUBLISH 事件，至少一次发布 task_id 到 JetStream
+│  │  ├─ relay.py                      # 只轮询 READY_TO_PUBLISH 事件，至少一次发布 task_id 到 JetStream
+│  │  └─ sweeper.py                    # TTL 清理未被 WAITING Outbox 引用的中断 staging object
 │  ├─ ports/
 │  │  ├─ metadata.py                   # MetadataRepository + 事务内 Task/Outbox 写入与 active-version 复核
 │  │  ├─ storage.py
@@ -501,6 +502,9 @@ NATS JetStream
         → ports/* → adapters/*
 
 MySQL OutboxEvent
+  → outbox/finalizer.py
+    → ports/storage.py（staging → 正式对象）
+    → ports/metadata.py（WAITING_OBJECT → READY_TO_PUBLISH）
   → outbox/relay.py
     → ports/message_queue.py（仅发布 task_id）
 
@@ -512,7 +516,7 @@ application/retrieval_service.py
   → 返回 Evidence DTO
 ```
 
-`main.py` 只启动 `rpc/server.py`；`outbox/main.py` 只启动 Object Finalizer 与 Relay；`bootstrap/container.py` 是唯一创建 concrete adapter 的位置。Compose 将 gRPC Server、Worker 和 Outbox 进程作为独立进程启动。任何 `rpc/`、`dev/`、`domain/`、`retrieval/` 文件都不得越级导入 `adapters/`。`outbox/finalizer.py` 只依赖 MetadataRepository 与 ObjectStorage；`outbox/relay.py` 只依赖 MetadataRepository 与 TaskQueue。两者都不得消费、ACK/NAK 或执行 Task。
+`main.py` 只启动 `rpc/server.py`；`outbox/main.py` 只启动 Object Finalizer、Relay 与 staging Sweeper；`bootstrap/container.py` 是唯一创建 concrete adapter 的位置。Compose 将 gRPC Server、Worker 和 Outbox 进程作为独立进程启动。Server 只装配 Metadata、Storage、Search、Model 和 RPC application services；Worker 额外装配 Queue、Pipeline、Ingestion/Cleanup services，但不装配 RagService；Outbox 只装配 Metadata、Storage 与 Queue，禁止拿到 Search 或 Model/API Key。容器构建失败时关闭已创建资源，正常关闭按创建顺序逆序执行且幂等。任何 `rpc/`、`dev/`、`domain/`、`retrieval/` 文件都不得越级导入 `adapters/`。`outbox/finalizer.py` 只依赖 MetadataRepository 与 ObjectStorage；`outbox/relay.py` 只依赖 MetadataRepository 与 TaskQueue；`outbox/sweeper.py` 只依赖 MetadataRepository 与 ObjectStorage。三者都不得消费、ACK/NAK 或执行 Task。
 
 ### 5.3 领域模型
 
@@ -651,7 +655,7 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 
 ### 5.7 配置与可观测性
 
-`Settings` 只从环境变量/`.env` 读取：MySQL DSN、对象目录、Elasticsearch URL/索引名、NATS URL/stream/consumer、模型 URL/名称/API Key/声明维度、chunk 参数、`ack_wait`、`max_deliver`、重试退避和日志级别。生产容器要求 `EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_MODEL_API_KEY` 与 `EMBEDDING_MODEL_DIMENSION`；维度不得在代码中按供应商写死。API Key 只存在环境变量或密钥管理系统，禁止写入 Dataset、Job、日志、trace、镜像或测试 artifact。
+`Settings` 只从环境变量/`.env` 读取：MySQL DSN、对象目录、Elasticsearch URL/索引名、NATS URL/stream/consumer、模型 URL/名称/API Key/声明维度、parser 版本、chunk 大小/重叠、上传上限、`ack_wait`、`max_deliver`、Worker 空闲等待、Outbox 轮询/批量/Finalizer 尝试上限、staging sweep 间隔/TTL、重试退避和日志级别。RPC 上传计算 `config_digest` 与 Worker Pipeline 必须使用同一份 parser/chunk/model Settings，禁止入口使用硬编码配置造成去重摘要与真实执行参数不一致。所有循环在超时轮询期间仍必须能被 stop event 立即唤醒。生产容器要求 `EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_MODEL_API_KEY` 与 `EMBEDDING_MODEL_DIMENSION`；维度不得在代码中按供应商写死。API Key 只存在环境变量或密钥管理系统，禁止写入 Dataset、Job、日志、trace、镜像或测试 artifact。
 
 真实模型 integration 和 Docker E2E 被显式选择时，缺少模型配置必须使门禁失败，不得静默 skip 或回退 Fake。Unit、快速 Contract 与 pre-commit 继续使用确定性 Fake，避免将外部网络抖动和费用引入每次提交；Fake 结果仍不能替代真实发布验收。
 

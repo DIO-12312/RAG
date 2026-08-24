@@ -9,6 +9,7 @@ import pytest
 from rag_mvp.application.document_service import DocumentService
 from rag_mvp.application.job_service import JobService
 from rag_mvp.application.retrieval_service import RetrievalService
+from rag_mvp.domain.ids import config_digest
 from rag_mvp.rpc.generated import rag_service_pb2, rag_service_pb2_grpc
 from rag_mvp.rpc.rag_service import RagService
 from tests.fakes.metadata import FakeMetadataRepository
@@ -46,7 +47,7 @@ async def _upload_frames(dataset_id: str) -> AsyncIterator[rag_service_pb2.Uploa
 
 @pytest.mark.asyncio
 async def test_open_rpc_methods_convert_application_results() -> None:
-    service, _ = _service()
+    service, repository = _service()
     created = await service.CreateDataset(
         rag_service_pb2.CreateDatasetRequest(
             context=rag_service_pb2.RequestContext(
@@ -78,6 +79,13 @@ async def test_open_rpc_methods_convert_application_results() -> None:
     assert created.result.dataset_id
     assert submitted.WhichOneof("outcome") == "result"
     assert submitted.result.document_id
+    assert repository.jobs[submitted.result.job_id].config_digest == config_digest(
+        {
+            "parser_version": "source-router-v1",
+            "chunker_config": {"chunk_size": 800, "overlap": 120},
+            "embedding_model": "fake",
+        }
+    )
     assert job.result.status == rag_service_pb2.JOB_STATUS_PENDING
     assert job.result.task_status == rag_service_pb2.TASK_STATUS_PENDING
     assert retrieved.WhichOneof("outcome") == "result"

@@ -64,6 +64,18 @@ class Settings(BaseSettings):
     nats_max_deliver: int = Field(default=3, ge=1)
     object_root: Path = Path("data/objects")
 
+    max_upload_bytes: int = Field(default=16 * 1024 * 1024, ge=1)
+    parser_version: str = "source-router-v1"
+    chunk_size: int = Field(default=800, ge=1)
+    chunk_overlap: int = Field(default=120, ge=0)
+    max_user_retries: int = Field(default=3, ge=1)
+    worker_idle_interval_seconds: float = Field(default=0.1, gt=0)
+    outbox_poll_interval_seconds: float = Field(default=0.25, gt=0)
+    outbox_batch_size: int = Field(default=100, ge=1, le=1000)
+    max_finalize_attempts: int = Field(default=5, ge=1)
+    staging_sweep_interval_seconds: float = Field(default=60.0, gt=0)
+    staging_ttl_seconds: float = Field(default=3600.0, gt=0)
+
     default_tenant_id: str = "default_tenant"
     embedding_model_url: str | None = Field(
         default=None,
@@ -129,6 +141,10 @@ class Settings(BaseSettings):
     def validate_production_safety(self) -> Self:
         """Reject development-only settings in production."""
 
+        if not self.parser_version.strip():
+            raise ValueError("parser_version must not be empty")
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("chunk_overlap must be smaller than chunk_size")
         if self.environment is not Environment.PRODUCTION:
             return self
         if self.grpc_reflection:

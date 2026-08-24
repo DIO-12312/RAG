@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from contextlib import suppress
+from datetime import UTC, datetime
 
 from rag_mvp.application.cleanup_service import CleanupService
 from rag_mvp.application.ingestion_service import IngestionExecution, IngestionService
 from rag_mvp.bootstrap.container import (
     Container,
-    build_container,
+    build_worker_container,
     install_shutdown_handlers,
 )
 from rag_mvp.config import Settings, load_settings
@@ -110,15 +111,34 @@ async def run_worker(
     container: Container,
     stop_event: asyncio.Event,
 ) -> None:
-    """Wait for shutdown without consuming messages in Milestone A."""
+    """Consume one delivery at a time until graceful shutdown is requested."""
 
-    del settings, container
-    await stop_event.wait()
+    queue = container.queue
+    metadata = container.metadata
+    ingestion = container.ingestion
+    if queue is None or metadata is None or ingestion is None:
+        raise RuntimeError("worker container is missing required services")
+    while not stop_event.is_set():
+        processed = await worker_once(
+            queue,
+            metadata,
+            ingestion,
+            settings.nats_consumer,
+            datetime.now(UTC),
+            max_deliveries=settings.nats_max_deliver,
+            cleanup=container.cleanup,
+        )
+        if not processed:
+            with suppress(TimeoutError):
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=settings.worker_idle_interval_seconds,
+                )
 
 
 async def _run() -> None:
     settings = load_settings()
-    container = build_container(settings)
+    container = await build_worker_container(settings)
     stop_event = asyncio.Event()
     install_shutdown_handlers(stop_event)
     try:

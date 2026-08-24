@@ -87,6 +87,22 @@ def test_embedding_profile_rejects_missing_or_partial_configuration() -> None:
         ).require_embedding_profile()
 
 
+@pytest.mark.parametrize(
+    "overrides,error",
+    [
+        ({"parser_version": " "}, "parser_version"),
+        ({"chunk_size": 100, "chunk_overlap": 100}, "chunk_overlap"),
+        ({"chunk_size": 100, "chunk_overlap": 101}, "chunk_overlap"),
+    ],
+)
+def test_parser_and_chunk_runtime_settings_reject_inconsistent_values(
+    overrides: dict[str, object],
+    error: str,
+) -> None:
+    with pytest.raises(ValidationError, match=error):
+        Settings(_env_file=None, **overrides)  # type: ignore[arg-type]
+
+
 def test_production_rejects_grpc_reflection() -> None:
     with pytest.raises(ValidationError, match="reflection"):
         Settings(

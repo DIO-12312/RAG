@@ -3,19 +3,21 @@ from __future__ import annotations
 import asyncio
 import socket
 from collections.abc import AsyncIterator, Awaitable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
 import grpc
 import pytest
 
-from rag_mvp.bootstrap.container import build_container
+from rag_mvp.bootstrap.container import Container
 from rag_mvp.config import Environment, Settings
 from rag_mvp.ingestion.worker import run_worker
 from rag_mvp.outbox.main import run_outbox
 from rag_mvp.rpc.generated import rag_service_pb2
 from rag_mvp.rpc.rag_service import RagService
 from rag_mvp.rpc.server import serve
+from tests.fakes.container import MockFunctionalHarness
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -29,6 +31,9 @@ def _settings(tmp_path: Path) -> Settings:
         elasticsearch_url="http://127.0.0.1:9200",
         nats_url="nats://127.0.0.1:4222",
         object_root=tmp_path,
+        worker_idle_interval_seconds=60,
+        outbox_poll_interval_seconds=60,
+        staging_sweep_interval_seconds=60,
     )
 
 
@@ -39,7 +44,27 @@ async def test_empty_background_process_stops_without_external_connections(
     runner: object,
 ) -> None:
     settings = _settings(tmp_path)
-    container = build_container(settings)
+    harness = MockFunctionalHarness.build(tmp_path, datetime.now(UTC))
+    if runner is run_worker:
+        container = Container(
+            settings,
+            "worker",
+            metadata=harness.metadata,
+            storage=harness.storage,
+            queue=harness.queue,
+            search=harness.search,
+            model=harness.model,
+            ingestion=harness.ingestion,
+            cleanup=harness.cleanup,
+        )
+    else:
+        container = Container(
+            settings,
+            "outbox",
+            metadata=harness.metadata,
+            storage=harness.storage,
+            queue=harness.queue,
+        )
     stop_event = asyncio.Event()
     typed_runner = cast(
         "object",
@@ -70,7 +95,7 @@ async def test_grpc_server_starts_and_stops_cleanly(tmp_path: Path) -> None:
         port = probe.getsockname()[1]
 
     settings = _settings(tmp_path).model_copy(update={"grpc_port": port})
-    container = build_container(settings)
+    container = Container(settings, "server", rag_service=RagService())
     stop_event = asyncio.Event()
 
     task = asyncio.create_task(serve(settings, container, stop_event))
