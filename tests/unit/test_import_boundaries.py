@@ -83,6 +83,17 @@ def test_source_imports_respect_layer_boundaries() -> None:
     assert violations == []
 
 
+def test_production_source_never_imports_test_fakes() -> None:
+    violations = [
+        f"{path.relative_to(SOURCE_ROOT)}: forbidden test import {imported_module}"
+        for path in sorted(SOURCE_ROOT.rglob("*.py"))
+        for imported_module in _imports(path)
+        if imported_module == "tests" or imported_module.startswith("tests.")
+    ]
+
+    assert violations == []
+
+
 def test_all_declared_ports_are_protocols() -> None:
     expected = {
         "metadata": "MetadataRepository",
