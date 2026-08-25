@@ -146,3 +146,21 @@ make docker-down
 ```
 
 只有实际执行过的命令才能标记为通过；Mock 与真实基础设施结果必须分开记录。
+
+## 9. 统一构建入口验收（2026-08-25）
+
+本次验收在 Windows + WSL2 Ubuntu 上使用统一 Make/Earthly 入口完成，未在命令输出或记录中展开运行时 `.env`、模型 URL、API Key、向量或完整 Compose 配置。
+
+| 验收项 | 实际结果 |
+| --- | --- |
+| 工具版本 | GNU Make 4.4.1、Earthly v0.8.16、Docker Engine 29.4.0、Docker Compose v5.1.1 |
+| Protobuf | `make proto` 成功；`src/rag_mvp/rpc/generated` 与 Git 中生成物内容一致，无缓存或临时文件进入导出目录 |
+| 离线门禁 | `make lint`、`make test`、`make ci` 成功；195 passed、9 deselected，核心覆盖率 88.01% |
+| Docker 拓扑 | `make docker-up` 成功；Migration 正常退出，MySQL、Elasticsearch、NATS、Server、Worker、Outbox 均达到声明的健康状态 |
+| Integration/E2E | `make docker-test SUITE=integration`：27 passed in 51.68s |
+| Docker Resilience | `make docker-test SUITE=resilience`：8 passed in 45.75s |
+| Real Eval | `make docker-test SUITE=eval`：1 passed in 16.30s；固定 30 问 Recall@6 = 1.0、MRR@6 = 1.0、locator accuracy = 1.0 |
+| 安全停止 | `make docker-down` 的日志 Secret 扫描成功；停止后 Compose 无运行服务，未执行 `down -v` |
+| 数据持久性 | `rag-mvp_mysql-data`、`rag-mvp_elasticsearch-data`、`rag-mvp_nats-data`、`rag-mvp_object-data` 和 resilience failpoint 卷仍存在 |
+
+未单独执行 `make docker-test SUITE=all`，因为 integration、resilience、eval 已按相同固定顺序分别执行并全部通过。原生 Windows shell 下 Earthly `LOCALLY` 对 Windows 路径的转换不稳定；本次 Docker target 按本文推荐路径在 WSL2 中验收，离线 target 可在原生 Windows 运行。

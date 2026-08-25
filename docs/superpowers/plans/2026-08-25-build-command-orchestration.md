@@ -747,7 +747,7 @@ git commit -m "docs(build): 统一构建与测试使用入口"
 - Consumes: 最终八个 Make targets、有效 `.env`、Docker Desktop 和 Earthly 0.8.16。
 - Produces: 可复核的离线、integration/E2E、Docker resilience、real eval 和安全清理结果；不修改业务数据契约。
 
-- [ ] **Step 1: 执行工具与工作区前置检查**
+- [x] **Step 1: 执行工具与工作区前置检查**
 
 Run:
 
@@ -761,7 +761,7 @@ git status --short
 
 Expected: GNU Make 可用；Earthly 为 `v0.8.16`；Docker daemon/Compose 可用；`.env.example` 仍保持未暂存且 `.env` 不出现在 Git 状态中。
 
-- [ ] **Step 2: 运行 protobuf、Lint 和完整离线门禁**
+- [x] **Step 2: 运行 protobuf、Lint 和完整离线门禁**
 
 Run:
 
@@ -775,7 +775,7 @@ make ci
 
 Expected: 全部 PASS；protobuf 不产生意外 diff；覆盖率不低于 85%。分别记录 pytest 数量、deselected 数量和最终覆盖率。
 
-- [ ] **Step 3: 启动并验证完整 Docker 拓扑**
+- [x] **Step 3: 启动并验证完整 Docker 拓扑**
 
 Run:
 
@@ -786,7 +786,7 @@ docker compose ps --format json
 
 Expected: `rag-migrate` 成功退出，MySQL、Elasticsearch、NATS、Server、Worker 和 Outbox 健康或处于预期运行状态；不得输出渲染后的 Secret。
 
-- [ ] **Step 4: 运行所有真实测试 suite**
+- [x] **Step 4: 运行所有真实测试 suite**
 
 Run:
 
@@ -798,17 +798,17 @@ make docker-test SUITE=eval
 
 Expected: 真实 adapter/model/四格式 E2E、Docker KILL/recovery 和 30 问评测全部 PASS。若某组失败，保留现场、记录失败命令和结果，先诊断再继续；不得直接跳到清理并宣称通过。
 
-- [ ] **Step 5: 扫描日志并安全停止服务**
+- [x] **Step 5: 扫描日志并安全停止服务**
 
 Run: `make docker-down`
 
 Expected: Secret scanner 返回成功，Compose 服务停止，命令未执行 `down -v`。随后运行 `docker volume ls --format '{{.Name}}'`，确认 `rag-mvp` 的 MySQL、ES、NATS 和对象卷仍存在。
 
-- [ ] **Step 6: 记录实际验收数据**
+- [x] **Step 6: 记录实际验收数据**
 
 在 `docs/testing-guide.md` 的发布证据后追加“统一构建入口验收（2026-08-25）”，只记录实际运行的：Earthly 版本、离线通过数、覆盖率、integration/E2E 通过数、resilience 通过数、eval 指标和未运行项。禁止复制 API Key、模型 URL、向量或完整 Compose 配置。
 
-- [ ] **Step 7: 运行最终静态检查并提交验收记录**
+- [x] **Step 7: 运行最终静态检查并提交验收记录**
 
 Run:
 
@@ -824,6 +824,8 @@ Expected: PASS；只暂存验收记录和本计划，不包含 `.env.example`。
 git add docs/testing-guide.md docs/superpowers/plans/2026-08-25-build-command-orchestration.md
 git commit -m "docs(test): 记录统一构建入口验收结果"
 ```
+
+实际结果：GNU Make 4.4.1、Earthly v0.8.16、Docker Engine 29.4.0 与 Compose v5.1.1 可用；protobuf 生成物内容无差异；离线门禁 195 passed、9 deselected、覆盖率 88.01%；真实 integration/E2E 27 项、Docker resilience 8 项、Real Eval 1 项全部通过，30 问三项指标均为 1.0。`make docker-down` 完成 Secret 扫描并停止服务，MySQL、ES、NATS、对象与 failpoint 命名卷保留。Docker target 在推荐的 WSL2 路径验收；原生 Windows Earthly `LOCALLY` 路径转换不作为支持路径。
 
 ---
 
