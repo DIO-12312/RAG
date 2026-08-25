@@ -43,6 +43,8 @@ def test_earthfile_pins_tools_and_separates_offline_targets() -> None:
     earthfile = _text("Earthfile")
 
     assert earthfile.startswith("VERSION --no-implicit-ignore --use-function-keyword 0.8\n")
+    preamble = earthfile.split("# Export the pinned uv binary", maxsplit=1)[0]
+    assert "\nFROM " not in preamble
     assert "ghcr.io/astral-sh/uv:0.12.1" in earthfile
     assert "python:3.12.11-slim-bookworm" in earthfile
     for target in (
@@ -94,6 +96,9 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
     assert _make_targets(makefile) == public
     assert "SUITE ?= integration" in makefile
     assert "+docker-test --SUITE=$(SUITE)" in makefile
+    assert re.search(r"^# .+\nDOCKER_START:\n\s+FUNCTION$", earthfile, re.MULTILINE)
+    assert earthfile.count("DO +DOCKER_START") == 2
+    assert "docker-start:\n    FUNCTION" not in earthfile
     for target in ("docker-up", "docker-test", "docker-down"):
         assert re.search(rf"^# .+\n{re.escape(target)}:", makefile, re.MULTILINE)
         assert re.search(rf"^# .+\n{re.escape(target)}:", earthfile, re.MULTILINE)
