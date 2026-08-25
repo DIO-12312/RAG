@@ -148,7 +148,7 @@ def test_quality_workflows_keep_offline_and_secret_backed_suites_separate() -> N
     assert docker_path.is_file()
     docker = docker_path.read_text(encoding="utf-8")
     assert "pull_request:" in quick
-    assert "eval and not e2e" in quick
+    assert "run: make ci" in quick
     assert "secrets." not in quick
     assert "workflow_dispatch:" in docker
     assert "schedule:" in docker

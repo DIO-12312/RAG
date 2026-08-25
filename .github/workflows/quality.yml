@@ -11,52 +11,16 @@ jobs:
   python-quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      EARTHLY_FLAGS: --ci
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install Python
-        uses: actions/setup-python@v5
+      - name: Install Earthly
+        uses: earthly/actions-setup@v1
         with:
-          python-version: "3.12"
+          version: "v0.8.16"
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          version: "0.12.1"
-          enable-cache: true
-
-      - name: Install locked dependencies
-        run: uv sync --frozen --group dev
-
-      - name: Lint
-        run: uv run ruff check src tests scripts migrations
-
-      - name: Check formatting
-        run: uv run ruff format --check src tests scripts migrations
-
-      - name: Type check
-        run: uv run mypy src scripts migrations
-
-      - name: Verify generated protobuf code
-        run: uv run python scripts/check_generated.py
-
-      - name: Run fast tests
-        run: uv run pytest tests/unit tests/contract tests/functional
-
-      - name: Run fake resilience tests
-        run: uv run pytest -m "resilience and not docker_resilience" tests/resilience
-
-      - name: Run deterministic retrieval evaluation
-        run: uv run pytest -m "eval and not e2e" tests/eval
-
-      - name: Enforce core Python coverage
-        run: >-
-          uv run pytest
-          --cov=rag_mvp.domain
-          --cov=rag_mvp.application
-          --cov=rag_mvp.ingestion
-          --cov=rag_mvp.retrieval
-          --cov-fail-under=85
-          -m "not e2e and not docker_resilience and not integration and not model_integration"
-          tests/unit tests/contract tests/functional tests/resilience tests/eval
+      - name: Run the Secret-free quality gate
+        run: make ci

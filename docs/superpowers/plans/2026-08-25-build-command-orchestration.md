@@ -451,6 +451,8 @@ git commit -m "feat(build): 封装 Docker 服务与真实测试入口"
 **Files:**
 - Modify: `.githooks/pre-commit`
 - Modify: `.github/workflows/quality.yml`
+- Modify: `Makefile`
+- Create: `.earthly.env`
 - Modify: `tests/contract/test_build_entrypoints.py`
 - Modify: `tests/contract/test_container_artifacts.py`
 - Modify: `tests/TEST.md`
@@ -460,7 +462,7 @@ git commit -m "feat(build): 封装 Docker 服务与真实测试入口"
 - Consumes: Task 1 的 `make ci`。
 - Produces: Hook 和无 Secret GitHub workflow 的唯一快速门禁调用 `make ci`，CI 固定 Earthly `v0.8.16`。
 
-- [ ] **Step 1: 写入 Hook 与 quick workflow 的失败契约**
+- [x] **Step 1: 写入 Hook 与 quick workflow 的失败契约**
 
 向 `test_build_entrypoints.py` 添加：
 
@@ -486,13 +488,13 @@ def test_hook_and_quick_workflow_delegate_only_to_make_ci() -> None:
     assert "secrets." not in workflow
 ```
 
-- [ ] **Step 2: 运行测试并确认旧 Hook/Workflow 仍复制底层命令**
+- [x] **Step 2: 运行测试并确认旧 Hook/Workflow 仍复制底层命令**
 
 Run: `uv run pytest tests/contract/test_build_entrypoints.py::test_hook_and_quick_workflow_delegate_only_to_make_ci -q`
 
 Expected: FAIL。
 
-- [ ] **Step 3: 把 Hook 收敛为 make ci**
+- [x] **Step 3: 把 Hook 收敛为 make ci**
 
 `.githooks/pre-commit` 的完整内容改为：
 
@@ -503,7 +505,7 @@ set -eu
 make ci
 ```
 
-- [ ] **Step 4: 把 quick workflow 收敛为 Earthly + Make**
+- [x] **Step 4: 把 quick workflow 收敛为 Earthly + Make**
 
 保留 `push`、`pull_request`、只读权限和 15 分钟 timeout，把 steps 改为：
 
@@ -524,19 +526,19 @@ steps:
     run: make ci
 ```
 
-- [ ] **Step 5: 更新既有工作流分离断言和测试登记**
+- [x] **Step 5: 更新既有工作流分离断言和测试登记**
 
 在 `test_container_artifacts.py::test_quality_workflows_keep_offline_and_secret_backed_suites_separate` 中把 quick workflow 的 `eval and not e2e` 断言替换为 `run: make ci`、`secrets. not in quick` 和 `pull_request:`；Docker workflow 的断言留到 Task 4 修改。
 
 在 `tests/TEST.md` 登记新增函数，并更新既有容器契约函数的职责说明。
 
-- [ ] **Step 6: 运行构建与容器契约测试**
+- [x] **Step 6: 运行构建与容器契约测试**
 
 Run: `uv run pytest tests/contract/test_build_entrypoints.py tests/contract/test_container_artifacts.py -q`
 
 Expected: PASS。
 
-- [ ] **Step 7: 更新计划复选框并提交 Task 3**
+- [x] **Step 7: 更新计划复选框并提交 Task 3**
 
 ```bash
 git add .githooks/pre-commit .github/workflows/quality.yml tests/contract/test_build_entrypoints.py tests/contract/test_container_artifacts.py tests/TEST.md docs/superpowers/plans/2026-08-25-build-command-orchestration.md

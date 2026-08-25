@@ -20,14 +20,19 @@ def test_makefile_offline_targets_are_commented_earthly_only_entrypoints() -> No
 
     assert expected <= _make_targets(makefile)
     assert "EARTHLY ?= earthly" in makefile
+    assert "EARTHLY_ENV_FILE ?= .earthly.env" in makefile
     assert "EARTHLY_FLAGS ?=" in makefile
+    assert (ROOT / ".earthly.env").read_text(encoding="utf-8").startswith("# Intentionally empty")
     execution_recipes = [
         line
         for line in makefile.splitlines()
         if line.startswith("\t") and not line.lstrip().startswith("@echo")
     ]
     assert execution_recipes
-    assert all("$(EARTHLY) $(EARTHLY_FLAGS)" in line for line in execution_recipes)
+    assert all(
+        "$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS)" in line
+        for line in execution_recipes
+    )
     for target in expected:
         assert re.search(rf"^# .+\n{re.escape(target)}:", makefile, re.MULTILINE)
     for target in {"proto", "lint", "test", "ci"}:
@@ -91,3 +96,22 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
     assert "scripts/check_secret_leaks.py" in earthfile
     assert "docker compose down --remove-orphans" in earthfile
     assert "down -v" not in earthfile
+
+
+def test_hook_and_quick_workflow_delegate_only_to_make_ci() -> None:
+    hook_lines = [
+        line.strip() for line in _text(".githooks/pre-commit").splitlines() if line.strip()
+    ]
+    workflow = _text(".github/workflows/quality.yml")
+
+    assert hook_lines == ["#!/bin/sh", "set -eu", "make ci"]
+    assert "earthly/actions-setup@v1" in workflow
+    assert 'version: "v0.8.16"' in workflow
+    assert "EARTHLY_FLAGS: --ci" in workflow
+    assert "run: make ci" in workflow
+    assert "setup-python" not in workflow
+    assert "uv run" not in workflow
+    assert "pytest" not in workflow
+    assert "ruff" not in workflow
+    assert "mypy" not in workflow
+    assert "secrets." not in workflow

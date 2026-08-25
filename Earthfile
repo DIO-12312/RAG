@@ -29,7 +29,7 @@ python-workspace:
     COPY .github ./.github
     COPY .githooks ./.githooks
     COPY Earthfile Makefile Dockerfile docker-compose.yml alembic.ini ./
-    COPY .dockerignore .gitattributes ./
+    COPY .dockerignore .gitattributes .earthly.env ./
     RUN uv sync --frozen --group dev
 
 # Regenerate protobuf code, verify it, and export only successful generated files to the host.
