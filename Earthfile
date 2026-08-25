@@ -37,7 +37,10 @@ proto:
     FROM +python-workspace
     RUN uv run python scripts/generate_proto.py
     RUN uv run python scripts/check_generated.py
-    SAVE ARTIFACT src/rag_mvp/rpc/generated/* AS LOCAL src/rag_mvp/rpc/generated/
+    SAVE ARTIFACT src/rag_mvp/rpc/generated/__init__.py AS LOCAL src/rag_mvp/rpc/generated/__init__.py
+    SAVE ARTIFACT src/rag_mvp/rpc/generated/rag_service_pb2.py AS LOCAL src/rag_mvp/rpc/generated/rag_service_pb2.py
+    SAVE ARTIFACT src/rag_mvp/rpc/generated/rag_service_pb2.pyi AS LOCAL src/rag_mvp/rpc/generated/rag_service_pb2.pyi
+    SAVE ARTIFACT src/rag_mvp/rpc/generated/rag_service_pb2_grpc.py AS LOCAL src/rag_mvp/rpc/generated/rag_service_pb2_grpc.py
 
 # Verify protobuf generated files without modifying the host workspace.
 proto-check:

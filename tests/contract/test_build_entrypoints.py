@@ -62,6 +62,15 @@ def test_earthfile_pins_tools_and_separates_offline_targets() -> None:
         assert re.search(rf"^# .+\n{re.escape(target)}:", earthfile, re.MULTILINE)
     assert "scripts/generate_proto.py" in earthfile
     assert "scripts/check_generated.py" in earthfile
+    assert "generated/* AS LOCAL" not in earthfile
+    for generated_file in (
+        "__init__.py",
+        "rag_service_pb2.py",
+        "rag_service_pb2.pyi",
+        "rag_service_pb2_grpc.py",
+    ):
+        generated_path = f"src/rag_mvp/rpc/generated/{generated_file}"
+        assert f"SAVE ARTIFACT {generated_path} AS LOCAL {generated_path}" in earthfile
     assert "--cov-fail-under=85" in earthfile
     assert "resilience and not docker_resilience" in earthfile
     assert "eval and not e2e" in earthfile
