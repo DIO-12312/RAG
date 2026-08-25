@@ -8,6 +8,8 @@
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
+- GNU Make
+- Earthly 0.8.16
 - Docker Compose（运行真实基础设施 integration、完整服务或 E2E 时需要）
 
 ## 安装
@@ -22,8 +24,7 @@ uv sync --frozen --group dev
 ## 生成 protobuf
 
 ```powershell
-uv run python scripts/generate_proto.py
-uv run python scripts/check_generated.py
+make proto
 ```
 
 `src/rag_mvp/rpc/generated/` 由脚本生成，禁止手工编辑。
@@ -31,15 +32,7 @@ uv run python scripts/check_generated.py
 ## 质量检查
 
 ```powershell
-uv run ruff check src tests scripts migrations
-uv run ruff format --check src tests scripts migrations
-uv run mypy src scripts migrations
-uv run python scripts/check_generated.py
-uv run pytest tests/unit tests/contract
-uv run pytest tests/functional
-uv run pytest -m "resilience and not docker_resilience" tests/resilience
-uv run pytest -m "eval and not e2e" tests/eval
-uv run pytest -m "not e2e and not docker_resilience and not integration and not model_integration" --cov=rag_mvp.domain --cov=rag_mvp.application --cov=rag_mvp.ingestion --cov=rag_mvp.retrieval --cov-fail-under=85 tests/unit tests/contract tests/functional tests/resilience tests/eval
+make ci
 ```
 
 无需 Docker 时，`tests/functional/` 使用真实 gRPC 与本地文件对象存储，只将 MetadataRepository、TaskQueue、SearchEngine 和 ModelGateway 替换为 `tests/fakes/` 中的确定性实现。它覆盖 TXT、Markdown、Python 和文本 PDF 的 upload → ingest → hybrid retrieve，以及重试、逻辑删除和异步清理。Fake 不会被生产 `bootstrap/container.py` 导入。
@@ -56,49 +49,26 @@ git config core.hooksPath .githooks
 
 ## 完整 Docker 服务
 
-先在未提交的 `.env` 中配置真实 Embedding provider。只使用 `--quiet` 校验 Compose，避免渲染后的配置把 Secret 输出到终端：
+先在未提交的 `.env` 中配置真实 Embedding provider，然后使用统一入口启动并等待完整拓扑：
 
 ```powershell
-docker compose config --quiet
-docker compose build rag-server rag-worker rag-outbox
-docker compose up -d rag-server rag-worker rag-outbox
-uv run python scripts/docker_healthcheck.py
+make docker-up
 ```
 
-`rag-migrate` 会先执行 `upgrade head`，只有成功后应用进程才启动。需要单独验证迁移幂等性时可运行：
+`rag-migrate` 会先执行 `upgrade head`，只有成功后应用进程才启动。完整容器内 adapter/model/E2E 验收使用：
 
 ```powershell
-docker compose run --rm rag-migrate
+make docker-test SUITE=integration
 ```
 
-真实 adapter integration 使用宿主机映射端口：
-
-```powershell
-uv run pytest -m "integration and not model_integration" tests/integration
-uv run pytest -m model_integration tests/integration/test_real_embedding_model.py
-```
-
-完整容器内 integration/model/E2E、Docker 强杀与真实评测入口：
-
-```powershell
-docker compose --profile test run --rm -e RAG_MIGRATIONS_ROOT=/app -e RAG_TEST_MYSQL_DSN=mysql+asyncmy://rag:rag@mysql:3306/rag -e RAG_TEST_ELASTICSEARCH_URL=http://elasticsearch:9200 -e RAG_TEST_NATS_URL=nats://nats:4222 rag-test uv run pytest -m "integration or model_integration or e2e" tests/integration tests/e2e -q
-docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q
-docker compose --profile test run --rm rag-test uv run pytest -m eval tests/eval/test_real_retrieval_quality.py -q
-```
+其他 suite、底层排错命令、费用和强杀权限说明见 [`testing-guide.md`](testing-guide.md)。
 
 `.github/workflows/quality.yml` 在 pull request/push 执行无网络快速门禁；`.github/workflows/docker-quality.yml` 在 main push 或手动触发真实 integration/model/E2E，并在夜间或手动触发 Docker Resilience 与 Real Eval。真实作业缺少任一模型 Secret 时会以具名配置错误失败，不会静默 skip。
-
-测试镜像不内置测试源码，而是通过只读 mount 使用当前工作区：
-
-```powershell
-docker compose --profile test build rag-test
-docker compose --profile test run --rm rag-test uv run pytest tests/contract/test_container_artifacts.py
-```
 
 关闭服务但保留持久数据：
 
 ```powershell
-docker compose down
+make docker-down
 ```
 
 不要使用 `docker compose down -v` 做恢复测试，否则会删除 MySQL、ES、NATS 与对象卷中需要验证的状态。

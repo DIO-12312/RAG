@@ -61,6 +61,8 @@
 - 修改删除、Worker 条件完成或 RetryJob 时，必须覆盖“删除与 ingest 并发不复活 Document”“已发布 delivery 的取消竞态”“并发重试只创建一个子 Job”。
 - 修改 Finalizer 或去重时，必须覆盖“删除与 Finalizer 并发不留孤儿对象/READY Outbox”“并发相同文件只生成一个 fingerprint/canonical Job”。
 - 不将 LLM 自由文本作为逐字 snapshot；检索质量使用固定 fixture、Recall@K、MRR 和 citation/evidence 指标验证。
+- 日常完整离线门禁优先运行 `make ci`；只定位单个失败时可直接运行底层 `uv run pytest ...`。真实验收通过 `make docker-test SUITE=integration|resilience|eval|all` 选择，禁止在 Hook、CI 或文档中复制 Earthfile 已维护的完整命令。
+- 修改 `Earthfile`、`Makefile`、Git Hook 或 GitHub Actions 时，必须运行 `tests/contract/test_build_entrypoints.py`，并验证公开 Make target、Secret 隔离和 Docker 持久卷保护不变量。
 - 未运行测试时，不得声称测试通过；应明确说明已运行与未运行的验证项。
 
 ## 安全与协作
@@ -96,4 +98,4 @@
 | `revert` | 回滚已有提交 | `revert: feat(retrieval): 支持 ES 稠密与 BM25 混合召回` |
 
 - 选择顺序：新增能力用 `feat`；修复明确错误用 `fix`；只改性能用 `perf`；只改内部结构用 `refactor`；只改测试用 `test`；只改文档用 `docs`；再考虑 `build`、`ci`、`style` 或 `chore`。
-- 提交前运行与改动相称的检查；提交说明或交接消息必须列出实际运行的命令和未运行项目。
+- 提交前运行与改动相称的检查；能覆盖改动时优先报告 `make lint`、`make test`、`make ci` 或实际 Docker suite，若 Earthly 未安装必须明确说明。提交说明或交接消息必须列出实际运行的命令和未运行项目。

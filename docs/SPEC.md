@@ -187,6 +187,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 | 内部服务接口 | gRPC + Protocol Buffers | Python/Go 共享的版本化契约；支持上传客户端流与检索 Unary 调用。 |
 | 本地调试 | generated gRPC client + `grpcurl`/`grpcui` + dev CLI | 与 Go 调用完全相同的协议路径；Server Reflection 仅在开发环境启用。 |
 | 依赖管理 | `uv` + `pyproject.toml` | 锁定依赖并快速创建可复现环境。 |
+| 构建入口 | Earthly 0.8.16 + GNU Make | Earthfile 保存完整命令与执行环境；Makefile 只暴露稳定高层入口。Git Hook、CI 和 README 不复制底层命令。 |
 | 代码质量 | Ruff + mypy | Ruff 统一 lint/format；mypy 对端口和 DTO 做静态校验。 |
 | 测试 | pytest + pytest-asyncio + pytest-cov | 支持同步/异步单测、覆盖率与 fixture。 |
 | 容器编排 | Docker Compose | 多阶段 `runtime/test` 镜像；Migration 成功后启动 gRPC Server、Worker、Outbox、MySQL、Elasticsearch、NATS；本地 MVP 不引入 Kubernetes。 |
@@ -332,6 +333,9 @@ after_relay_publish_before_mark
 
 ### 4.6 覆盖率与质量门禁
 
+- `make lint` 只执行 Ruff lint/format check、mypy 与 protobuf 生成物一致性检查；不运行测试。
+- `make test` 执行全部确定性离线测试、离线评测和核心模块覆盖率门禁；不访问真实模型或 Docker 基础设施。
+- `make ci` 是 `make lint` 与 `make test` 的完整无 Secret 门禁，也是 Git Hook 和快速 GitHub Actions 的唯一公共入口。真实基础设施验收必须另行使用 `make docker-test SUITE=integration|resilience|eval|all`。
 - `domain/`、`application/`、`ingestion/`、`retrieval/` 的 line coverage 不低于 85%；新增代码不低于 90%。
 - `ports/` 所有抽象方法必须至少有一个 contract 测试覆盖。
 - 发布前 E2E 必须覆盖 `.md`、`.txt`、代码文件和文本 PDF 各一例。
@@ -347,22 +351,15 @@ git config core.hooksPath .githooks
 
 此配置仅改变当前 clone 的 Git 配置，不会提交到仓库；`.githooks/pre-commit` 本身必须使用 Git for Windows 可执行的 POSIX `sh`。每次 `git commit` 在创建提交对象前执行该脚本：所有检查成功才允许提交；任一命令以非零状态退出则 Git 终止提交、保留工作区和暂存区，开发者修复后重新暂存并提交。禁止依赖 `--no-verify` 绕过质量门禁。
 
-当前 Python MVP 的 hook 依次执行：
+当前 Python MVP 的 hook 只调用稳定公共入口：
 
 ```sh
-uv run ruff check src tests scripts migrations
-uv run ruff format --check src tests scripts migrations
-uv run mypy src scripts migrations
-uv run python scripts/check_generated.py
-uv run pytest tests/unit tests/contract tests/functional
-uv run pytest -m "resilience and not docker_resilience" tests/resilience
-uv run pytest -m "eval and not e2e" tests/eval
-uv run pytest --cov=rag_mvp.domain --cov=rag_mvp.application --cov=rag_mvp.ingestion --cov=rag_mvp.retrieval --cov-fail-under=85 -m "not e2e and not docker_resilience and not integration and not model_integration" tests/unit tests/contract tests/functional tests/resilience tests/eval
+make ci
 ```
 
-hook 只做检查，不运行会改写工作区的 `ruff format` 或 `gofmt -w`；否则格式化后的内容不会自动进入本次暂存区，检查对象与提交对象可能不一致。开发者应先显式执行格式化命令并重新 `git add`。hook 中的 resilience 与 eval 分别只运行 Fake 和离线集合；真实 Integration、Model Integration、E2E、Docker Resilience 与 Real Eval 依赖容器、Secret、耗时或模型资源，不进入每次提交 hook，改由 `.github/workflows/docker-quality.yml` 在 main push、手动或夜间执行。
+`make ci` 通过 Earthly 固定 Python、uv、依赖与完整底层命令，并使用独立空白 env 文件，不能读取运行时 `.env`。hook 只做检查，不运行会改写工作区的 `ruff format` 或 `gofmt -w`；否则格式化后的内容不会自动进入本次暂存区，检查对象与提交对象可能不一致。开发者应先显式执行格式化命令并重新 `git add`。hook 中的 resilience 与 eval 分别只运行 Fake 和离线集合；真实 Integration、Model Integration、E2E、Docker Resilience 与 Real Eval 依赖容器、Secret、耗时或模型资源，不进入每次提交 hook，改由 `.github/workflows/docker-quality.yml` 在 main push、手动或夜间执行。
 
-未来引入 Go 产品控制面后，在其 Go module 根目录执行下列检查（路径以实际模块目录为准），并将它们追加到同一 hook：
+未来引入 Go 产品控制面后，应在 Earthfile 中增加 Go 的 format check、vet 与 test target，再由现有 `make ci` 聚合；不得把底层 Go 命令复制到 Hook、CI 或 README。预期检查仍包括：
 
 ```sh
 test -z "$(gofmt -l ./...)"
@@ -415,6 +412,8 @@ Go 是唯一公网入口和 Agent 决策者；Python 是私网 RAG 服务。Go �
 
 ```text
 python-rag-mvp/
+├─ Earthfile                           # 完整、可复现的构建与测试执行环境
+├─ Makefile                            # 八个稳定公共入口；只转发 Earthly target
 ├─ pyproject.toml
 ├─ AGENTS.md
 ├─ LICENSE
@@ -493,6 +492,8 @@ python-rag-mvp/
 │  └─ bootstrap/
 │     └─ container.py                   # 唯一装配点：构建 adapters、services、pipeline、worker 和 gRPC server
 ├─ tests/
+│  └─ contract/
+│     └─ test_build_entrypoints.py     # Make/Earthly/Hook/CI、Secret 隔离与卷保护契约
 └─ data/                                # 本地运行数据；默认不提交 Git
 ```
 

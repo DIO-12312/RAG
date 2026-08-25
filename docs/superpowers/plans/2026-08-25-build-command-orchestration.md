@@ -660,7 +660,7 @@ git commit -m "ci(docker): 复用 Earthly 真实测试编排"
 - Consumes: Tasks 1～4 已验证的八个 Make target 和四个 Docker suite。
 - Produces: 权威规格、协作指令和用户文档统一引用 Makefile；底层单文件 pytest 命令仅保留为排错入口。
 
-- [ ] **Step 1: 在 SPEC 固化工具与入口约束**
+- [x] **Step 1: 在 SPEC 固化工具与入口约束**
 
 在 `3.1 运行时与开发工具` 增加：
 
@@ -670,7 +670,7 @@ git commit -m "ci(docker): 复用 Earthly 真实测试编排"
 
 在 `4.6 覆盖率与质量门禁` 明确 `make lint`、`make test`、`make ci` 的边界；在 `4.7 本地提交质量门禁` 把 Hook 命令列表收敛为 `make ci`，并说明它不运行真实 Docker suite。在 `5.2 建议目录树` 加入 Earthfile、Makefile 和新 contract test。
 
-- [ ] **Step 2: 更新 AGENTS 的强制执行规则**
+- [x] **Step 2: 更新 AGENTS 的强制执行规则**
 
 在“可靠性与测试”加入：
 
@@ -681,7 +681,7 @@ git commit -m "ci(docker): 复用 Earthly 真实测试编排"
 
 在提交规则的“提交前运行与改动相称的检查”后补充：能覆盖改动时优先报告 `make lint`、`make test`、`make ci` 或实际 Docker suite；若 Earthly 未安装必须明确说明。
 
-- [ ] **Step 3: 用高层命令重构 testing guide 的常用路径**
+- [x] **Step 3: 用高层命令重构 testing guide 的常用路径**
 
 更新环境要求为 Docker、GNU Make、Earthly 0.8.16；Windows 推荐 WSL2。日常验证改为：
 
@@ -704,7 +704,7 @@ make docker-down
 
 保留“按功能验证”表内的单测试文件 `uv run pytest`，用于失败定位而非正式公共入口。明确 `SUITE=all` 的执行顺序、真实费用、resilience 的进程控制以及测试失败后服务不会自动关闭。
 
-- [ ] **Step 4: 暂时精简 docs README 的命令区**
+- [x] **Step 4: 暂时精简 docs README 的命令区**
 
 在后续完整 README 重写前，只把现有 protobuf、质量检查和 Docker 长命令替换为：
 
@@ -718,7 +718,7 @@ make docker-down
 
 README 链接到 `testing-guide.md` 获取 suite、排错与底层命令，不在本任务迁移根 README，也不改 `pyproject.toml` 或 `Dockerfile` 的 README 路径。
 
-- [ ] **Step 5: 运行文档相关契约与统一离线入口**
+- [x] **Step 5: 运行文档相关契约与统一离线入口**
 
 Run: `uv run pytest tests/contract/test_build_entrypoints.py tests/contract/test_container_artifacts.py -q`
 
@@ -728,7 +728,7 @@ Run: `make ci`
 
 Expected: PASS。若 Earthly 仍不可用，停止任务并请求用户提供安装权限或可执行路径；不得用旧 Hook 的宿主机命令冒充 `make ci` 验收。
 
-- [ ] **Step 6: 更新计划复选框并提交 Task 5**
+- [x] **Step 6: 更新计划复选框并提交 Task 5**
 
 ```bash
 git add docs/SPEC.md docs/testing-guide.md docs/README.md AGENTS.md docs/superpowers/plans/2026-08-25-build-command-orchestration.md
