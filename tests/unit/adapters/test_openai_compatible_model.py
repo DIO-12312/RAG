@@ -76,6 +76,58 @@ async def test_embed_normalizes_url_preserves_batch_order_and_bearer_header() ->
 
 
 @pytest.mark.asyncio
+async def test_embed_bisects_provider_rejected_multi_input_batches() -> None:
+    request_sizes: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.read())
+        inputs = payload["input"]
+        request_sizes.append(len(inputs))
+        if len(inputs) > 2:
+            return httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "code": "invalid_parameter_error",
+                        "message": "batch is too large",
+                        "param": None,
+                        "type": "invalid_request_error",
+                    }
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "object": "list",
+                "data": [
+                    {
+                        "object": "embedding",
+                        "index": index,
+                        "embedding": [float(value), 1.0, 2.0],
+                    }
+                    for index, value in enumerate(inputs)
+                ],
+            },
+        )
+
+    client = _client(handler)
+    gateway = _gateway(client, batch_size=8, max_retries=0)
+    try:
+        vectors = await gateway.embed(["1", "2", "3", "4", "5"])
+    finally:
+        await gateway.close()
+
+    assert vectors == [
+        (1.0, 1.0, 2.0),
+        (2.0, 1.0, 2.0),
+        (3.0, 1.0, 2.0),
+        (4.0, 1.0, 2.0),
+        (5.0, 1.0, 2.0),
+    ]
+    assert request_sizes == [5, 2, 3, 1, 2]
+
+
+@pytest.mark.asyncio
 async def test_embed_empty_input_does_not_call_provider() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         raise AssertionError("provider must not be called for empty input")

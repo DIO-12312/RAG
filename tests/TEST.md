@@ -27,6 +27,7 @@ tests/
 │  └─ test_task_queue_contract.py
 ├─ e2e/                                     # 真实 Compose 与模型的 gRPC 业务闭环
 │  ├─ conftest.py                            # generated gRPC client、真实运行配置和轮询 helpers
+│  ├─ test_local_computer_architecture_pdf.py # 可选本地真实 PDF 的长文档用户场景
 │  └─ test_real_upload_ingest_retrieve.py
 ├─ eval/                                    # 固定问题集的检索质量评测
 │  ├─ conftest.py                            # 复用真实 E2E gRPC client 与模型运行配置
@@ -73,6 +74,8 @@ tests/
 │  ├─ test_mysql_submission.py
 │  ├─ test_nats_jetstream_adapter.py
 │  └─ test_real_embedding_model.py
+├─ object/                                  # Git 忽略的本地真实 E2E 输入；不属于仓库 fixture
+│  └─ 计组复习.pdf                           # 可选；可由 RAG_E2E_PDF_PATH 覆盖
 ├─ resilience/                              # 故障、竞态、重投与恢复矩阵
 │  ├─ docker/                               # 显式控制真实容器 KILL/stop/start 的恢复验收
 │  │  ├─ conftest.py                        # Docker/barrier/gRPC/MySQL/ES/NATS fixtures 与恢复清理
@@ -132,7 +135,7 @@ tests/
 | Contract | protobuf、gRPC DTO、Port 抽象及各实现必须共同遵守的语义 | `uv run pytest tests/contract` | 使用确定性 Fake 或本地对象存储；真实 adapter 契约待补充 |
 | Functional | upload → Finalizer → Relay → Worker → Retrieve 的完整调用链 | `uv run pytest tests/functional` | 真实 gRPC/application 流程 + Fake Metadata/Queue/Search/Model |
 | Integration | migration 和真实基础设施 adapter 的协议、约束与幂等性 | `uv run pytest -m integration tests/integration` | 要求对应 Docker 服务健康；缺少基础设施时失败而非跳过 |
-| E2E | 四格式 upload → 异步摄取 → hybrid Retrieve 的容器业务闭环 | `docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e -q` | generated gRPC client + 真实 MySQL/ES/NATS/模型；禁止 Fake |
+| E2E | 四格式及可选本地长 PDF 的 upload → 异步摄取 → hybrid Retrieve 容器业务闭环 | `docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e -q` | generated gRPC client + 真实 MySQL/ES/NATS/模型；禁止 Fake；本地 PDF 缺失时仅跳过对应用户场景 |
 | Resilience | failpoint、重投、取消、并发、generation fence 与恢复不变量 | `uv run pytest -m resilience tests/resilience` | Mock Reliability；不替代进程强杀和真实中间件恢复 |
 | Docker Resilience | Worker/Relay KILL、NATS 停启和真实并发栅栏 | `docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q` | test-only Docker socket + barrier 卷；必须显式选择 marker，禁止删除数据卷 |
 | Eval | 固定 30 问检索集的 Recall@6、MRR@6、locator accuracy | 离线：`uv run pytest -m "eval and not e2e" tests/eval`；真实：`docker compose --profile test run --rm rag-test uv run pytest -m eval tests/eval/test_real_retrieval_quality.py -q` | 离线 fixture 负责算法门槛；真实评测通过 gRPC 使用真实 MySQL/ES/NATS/模型，禁止 Fake |
@@ -155,6 +158,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_schema_declares_aggregate_foreign_keys` | Dataset、Document、Job、Task、Outbox 和 manifest 的聚合外键完整。 |
 | 同上 | `test_schema_uses_precise_json_time_and_digest_columns_without_vectors` | JSON、DATETIME(6) 与 64 位摘要字段类型正确，manifest 不保存向量。 |
 | `adapters/test_openai_compatible_model.py` | `test_embed_normalizes_url_preserves_batch_order_and_bearer_header` | 规范 endpoint、仅以 Bearer header 鉴权，并对分批乱序响应恢复全局输入顺序。 |
+| 同上 | `test_embed_bisects_provider_rejected_multi_input_batches` | 多输入批次被供应商以 HTTP 400 拒绝时按顺序二分，成功后恢复完整向量顺序。 |
 | 同上 | `test_embed_empty_input_does_not_call_provider` | 空输入直接返回空向量集合，不产生外部请求。 |
 | 同上 | `test_embed_rejects_invalid_schema_count_dimension_and_numbers` | 参数化拒绝错误 object/data、数量、重复 index、维度和非有限数值。 |
 | 同上 | `test_auth_failure_is_non_retryable_and_redacts_provider_body` | 401/403 不重试，映射稳定鉴权错误且不泄漏供应商正文或密钥。 |
@@ -324,6 +328,7 @@ E2E 测试只从 generated gRPC client 驱动已启动的 Compose 服务，不�
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
 | `test_real_upload_ingest_retrieve.py` | `test_real_upload_ingest_and_hybrid_retrieve_preserves_provenance` | 分别上传 TXT、Markdown、Python 和 PDF，等待真实异步摄取成功，再验证 Dense/BM25/RRF evidence、active index version 与 line/symbol/language/page provenance。 |
+| `test_local_computer_architecture_pdf.py` | `test_local_user_uploads_review_pdf_and_retrieves_distant_topics` | 从 generated gRPC client 上传 Git 忽略的 44 页本地 PDF，等待真实摄取后检索前部“计算机基本功能”和后部“DMA 传送方式”，验证中文正文、页码、分数及来源血缘。 |
 
 ## Functional 测试函数
 

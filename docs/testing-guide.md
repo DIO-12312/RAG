@@ -74,6 +74,7 @@ git config core.hooksPath .githooks
 | --- | --- |
 | 上传、Finalizer、Relay、Worker、检索主链 | `uv run pytest -vv tests/functional/test_mock_upload_ingest_retrieve.py` |
 | TXT、Markdown、Python、文本 PDF | `uv run pytest -vv tests/functional/test_mock_four_formats.py` |
+| 本地 44 页 PDF 真实用户链路 | `docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e/test_local_computer_architecture_pdf.py -q` |
 | 幂等与重复投递 | `uv run pytest -vv tests/functional/test_mock_dedup_and_redelivery.py` |
 | Retry/Cancel/Delete | `uv run pytest -vv tests/functional/test_mock_retry_job.py tests/functional/test_mock_cancel_job.py tests/functional/test_mock_delete_document.py` |
 | 混合检索 | `uv run pytest -vv tests/unit/retrieval` |
@@ -108,6 +109,8 @@ make docker-down
 真实测试注意事项：
 
 - `integration` 会调用真实 Embedding API，产生网络请求、延迟和费用；缺少模型配置必须失败，不能静默回退 Fake。
+- `tests/object/计组复习.pdf` 是 Git 忽略的本地真实输入：存在时由 integration/E2E 套件执行，缺失时只跳过该用例。可用 `RAG_E2E_PDF_PATH` 指向测试进程可见的替代路径；Docker 内路径必须通过 bind mount 可见。
+- Embedding 仍以 32 条为配置批次上限；若兼容供应商用 HTTP 400 拒绝多输入批次，Adapter 会保持顺序二分请求，单条输入仍被拒绝时保留稳定失败，不回退 Fake。
 - `resilience` 使用测试专用 Compose override、共享 barrier 和 Docker socket，能够 KILL/stop/start 精确容器；只允许在隔离的测试宿主机运行。
 - `eval` 摄取固定语料并调用真实模型完成 30 问，通常是模型请求最多的 suite。
 - 真实测试只传必要 Secret 给 `rag-server`、`rag-worker` 和 `rag-test`；Migration 与 Outbox 不应获得模型 API Key。

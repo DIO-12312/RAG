@@ -206,7 +206,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 
 | 能力 | MVP 策略 | 默认参数（可配置） |
 |---|---|---|
-| Embedding | OpenAI-compatible `/embeddings` | `batch_size=32`，维度由模型返回后校验并固定 Elasticsearch index mapping。 |
+| Embedding | OpenAI-compatible `/embeddings` | `batch_size=32`；多输入批次收到 HTTP 400 时按输入顺序二分并重试，单条仍被拒绝则返回 `EMBEDDING_REQUEST_REJECTED`；维度由模型返回后校验并固定 Elasticsearch index mapping。 |
 | Chunking | Markdown/文本递归切分 | `chunk_size=800` 字符，`overlap=120`；代码按函数/类优先，回退到行边界。 |
 | Dense 召回 | Cosine KNN | `dense_top_k=20` |
 | Sparse 召回 | Elasticsearch `match` / `multi_match` BM25 | `sparse_top_k=20` |

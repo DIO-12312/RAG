@@ -104,6 +104,11 @@ class OpenAICompatibleModelGateway:
                     await self._backoff(attempt)
                     continue
                 raise self._unavailable()
+            if response.status_code == 400 and len(texts) > 1:
+                midpoint = len(texts) // 2
+                left = await self._embed_batch(texts[:midpoint])
+                right = await self._embed_batch(texts[midpoint:])
+                return [*left, *right]
             if response.status_code < 200 or response.status_code >= 300:
                 raise DomainError(
                     DomainFailure(
