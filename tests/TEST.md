@@ -250,6 +250,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes` | Docker 公共入口使用合法的复用 Function，验证 suite、静默校验 Compose、扫描日志并安全停服，禁止删除持久卷。 |
 | 同上 | `test_hook_and_quick_workflow_delegate_only_to_make_ci` | Git Hook 与无 Secret quick workflow 只调用固定 Earthly 环境下的 `make ci`。 |
 | 同上 | `test_docker_workflow_delegates_real_suites_and_always_cleans_up` | Secret-backed Docker workflow 只转发三个真实测试 suite，并保证两个 job 始终调用统一清理入口。 |
+| `test_container_artifacts.py` | `test_package_and_container_use_canonical_root_readme` | GitHub 首页、Python package、Docker 镜像与 Earthly 依赖安装统一使用仓库根 README，禁止保留重复入口。 |
 | `test_container_artifacts.py` | `test_runtime_image_and_context_exclude_secrets_and_test_artifacts` | runtime/test 镜像目标、非 root 用户及 build context 排除规则正确。 |
 | 同上 | `test_compose_declares_migration_health_role_secrets_and_shared_storage` | Compose 固定迁移顺序、健康依赖、共享对象卷及模型密钥角色边界。 |
 | 同上 | `test_secret_scanner_fails_without_echoing_the_secret` | 日志命中模型密钥时扫描失败且不回显 Secret。 |

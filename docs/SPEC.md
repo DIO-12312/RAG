@@ -414,11 +414,11 @@ Go 是唯一公网入口和 Agent 决策者；Python 是私网 RAG 服务。Go �
 python-rag-mvp/
 ├─ Earthfile                           # 完整、可复现的构建与测试执行环境
 ├─ Makefile                            # 八个稳定公共入口；只转发 Earthly target
+├─ README.md                           # GitHub、Python package 与容器共用的项目入口
 ├─ pyproject.toml
 ├─ AGENTS.md
 ├─ LICENSE
 ├─ docs/
-│  ├─ README.md
 │  ├─ SPEC.md
 │  ├─ PLAN.md
 │  ├─ testing-guide.md
@@ -680,7 +680,7 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 
 | ID | 任务 | 验收 | 依赖 |
 |---|---|---|---|
-| P0-1 | 创建 `pyproject.toml`、Ruff、mypy、pytest 配置 | `uv run ruff check .`、`uv run pytest tests/unit` 可运行 | - |
+| P0-1 | 创建 `pyproject.toml`、Ruff、mypy、pytest 配置 | `make lint`、`make test` 可运行 | - |
 | P0-2 | 创建 Application Container 和 Settings | 测试可注入 fake ports，无 import-time 网络/连接 | P0-1 |
 | P0-3 | 配置 Compose：gRPC Server、Worker、Outbox Relay、MySQL、Elasticsearch、NATS JetStream | 一条命令启动，全部依赖 healthcheck 可用 | P0-1 |
 

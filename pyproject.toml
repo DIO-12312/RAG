@@ -6,7 +6,7 @@ build-backend = "uv_build"
 name = "rag-mvp"
 version = "0.1.0"
 description = "A reliable Python RAG compute service exposed through versioned gRPC."
-readme = "docs/README.md"
+readme = "README.md"
 requires-python = ">=3.12,<3.15"
 license = "Apache-2.0"
 dependencies = [

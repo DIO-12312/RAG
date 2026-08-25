@@ -15,7 +15,7 @@ COPY --from=uv /uv /uvx /bin/
 WORKDIR /app
 
 COPY pyproject.toml uv.lock LICENSE ./
-COPY docs/README.md ./docs/README.md
+COPY README.md ./README.md
 COPY src ./src
 
 FROM build-base AS runtime-builder
@@ -59,7 +59,7 @@ COPY --from=uv /uv /uvx /bin/
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --chown=rag:rag --from=test-builder /app/.venv /app/.venv
 COPY --chown=rag:rag pyproject.toml uv.lock LICENSE Dockerfile docker-compose.yml .dockerignore ./
-COPY --chown=rag:rag docs/README.md ./docs/README.md
+COPY --chown=rag:rag README.md ./README.md
 COPY --chown=rag:rag scripts ./scripts
 
 USER rag

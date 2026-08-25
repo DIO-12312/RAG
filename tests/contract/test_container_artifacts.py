@@ -18,6 +18,24 @@ from scripts.docker_healthcheck import (
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_package_and_container_use_canonical_root_readme() -> None:
+    readme = ROOT / "README.md"
+    legacy_readme = ROOT / "docs" / "README.md"
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    earthfile = (ROOT / "Earthfile").read_text(encoding="utf-8")
+
+    assert readme.is_file()
+    assert not legacy_readme.exists()
+    assert 'readme = "README.md"' in pyproject
+    assert "docs/README.md" not in pyproject
+    assert "COPY README.md ./README.md" in dockerfile
+    assert "COPY --chown=rag:rag README.md ./README.md" in dockerfile
+    assert "docs/README.md" not in dockerfile
+    assert "COPY README.md ./README.md" in earthfile
+    assert "docs/README.md" not in earthfile
+
+
 def _service_block(compose: str, service: str) -> str:
     marker = f"  {service}:\n"
     start = compose.index(marker)

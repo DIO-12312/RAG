@@ -12,7 +12,7 @@ python-deps:
     WORKDIR /workspace
     ENV UV_LINK_MODE=copy
     COPY pyproject.toml uv.lock LICENSE ./
-    COPY docs/README.md ./docs/README.md
+    COPY README.md ./README.md
     RUN uv sync --frozen --group dev --no-install-project
 
 # Assemble the complete offline workspace without reading .env or contacting production services.
