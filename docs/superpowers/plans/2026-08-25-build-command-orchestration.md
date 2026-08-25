@@ -61,7 +61,7 @@
 - Consumes: `pyproject.toml`、`uv.lock`、`scripts/generate_proto.py`、`scripts/check_generated.py` 和既有 pytest markers。
 - Produces: Earthly targets `+proto`、`+proto-check`、`+ruff-check`、`+format-check`、`+type-check`、`+lint`、`+test-fast`、`+test-resilience`、`+test-eval`、`+test-coverage`、`+test`、`+ci`；Make targets `proto`、`lint`、`test`、`ci`、`help`。
 
-- [ ] **Step 1: 写入离线入口的失败契约测试**
+- [x] **Step 1: 写入离线入口的失败契约测试**
 
 在 `tests/contract/test_build_entrypoints.py` 写入：
 
@@ -132,13 +132,13 @@ def test_earthfile_pins_tools_and_separates_offline_targets() -> None:
     assert "EMBEDDING_MODEL_API_KEY" not in earthfile
 ```
 
-- [ ] **Step 2: 运行测试并确认因入口文件不存在而失败**
+- [x] **Step 2: 运行测试并确认因入口文件不存在而失败**
 
 Run: `uv run pytest tests/contract/test_build_entrypoints.py -q`
 
 Expected: FAIL，错误明确指出 `Makefile` 或 `Earthfile` 不存在。
 
-- [ ] **Step 3: 实现固定 Python 环境和离线 Earthly targets**
+- [x] **Step 3: 实现固定 Python 环境和离线 Earthly targets**
 
 在 `Earthfile` 使用以下结构，完整 pytest 参数必须从现有 Hook/CI 原样迁移：
 
@@ -244,7 +244,7 @@ ci:
     BUILD +test
 ```
 
-- [ ] **Step 4: 实现五个离线 Make targets 和帮助**
+- [x] **Step 4: 实现五个离线 Make targets 和帮助**
 
 `Makefile` 顶部定义 `EARTHLY ?= earthly`、`EARTHLY_FLAGS ?=` 和 `SUITE ?= integration`。每个 target 上方写英文或中文注释；命令只能采用：
 
@@ -268,7 +268,7 @@ ci:
 
 `help` 用普通 `echo` 展示五个当前 target；Task 2 再扩展 Docker 三项。不得通过 `awk`、Python 或 Earthly 生成帮助，以保证 Earthly 尚未安装时仍能查看说明。
 
-- [ ] **Step 5: 固定行尾并登记测试职责**
+- [x] **Step 5: 固定行尾并登记测试职责**
 
 在 `.gitattributes` 添加：
 
@@ -279,7 +279,7 @@ Makefile text eol=lf
 
 在 `tests/TEST.md` 的 Contract 目录树加入 `test_build_entrypoints.py`，并在 Contract 测试函数表登记两个测试及上述职责。
 
-- [ ] **Step 6: 运行离线入口契约与既有容器契约**
+- [x] **Step 6: 运行离线入口契约与既有容器契约**
 
 Run: `uv run pytest tests/contract/test_build_entrypoints.py tests/contract/test_container_artifacts.py -q`
 
@@ -287,7 +287,9 @@ Expected: PASS。
 
 若执行机已安装 Earthly，再运行：`make lint`。若未安装，记录为未运行，不能声称 Earthly 行为已通过。
 
-- [ ] **Step 7: 更新计划复选框并提交 Task 1**
+实际结果：`8 passed`；Ruff check/format 均通过。执行机尚未安装 Earthly，因此 `make lint` 留待 Task 6 的真实环境总验收。
+
+- [x] **Step 7: 更新计划复选框并提交 Task 1**
 
 提交前运行 `git status --short`，确认 `.env.example` 未暂存。
 

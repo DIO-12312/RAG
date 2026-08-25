@@ -12,6 +12,7 @@ tests/
 ├─ __init__.py
 ├─ conftest.py                              # 共享 pytest 配置与 fixture
 ├─ contract/                                # gRPC、protobuf 与 Port 语义契约
+│  ├─ test_build_entrypoints.py
 │  ├─ test_container_artifacts.py
 │  ├─ test_delete_document_contract.py
 │  ├─ test_generated_code.py
@@ -244,6 +245,8 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
+| `test_build_entrypoints.py` | `test_makefile_offline_targets_are_commented_earthly_only_entrypoints` | Makefile 的离线公共入口均有说明，并且只负责转发 Earthly target。 |
+| 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，完整定义 protobuf、质量与离线测试边界，且不引用真实模型 Secret。 |
 | `test_container_artifacts.py` | `test_runtime_image_and_context_exclude_secrets_and_test_artifacts` | runtime/test 镜像目标、非 root 用户及 build context 排除规则正确。 |
 | 同上 | `test_compose_declares_migration_health_role_secrets_and_shared_storage` | Compose 固定迁移顺序、健康依赖、共享对象卷及模型密钥角色边界。 |
 | 同上 | `test_secret_scanner_fails_without_echoing_the_secret` | 日志命中模型密钥时扫描失败且不回显 Secret。 |

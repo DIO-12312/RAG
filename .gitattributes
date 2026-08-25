@@ -5,3 +5,5 @@ scripts/check_generated.py text eol=lf
 src/rag_mvp/rpc/generated/* text eol=lf
 .githooks/* text eol=lf
 .github/workflows/*.yml text eol=lf
+Earthfile text eol=lf
+Makefile text eol=lf
