@@ -61,3 +61,33 @@ def test_earthfile_pins_tools_and_separates_offline_targets() -> None:
     assert "resilience and not docker_resilience" in earthfile
     assert "eval and not e2e" in earthfile
     assert "EMBEDDING_MODEL_API_KEY" not in earthfile
+
+
+def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> None:
+    makefile = _text("Makefile")
+    earthfile = _text("Earthfile")
+    public = {
+        "proto",
+        "lint",
+        "test",
+        "ci",
+        "docker-up",
+        "docker-test",
+        "docker-down",
+        "help",
+    }
+
+    assert _make_targets(makefile) == public
+    assert "SUITE ?= integration" in makefile
+    assert "+docker-test --SUITE=$(SUITE)" in makefile
+    for target in ("docker-up", "docker-test", "docker-down"):
+        assert re.search(rf"^# .+\n{re.escape(target)}:", makefile, re.MULTILINE)
+        assert re.search(rf"^# .+\n{re.escape(target)}:", earthfile, re.MULTILINE)
+    assert "LOCALLY" in earthfile
+    assert "docker compose config --quiet" in earthfile
+    for suite in ("integration", "resilience", "eval", "all"):
+        assert f"{suite})" in earthfile
+    assert "Unknown SUITE:" in earthfile
+    assert "scripts/check_secret_leaks.py" in earthfile
+    assert "docker compose down --remove-orphans" in earthfile
+    assert "down -v" not in earthfile

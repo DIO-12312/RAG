@@ -97,3 +97,36 @@ test:
 ci:
     BUILD +lint
     BUILD +test
+
+# Validate, build, and start the complete Compose topology; requires Docker and a valid .env.
+docker-start:
+    FUNCTION
+    RUN docker compose config --quiet
+    RUN docker compose --profile test build rag-server rag-worker rag-outbox rag-test
+    RUN docker compose up -d --wait --wait-timeout 240 rag-server rag-worker rag-outbox
+
+# Start the complete RAG service topology and wait for every declared health condition.
+docker-up:
+    LOCALLY
+    DO +docker-start
+
+# Run a selected real Docker suite and preserve the service state for diagnosis after failure.
+docker-test:
+    LOCALLY
+    ARG SUITE=integration
+    RUN case "$SUITE" in integration|resilience|eval|all) ;; *) echo "Unknown SUITE: $SUITE" >&2; exit 2 ;; esac
+    DO +docker-start
+    RUN run_integration() { docker compose --profile test run --rm -e RAG_MIGRATIONS_ROOT=/app -e RAG_TEST_MYSQL_DSN=mysql+asyncmy://rag:rag@mysql:3306/rag -e RAG_TEST_ELASTICSEARCH_URL=http://elasticsearch:9200 -e RAG_TEST_NATS_URL=nats://nats:4222 rag-test uv run pytest -m "integration or model_integration or e2e" tests/integration tests/e2e -q; }; \
+        run_resilience() { docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml config --quiet && docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test build rag-server rag-worker rag-outbox rag-test && docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q; }; \
+        run_eval() { docker compose --profile test run --rm rag-test uv run pytest -m eval tests/eval/test_real_retrieval_quality.py -q; }; \
+        case "$SUITE" in integration) run_integration ;; resilience) run_resilience ;; eval) run_eval ;; all) run_integration && run_resilience && run_eval ;; esac
+
+# Scan Compose logs for the configured API key, then stop services without deleting volumes.
+docker-down:
+    LOCALLY
+    RUN log_file="$(mktemp)"; trap 'rm -f "$log_file"' EXIT; \
+        docker compose logs --no-color >"$log_file" 2>&1 || true; \
+        scan_status=0; \
+        docker compose --profile test run --rm -T --no-deps rag-test uv run python scripts/check_secret_leaks.py <"$log_file" || scan_status=$?; \
+        down_status=0; docker compose down --remove-orphans || down_status=$?; \
+        if [ "$scan_status" -ne 0 ]; then exit "$scan_status"; fi; exit "$down_status"

@@ -313,7 +313,7 @@ git commit -m "feat(build): 新增统一离线构建入口"
 - Consumes: Task 1 的 `EARTHLY`、`EARTHLY_FLAGS`、`SUITE` 变量，现有 `docker-compose.yml`、resilience override 和 `rag-test` 镜像。
 - Produces: Earthly function `+docker-start`，targets `+docker-up`、`+docker-test`、`+docker-down`，Make targets `docker-up`、`docker-test`、`docker-down`。
 
-- [ ] **Step 1: 扩展失败契约测试**
+- [x] **Step 1: 扩展失败契约测试**
 
 向 `tests/contract/test_build_entrypoints.py` 添加：
 
@@ -348,13 +348,13 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
     assert "down -v" not in earthfile
 ```
 
-- [ ] **Step 2: 运行测试并确认 Docker target 缺失**
+- [x] **Step 2: 运行测试并确认 Docker target 缺失**
 
 Run: `uv run pytest tests/contract/test_build_entrypoints.py::test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes -q`
 
 Expected: FAIL，指出缺少三个 Docker Make/Earthly targets。
 
-- [ ] **Step 3: 在 Earthfile 实现可复用 Docker 启动 function**
+- [x] **Step 3: 在 Earthfile 实现可复用 Docker 启动 function**
 
 使用 `FUNCTION` 让 `+docker-up` 和 `+docker-test` 共用以下唯一启动序列：
 
@@ -372,7 +372,7 @@ docker-up:
     DO +docker-start
 ```
 
-- [ ] **Step 4: 实现参数化 Docker 测试 target**
+- [x] **Step 4: 实现参数化 Docker 测试 target**
 
 `+docker-test` 必须先在 shell `case` 中校验 `SUITE`，再调用 `DO +docker-start`，然后以 shell functions 保存三条真实命令。命令必须与当前 `docker-quality.yml` 一致：
 
@@ -389,7 +389,7 @@ docker-test:
         case "$SUITE" in integration) run_integration ;; resilience) run_resilience ;; eval) run_eval ;; all) run_integration && run_resilience && run_eval ;; esac
 ```
 
-- [ ] **Step 5: 实现安全清理 target**
+- [x] **Step 5: 实现安全清理 target**
 
 `+docker-down` 使用一个 `RUN` 完成日志采集、Secret 扫描和清理，确保扫描失败后仍执行 down：
 
@@ -407,7 +407,7 @@ docker-down:
 
 Earthfile 中 shell 变量使用单个 `$`，最终脚本传给 shell 的变量必须是 `$?`、`$scan_status` 和 `$down_status`。
 
-- [ ] **Step 6: 扩展 Makefile 到最终八个公共目标**
+- [x] **Step 6: 扩展 Makefile 到最终八个公共目标**
 
 新增三个带注释 target：
 
@@ -427,7 +427,7 @@ docker-down:
 
 同步扩展 `.PHONY` 和 `help`，显示 `SUITE=integration|resilience|eval|all`，默认值为 `integration`。
 
-- [ ] **Step 7: 更新测试登记并运行契约测试**
+- [x] **Step 7: 更新测试登记并运行契约测试**
 
 在 `tests/TEST.md` 登记新增测试函数。
 
@@ -435,7 +435,9 @@ Run: `uv run pytest tests/contract/test_build_entrypoints.py tests/contract/test
 
 Expected: PASS。
 
-- [ ] **Step 8: 更新计划复选框并提交 Task 2**
+实际结果：构建入口与容器契约合计 `9 passed`；Ruff check/format 和 `make help` 均通过。Earthly/Docker 行为留待 Task 6 真实验收。
+
+- [x] **Step 8: 更新计划复选框并提交 Task 2**
 
 ```bash
 git add Earthfile Makefile tests/contract/test_build_entrypoints.py tests/TEST.md docs/superpowers/plans/2026-08-25-build-command-orchestration.md
