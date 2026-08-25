@@ -821,6 +821,97 @@ git commit -m "docs(test): 记录统一构建入口验收结果"
 
 ---
 
+### Task 7: 迁移并重写 GitHub 根 README
+
+**Files:**
+- Create: `README.md`
+- Delete: `docs/README.md`
+- Modify: `pyproject.toml`
+- Modify: `Dockerfile`
+- Modify: `tests/contract/test_container_artifacts.py`
+- Modify: `tests/TEST.md`
+- Modify: `docs/SPEC.md`
+- Modify: `docs/superpowers/plans/2026-08-25-build-command-orchestration.md`
+
+**Interfaces:**
+- Consumes: Task 6 已验收的八个 Make targets、当前 gRPC `rag-dev` 客户端、`LICENSE` 和权威设计文档。
+- Produces: GitHub 与 Python package 共用的根 `README.md`；Docker runtime/test 构建上下文也只复制根 README。
+
+- [ ] **Step 1: 写入根 README 路径的失败契约**
+
+在 `tests/contract/test_container_artifacts.py` 增加 `test_package_and_container_use_canonical_root_readme`：断言根 `README.md` 存在、`docs/README.md` 不存在、`pyproject.toml` 声明 `readme = "README.md"`，并且 Dockerfile 的 build-base/test 阶段只复制根 README。先运行该测试，确认它因根 README 尚不存在而失败。
+
+Run: `uv run pytest tests/contract/test_container_artifacts.py::test_package_and_container_use_canonical_root_readme -q`
+
+Expected: FAIL，原因是 `README.md` 不存在。
+
+- [ ] **Step 2: 迁移 README 的权威路径**
+
+使用 `apply_patch` 创建根 `README.md`、删除 `docs/README.md`，将 `pyproject.toml` 改为：
+
+```toml
+readme = "README.md"
+```
+
+将 Dockerfile 中两处 README 复制改为：
+
+```dockerfile
+COPY README.md ./README.md
+```
+
+同步更新 `docs/SPEC.md` 的建议目录树与构建说明，不保留两个内容重复的 README。
+
+- [ ] **Step 3: 按读者路径重写 README**
+
+根 README 按以下顺序组织，每节只保留读者完成当前动作所需的信息：
+
+1. 项目定位、当前成熟度和 Python/未来 Go 职责边界；
+2. 已实现能力与明确非目标；
+3. `Client → gRPC Server → MySQL/Object Storage → Outbox/NATS → Worker → ES` 架构和摄取/检索数据流；
+4. Docker 最短启动路径：准备 `.env`、`make docker-up`、`make docker-down`；
+5. `rag-dev` 或 generated gRPC client 的最小调用入口，不新增 HTTP 示例；
+6. 本地开发：`make proto`、`make lint`、`make test`、`make ci`；
+7. 测试分层概览，并链接 `docs/testing-guide.md`；
+8. 精简仓库目录树；
+9. 配置、Secret 和持久卷安全说明；
+10. 当前路线图、权威文档链接和 Apache-2.0 许可证。
+
+README 不复制完整 pytest、Docker Compose、CI 或故障恢复长命令，不展示模型 URL/API Key，不把 Python 描述成 Answer/Agent/SSE 服务。
+
+- [ ] **Step 4: 更新测试职责并验证 package/container 契约**
+
+在 `tests/TEST.md` 登记新增测试函数。运行：
+
+```bash
+uv run pytest tests/contract/test_container_artifacts.py tests/contract/test_build_entrypoints.py -q
+uv build
+docker compose --profile test build rag-server rag-worker rag-outbox rag-test
+```
+
+Expected: Contract PASS；sdist/wheel 成功构建并包含根 README 元数据；runtime/test 镜像构建成功。
+
+- [ ] **Step 5: 运行 README 最终内容检查**
+
+Run:
+
+```bash
+git diff --check
+rg -n "docs/README.md|uv run pytest.*tests/(unit|contract|functional)|docker compose .*pytest" README.md pyproject.toml Dockerfile docs/SPEC.md
+```
+
+Expected: `git diff --check` PASS；`rg` 不在根 README、package metadata、Dockerfile 或 SPEC 中发现旧 README 路径或重新引入的长测试命令。
+
+- [ ] **Step 6: 更新计划复选框并提交 Task 7**
+
+提交前检查根 README 链接均使用仓库相对路径，`.env.example` 仍未暂存。
+
+```bash
+git add README.md docs/README.md pyproject.toml Dockerfile tests/contract/test_container_artifacts.py tests/TEST.md docs/SPEC.md docs/superpowers/plans/2026-08-25-build-command-orchestration.md
+git commit -m "docs(readme): 重写项目首页与快速入门"
+```
+
+---
+
 ## Completion Criteria
 
 - 八个 Make target 与所有 Earthly target/function 都有说明注释。
@@ -830,4 +921,5 @@ git commit -m "docs(test): 记录统一构建入口验收结果"
 - `SUITE` 非法值 fail fast，`docker-down` 扫描日志且绝不删除持久卷。
 - 新增构建契约测试和 `tests/TEST.md` 完全对齐。
 - `make ci`、三个真实 Docker suite 和 `make docker-down` 均有实际验收记录；任何未运行项被明确标注。
+- GitHub、Python package 和 Docker 镜像统一使用根 `README.md`，项目首页按读者路径组织且不复制底层长命令。
 - 每个 Task 独立提交，`.env`、API Key、模型 URL 和外部 `.env.example` 修改均未进入提交。
