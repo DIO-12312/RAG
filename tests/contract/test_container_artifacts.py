@@ -154,11 +154,12 @@ def test_quality_workflows_keep_offline_and_secret_backed_suites_separate() -> N
     assert "schedule:" in docker
     assert "pull_request_target:" not in docker
     assert "EMBEDDING_MODEL_API_KEY: ${{ secrets.EMBEDDING_MODEL_API_KEY }}" in docker
-    assert docker.count("docker compose config --quiet") >= 2
-    assert "RAG_MIGRATIONS_ROOT=/app" in docker
-    assert "tests/integration tests/e2e" in docker
-    assert "tests/resilience/docker" in docker
-    assert "tests/eval/test_real_retrieval_quality.py" in docker
+    assert docker.count("earthly/actions-setup@v1") == 2
+    for suite in ("integration", "resilience", "eval"):
+        assert f"make docker-test SUITE={suite}" in docker
+    assert docker.count("make docker-down") == 2
+    assert "docker compose" not in docker
+    assert "uv run pytest" not in docker
     assert "down -v" not in docker
     assert ".githooks/* text eol=lf" in attributes
     assert ".github/workflows/*.yml text eol=lf" in attributes

@@ -560,7 +560,7 @@ git commit -m "ci: 统一快速质量门禁入口"
 - Consumes: Task 2 的 `make docker-test SUITE=...` 和 `make docker-down`。
 - Produces: main/manual/nightly jobs 复用同一 Earthfile Docker 命令，同时保留 Secret 预检与 always cleanup。
 
-- [ ] **Step 1: 写入 Docker workflow 的失败契约**
+- [x] **Step 1: 写入 Docker workflow 的失败契约**
 
 向 `test_build_entrypoints.py` 添加：
 
@@ -582,13 +582,13 @@ def test_docker_workflow_delegates_real_suites_and_always_cleans_up() -> None:
     assert "EMBEDDING_MODEL_API_KEY: ${{ secrets.EMBEDDING_MODEL_API_KEY }}" in workflow
 ```
 
-- [ ] **Step 2: 运行测试并确认旧 workflow 仍复制 Compose/pytest 命令**
+- [x] **Step 2: 运行测试并确认旧 workflow 仍复制 Compose/pytest 命令**
 
 Run: `uv run pytest tests/contract/test_build_entrypoints.py::test_docker_workflow_delegates_real_suites_and_always_cleans_up -q`
 
 Expected: FAIL。
 
-- [ ] **Step 3: 重写 integration/E2E job steps**
+- [x] **Step 3: 重写 integration/E2E job steps**
 
 保留四个 Secret 的具名非空检查，并在 job `env` 中增加 `EARTHLY_FLAGS: --ci`。其余 steps 改为：
 
@@ -606,7 +606,7 @@ Expected: FAIL。
   run: make docker-down
 ```
 
-- [ ] **Step 4: 重写 nightly job steps**
+- [x] **Step 4: 重写 nightly job steps**
 
 同样保留 Secret 检查、在 job `env` 中增加 `EARTHLY_FLAGS: --ci` 并安装固定 Earthly，然后执行：
 
@@ -622,13 +622,13 @@ Expected: FAIL。
   run: make docker-down
 ```
 
-- [ ] **Step 5: 更新既有容器契约和测试登记**
+- [x] **Step 5: 更新既有容器契约和测试登记**
 
 `test_container_artifacts.py::test_quality_workflows_keep_offline_and_secret_backed_suites_separate` 改为断言：quick 使用 `make ci`；Docker workflow 包含三个 `make docker-test` suite、两个 `make docker-down`、Secret 引用、schedule/workflow_dispatch，且不含 `pull_request_target:` 或 `down -v`。
 
 在 `tests/TEST.md` 登记新增函数并更新既有职责。
 
-- [ ] **Step 6: 运行全部 Contract 与离线快速测试**
+- [x] **Step 6: 运行全部 Contract 与离线快速测试**
 
 Run: `uv run pytest tests/contract -q`
 
@@ -638,7 +638,7 @@ Run: `uv run pytest tests/unit tests/contract tests/functional -q`
 
 Expected: PASS。
 
-- [ ] **Step 7: 更新计划复选框并提交 Task 4**
+- [x] **Step 7: 更新计划复选框并提交 Task 4**
 
 ```bash
 git add .github/workflows/docker-quality.yml tests/contract/test_build_entrypoints.py tests/contract/test_container_artifacts.py tests/TEST.md docs/superpowers/plans/2026-08-25-build-command-orchestration.md

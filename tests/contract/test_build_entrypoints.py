@@ -115,3 +115,20 @@ def test_hook_and_quick_workflow_delegate_only_to_make_ci() -> None:
     assert "ruff" not in workflow
     assert "mypy" not in workflow
     assert "secrets." not in workflow
+
+
+def test_docker_workflow_delegates_real_suites_and_always_cleans_up() -> None:
+    workflow = _text(".github/workflows/docker-quality.yml")
+
+    assert workflow.count("earthly/actions-setup@v1") == 2
+    assert workflow.count('version: "v0.8.16"') == 2
+    assert workflow.count("EARTHLY_FLAGS: --ci") == 2
+    assert "make docker-test SUITE=integration" in workflow
+    assert "make docker-test SUITE=resilience" in workflow
+    assert "make docker-test SUITE=eval" in workflow
+    assert workflow.count("make docker-down") == 2
+    assert workflow.count("if: always()") == 2
+    assert "docker compose" not in workflow
+    assert "uv run pytest" not in workflow
+    assert "pull_request_target:" not in workflow
+    assert "EMBEDDING_MODEL_API_KEY: ${{ secrets.EMBEDDING_MODEL_API_KEY }}" in workflow
