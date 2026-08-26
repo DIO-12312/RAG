@@ -24,7 +24,7 @@
   "query": "冯·诺依曼模型计算机采用什么原理？",
   "pages": [6],
   "answer": "存储程序原理：程序和数据预先放在存储器中，机器工作时自动按程序的逻辑顺序从存储器中逐条取出指令并执行。",
-  "required_phrases": ["存储程序原理", "程序和数据预先放在存储器中"]
+  "required_phrases": ["存储", "程序原理", "程序和数据", "存储器", "逐条取出指令", "执行"]
 }
 ```
 
@@ -35,7 +35,7 @@
 - `query`：自然语言问句。
 - `pages`：期望命中的 PDF 页码列表（基于 PdfParser 从 1 开始的分页）。
 - `answer`：完整参考答案文本（取自 PDF 原文，允许轻微规范化）。
-- `required_phrases`：2~3 条必含短语，全部命中 top-k 证据原文才算"答案命中"。
+- `required_phrases`：从参考答案中拆出的关键名词、术语或事实短语，至少 2 条、不设固定上限；全部命中 top-k 证据原文才算"答案命中"。优先拆分为可独立核对的细粒度短语，而不是用一条长句覆盖整个答案。
 
 ## 生成规则
 
@@ -50,7 +50,7 @@
 | 第七章 输入/输出系统 | 33-44 | 13 |
 
 - `pages` 取该知识点实际所在页；跨页知识点可给多个页码（如 DMA 三种传送方式 → [42, 43]）。
-- `required_phrases` 必须是 PDF 原文子串（去除多余空白后可被证据文本包含），避免拼写/翻译漂移。
+- `required_phrases` 必须拆出答案中的重要名词、术语和事实动作，并且都是 PDF 原文子串（去除多余空白后可被证据文本包含），避免拼写/翻译漂移。
 - 质量检查：每条 `required_phrases` 必须能被 `answer` 与对应页原文覆盖；不允许含糊问句（如"什么是寻址方式"）。
 
 ## 评估测试
@@ -97,7 +97,14 @@
 - `tests/eval/fixtures/computer_architecture_knowledge.jsonl`
 - `tests/eval/test_real_computer_architecture_pdf_quality.py`
 
-不改动：`evaluation.py`、`conftest.py`、Makefile、Earthfile、现有测试。PDF 文件 `tests/object/计组复习.pdf` 保持 untracked（个人资料，不进 CI）。
+修改文件：
+
+- `Earthfile`：`eval` suite 同时执行既有 30 问评测和新增 50 问 PDF 评测；本地 PDF 缺失时新增测试按既有约定 skip。
+- `tests/contract/test_build_entrypoints.py`：约束公开 eval suite 必须包含两个真实评测文件。
+- `tests/TEST.md`、`docs/testing-guide.md`：同步测试目录、职责和公开运行边界。
+- `.gitignore`：精确忽略本地真实 PDF。
+
+不改动：`evaluation.py`、`conftest.py`、Makefile、其他现有测试。PDF 文件 `tests/object/计组复习.pdf` 保持 untracked（个人资料，不进 CI）。
 
 ## 风险
 

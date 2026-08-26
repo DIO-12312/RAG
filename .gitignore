@@ -1,5 +1,6 @@
 # Reference material (kept local and never committed)
 references/
+tests/object/计组复习.pdf
 
 # Python bytecode and interpreter caches
 __pycache__/
