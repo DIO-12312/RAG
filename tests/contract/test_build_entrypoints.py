@@ -106,6 +106,9 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
     assert "docker compose config --quiet" in earthfile
     for suite in ("integration", "resilience", "eval", "all"):
         assert f"{suite})" in earthfile
+    eval_command = next(line for line in earthfile.splitlines() if "run_eval()" in line)
+    assert "tests/eval/test_real_retrieval_quality.py" in eval_command
+    assert "tests/eval/test_real_computer_architecture_pdf_quality.py" in eval_command
     assert "Unknown SUITE:" in earthfile
     assert "scripts/check_secret_leaks.py" in earthfile
     assert "docker compose down --remove-orphans" in earthfile

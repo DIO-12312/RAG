@@ -573,7 +573,7 @@ Expected：提交只表达真实 PDF 质量门禁及其必要测试文档/阈值
 - Consumes: Task 2 新增的 `tests/eval/test_real_computer_architecture_pdf_quality.py` 与既有 `tests/eval/test_real_retrieval_quality.py`。
 - Produces: `make docker-test SUITE=eval` 在同一真实 Compose 拓扑依次收集两个 eval 文件；新增 PDF 缺失时 pytest 将该用例标为 skip，旧 30 问仍必须运行。
 
-- [ ] **Step 1: RED——扩展构建入口契约**
+- [x] **Step 1: RED——扩展构建入口契约**
 
 在 `test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes()` 中增加行为断言：Earthfile 必须包含两个真实 eval 测试文件，且 eval pytest 参数不能再只指向旧文件。运行：
 
@@ -583,7 +583,7 @@ uv run pytest tests/contract/test_build_entrypoints.py::test_docker_entrypoints_
 
 Expected：FAIL，指出 `test_real_computer_architecture_pdf_quality.py` 尚未出现在 Earthfile。
 
-- [ ] **Step 2: GREEN——扩展 Earthfile 的 `run_eval()`**
+- [x] **Step 2: GREEN——扩展 Earthfile 的 `run_eval()`**
 
 将 `run_eval()` 的 pytest 路径改为同时列出两个测试文件：
 
@@ -593,7 +593,7 @@ run_eval() { docker compose --profile test run --rm rag-test uv run pytest -m ev
 
 不改变 suite 枚举、Compose 启动、Secret 传递、失败现场保留或 `all` 的执行顺序。
 
-- [ ] **Step 3: 验证构建入口契约转绿**
+- [x] **Step 3: 验证构建入口契约转绿**
 
 ```bash
 uv run pytest tests/contract/test_build_entrypoints.py -q
@@ -601,11 +601,11 @@ uv run pytest tests/contract/test_build_entrypoints.py -q
 
 Expected：全部通过，且新增断言证明公开 eval suite 收集两个真实评测文件。
 
-- [ ] **Step 4: 同步测试运行文档**
+- [x] **Step 4: 同步测试运行文档**
 
 在 `tests/TEST.md` 的 Eval 运行边界和 `docs/testing-guide.md` 的 Real Eval、单项定位命令、真实测试注意事项中明确：公开 eval suite 包含固定 30 问与本地 PDF 50 问；PDF 缺失时只 skip 50 问；存在时会额外产生一次完整文档 embedding 和 50 次 query embedding。
 
-- [ ] **Step 5: 运行构建入口必跑检查与公开真实 suite**
+- [x] **Step 5: 运行构建入口必跑检查与公开真实 suite**
 
 ```bash
 uv run pytest tests/contract/test_build_entrypoints.py -q
@@ -616,7 +616,7 @@ make docker-down
 
 Expected：契约测试、离线门禁和两个真实 eval 文件全部通过；最后安全停止容器并保留持久卷。任何命令未运行或失败必须如实记录。
 
-- [ ] **Step 6: 提交公开 Eval Suite 模块**
+- [x] **Step 6: 提交公开 Eval Suite 模块**
 
 ```bash
 git add Earthfile tests/contract/test_build_entrypoints.py tests/TEST.md docs/testing-guide.md docs/superpowers/plans/2026-08-26-computer-architecture-pdf-eval.md

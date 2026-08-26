@@ -62,7 +62,7 @@ git config core.hooksPath .githooks
 | Offline Eval | 固定 fixture | Recall@6、MRR@6、locator accuracy | `make test` |
 | Integration/E2E | MySQL、ES、NATS、真实模型 | adapter、四格式 gRPC 全链路 | `make docker-test SUITE=integration` |
 | Docker Resilience | 完整 Compose + Docker 控制权 | KILL、停启、重复投递和恢复 | `make docker-test SUITE=resilience` |
-| Real Eval | 真实 gRPC、ES、模型 | 固定语料的 30 问真实检索评测 | `make docker-test SUITE=eval` |
+| Real Eval | 真实 gRPC、ES、模型 | 固定语料 30 问 + 可选本地真实 PDF 五十问评测 | `make docker-test SUITE=eval` |
 
 `tests/fakes/` 不会被生产 `bootstrap/container.py` 导入。Fake 可证明编排和业务不变量，但不能证明 MySQL 锁、ES mapping/KNN/BM25、JetStream ACK/NAK 或进程级恢复。
 
@@ -75,6 +75,7 @@ git config core.hooksPath .githooks
 | 上传、Finalizer、Relay、Worker、检索主链 | `uv run pytest -vv tests/functional/test_mock_upload_ingest_retrieve.py` |
 | TXT、Markdown、Python、文本 PDF | `uv run pytest -vv tests/functional/test_mock_four_formats.py` |
 | 本地 44 页 PDF 真实用户链路 | `docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e/test_local_computer_architecture_pdf.py -q` |
+| 本地 44 页 PDF 五十问质量门禁 | `docker compose --profile test run --rm rag-test uv run pytest -m "eval and e2e" tests/eval/test_real_computer_architecture_pdf_quality.py -q -s` |
 | 幂等与重复投递 | `uv run pytest -vv tests/functional/test_mock_dedup_and_redelivery.py` |
 | Retry/Cancel/Delete | `uv run pytest -vv tests/functional/test_mock_retry_job.py tests/functional/test_mock_cancel_job.py tests/functional/test_mock_delete_document.py` |
 | 混合检索 | `uv run pytest -vv tests/unit/retrieval` |
@@ -109,13 +110,13 @@ make docker-down
 真实测试注意事项：
 
 - `integration` 会调用真实 Embedding API，产生网络请求、延迟和费用；缺少模型配置必须失败，不能静默回退 Fake。
-- `tests/object/计组复习.pdf` 是 Git 忽略的本地真实输入：存在时由 integration/E2E 套件执行，缺失时只跳过该用例。可用 `RAG_E2E_PDF_PATH` 指向测试进程可见的替代路径；Docker 内路径必须通过 bind mount 可见。
+- `tests/object/计组复习.pdf` 是 Git 忽略的本地真实输入：存在时由 integration/E2E 与 eval 套件执行，缺失时只跳过对应本地 PDF 用例。可用 `RAG_E2E_PDF_PATH` 指向测试进程可见的替代路径；Docker 内路径必须通过 bind mount 可见。
 - Embedding 仍以 32 条为配置批次上限；若兼容供应商用 HTTP 400 拒绝多输入批次，Adapter 会保持顺序二分请求，单条输入仍被拒绝时保留稳定失败，不回退 Fake。
 - `resilience` 使用测试专用 Compose override、共享 barrier 和 Docker socket，能够 KILL/stop/start 精确容器；只允许在隔离的测试宿主机运行。
-- `eval` 摄取固定语料并调用真实模型完成 30 问，通常是模型请求最多的 suite。
+- `eval` 始终摄取固定语料并调用真实模型完成 30 问；本地 PDF 存在时还会完整摄取 44 页文档并执行 50 次 query embedding，因此通常是模型请求最多的 suite。
 - 真实测试只传必要 Secret 给 `rag-server`、`rag-worker` 和 `rag-test`；Migration 与 Outbox 不应获得模型 API Key。
 
-真实和离线评测门槛均为 `Recall@6 ≥ 0.85`、`MRR@6 ≥ 0.70`、locator accuracy `= 1.0`。不得通过降低阈值、修改向量 snapshot 或 LLM 自由文本 snapshot 消除失败。
+固定 30 问的真实和离线评测门槛均为 `Recall@6 ≥ 0.85`、`MRR@6 ≥ 0.70`、locator accuracy `= 1.0`。本地 PDF 五十问门槛为 `Recall@6 ≥ 0.80`、`MRR@6 ≥ 0.65`、Top-1 页命中率 `≥ 0.60`、答案包含度 `≥ 0.70`。不得通过降低阈值、修改向量 snapshot 或 LLM 自由文本 snapshot 消除失败。
 
 ## 6. 常见失败
 
