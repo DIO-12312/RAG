@@ -119,7 +119,7 @@ docker-test:
     DO +DOCKER_START
     RUN run_integration() { docker compose --profile test run --rm -e RAG_MIGRATIONS_ROOT=/app -e RAG_TEST_MYSQL_DSN=mysql+asyncmy://rag:rag@mysql:3306/rag -e RAG_TEST_ELASTICSEARCH_URL=http://elasticsearch:9200 -e RAG_TEST_NATS_URL=nats://nats:4222 rag-test uv run pytest -m "integration or model_integration or e2e" tests/integration tests/e2e -q; }; \
         run_resilience() { docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml config --quiet && docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test build rag-server rag-worker rag-outbox rag-test && docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q; }; \
-        run_eval() { docker compose --profile test run --rm rag-test uv run pytest -m eval tests/eval/test_real_retrieval_quality.py tests/eval/test_real_computer_architecture_pdf_quality.py -q; }; \
+        run_eval() { docker compose --profile test run --rm --user "$(id -u):$(id -g)" rag-test uv run pytest -m eval tests/eval/test_real_retrieval_quality.py tests/eval/test_real_computer_architecture_pdf_quality.py -q; }; \
         case "$SUITE" in integration) run_integration ;; resilience) run_resilience ;; eval) run_eval ;; all) run_integration && run_resilience && run_eval ;; esac
 
 # Scan Compose logs for the configured API key, then stop services without deleting volumes.

@@ -82,6 +82,7 @@ def test_earthfile_pins_tools_and_separates_offline_targets() -> None:
 def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> None:
     makefile = _text("Makefile")
     earthfile = _text("Earthfile")
+    compose = _text("docker-compose.yml")
     public = {
         "proto",
         "lint",
@@ -109,10 +110,12 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
     eval_command = next(line for line in earthfile.splitlines() if "run_eval()" in line)
     assert "tests/eval/test_real_retrieval_quality.py" in eval_command
     assert "tests/eval/test_real_computer_architecture_pdf_quality.py" in eval_command
+    assert '--user "$(id -u):$(id -g)"' in eval_command
     assert "Unknown SUITE:" in earthfile
     assert "scripts/check_secret_leaks.py" in earthfile
     assert "docker compose down --remove-orphans" in earthfile
     assert "down -v" not in earthfile
+    assert "./tests/eval/log:/app/tests/eval/log:rw" in compose
 
 
 def test_hook_and_quick_workflow_delegate_only_to_make_ci() -> None:

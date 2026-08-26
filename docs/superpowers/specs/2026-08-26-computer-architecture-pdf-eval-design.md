@@ -77,6 +77,8 @@
      - `answer_coverage`：拼接 top-6 证据原文，`case.required_phrases` 全部包含。
 6. 聚合 50 条指标并断言阈值。
 
+每次真实评测在 `tests/eval/log/` 生成带时间戳的 JSON 日志，记录 50 条 query 的完整测试端 embedding、服务实际返回的 Top-K evidence（含 rank、chunk、页码、各阶段分数和原文）以及聚合指标。日志目录只读挂载之外单独以可写 bind mount 提供给 `rag-test`，生成物不进入 Git。
+
 指标在测试内计算，**不改** `src/rag_mvp/retrieval/evaluation.py`。
 
 ## 阈值

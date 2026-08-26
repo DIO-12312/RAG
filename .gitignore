@@ -55,6 +55,7 @@ site/
 data/
 logs/
 *.log
+tests/eval/log/
 *.pid
 *.tmp
 tmp/

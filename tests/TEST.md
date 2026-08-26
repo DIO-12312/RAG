@@ -388,7 +388,9 @@ Eval 测试负责防止检索排序和 evidence 定位质量回退。不得以 L
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
 | `test_retrieval_quality.py` | `test_fixed_thirty_question_quality_baseline` | 在固定 30 问集上验证 Recall@6、MRR@6 和 locator accuracy 门槛。 |
-| `test_real_computer_architecture_pdf_quality.py` | `test_real_computer_architecture_pdf_quality` | 一次完整摄取本地 44 页计组 PDF，执行 50 次真实 query embedding 与混合检索，按 PdfParser 页码和细粒度关键短语聚合 Recall@6、MRR@6、Top-1 页命中率及答案包含度。 |
+| `test_real_computer_architecture_pdf_quality.py` | `test_real_computer_architecture_pdf_quality` | 一次完整摄取本地 44 页计组 PDF，执行 50 次真实 query embedding 与混合检索，记录每条 query 的完整 embedding 和服务实际 Top-K evidence 到 `eval/log/`，并按 PdfParser 页码和细粒度关键短语聚合 Recall@6、MRR@6、Top-1 页命中率及答案包含度。 |
+| 同上 | `test_case_log_record_preserves_embedding_and_top_k_details` | 离线验证单条日志记录保留完整 embedding、Top-K 排名、分数和 evidence 原文。 |
+| 同上 | `test_write_run_log_persists_json_with_completion_time` | 离线验证评测日志可写入 JSON 文件并包含完成时间。 |
 | `test_real_retrieval_quality.py` | `test_real_thirty_question_quality_baseline` | 十份固定语料经真实 gRPC 摄取后执行 30 问，使用真实 chunk_id 验证 Recall@6、MRR@6 和来源行定位。 |
 
 ## Fake 与 Fixture 的职责

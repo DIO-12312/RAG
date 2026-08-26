@@ -75,7 +75,7 @@ git config core.hooksPath .githooks
 | 上传、Finalizer、Relay、Worker、检索主链 | `uv run pytest -vv tests/functional/test_mock_upload_ingest_retrieve.py` |
 | TXT、Markdown、Python、文本 PDF | `uv run pytest -vv tests/functional/test_mock_four_formats.py` |
 | 本地 44 页 PDF 真实用户链路 | `docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e/test_local_computer_architecture_pdf.py -q` |
-| 本地 44 页 PDF 五十问质量门禁 | `docker compose --profile test run --rm rag-test uv run pytest -m "eval and e2e" tests/eval/test_real_computer_architecture_pdf_quality.py -q -s` |
+| 本地 44 页 PDF 五十问质量门禁 | `docker compose --profile test run --rm rag-test uv run pytest -m "eval and e2e" tests/eval/test_real_computer_architecture_pdf_quality.py -q -s`；每次运行在 `tests/eval/log/` 生成包含完整 query embedding 与实际 Top-K evidence 的 JSON 日志 |
 | 幂等与重复投递 | `uv run pytest -vv tests/functional/test_mock_dedup_and_redelivery.py` |
 | Retry/Cancel/Delete | `uv run pytest -vv tests/functional/test_mock_retry_job.py tests/functional/test_mock_cancel_job.py tests/functional/test_mock_delete_document.py` |
 | 混合检索 | `uv run pytest -vv tests/unit/retrieval` |

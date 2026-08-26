@@ -179,6 +179,7 @@ services:
       RAG_GRPC_TARGET: rag-server:50051
     volumes:
       - ./tests:/app/tests:ro
+      - ./tests/eval/log:/app/tests/eval/log:rw
       - ./proto:/app/proto:ro
       - ./scripts:/app/scripts:ro
       - object-data:/app/data/objects

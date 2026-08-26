@@ -6,11 +6,14 @@ import json
 import os
 from collections import Counter
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
+from rag_mvp.adapters.model.openai_compatible import OpenAICompatibleModelGateway
 from tests.e2e.conftest import (
     EmbeddingRuntime,
     create_dataset,
@@ -20,6 +23,7 @@ from tests.e2e.conftest import (
 )
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "computer_architecture_knowledge.json"
+LOG_DIR = Path(__file__).parent / "log"
 LOCAL_PDF_ENV = "RAG_E2E_PDF_PATH"
 DEFAULT_LOCAL_PDF = Path(__file__).resolve().parents[1] / "object" / "计组复习.pdf"
 EXPECTED_CHAPTER_COUNTS = {
@@ -69,6 +73,156 @@ class QualityMetrics:
     mrr_at_6: float
     top1_page_hit: float
     answer_coverage: float
+
+
+def _optional_score(scores: Any, name: str) -> float | None:
+    return getattr(scores, name) if scores.HasField(name) else None
+
+
+def _case_log_record(
+    case: KnowledgeCase,
+    embedding: tuple[float, ...],
+    result: Any,
+    outcome: CaseOutcome,
+) -> dict[str, Any]:
+    evidence = tuple(result.evidence[:6])
+
+    return {
+        "id": case.id,
+        "query": case.query,
+        "expected_pages": list(case.pages),
+        "embedding": list(embedding),
+        "top_k": [
+            {
+                "rank": rank,
+                "chunk_id": item.chunk_id,
+                "document_id": item.document_id,
+                "index_version": item.index_version,
+                "page_number": item.locator.page_number,
+                "source_name": item.source_name,
+                "scores": {
+                    "dense_score": _optional_score(item.scores, "dense_score"),
+                    "sparse_score": _optional_score(item.scores, "sparse_score"),
+                    "fusion_score": _optional_score(item.scores, "fusion_score"),
+                    "rerank_score": _optional_score(item.scores, "rerank_score"),
+                },
+                "content_with_weight": item.content_with_weight,
+            }
+            for rank, item in enumerate(evidence, start=1)
+        ],
+        "metrics": {
+            "hit": outcome.hit,
+            "reciprocal_rank": outcome.reciprocal_rank,
+            "top1_page_hit": outcome.top1_page_hit,
+            "answer_covered": outcome.answer_covered,
+            "retrieved_pages": list(outcome.retrieved_pages),
+            "missing_phrases": list(outcome.missing_phrases),
+        },
+    }
+
+
+def _write_run_log(
+    cases: tuple[KnowledgeCase, ...],
+    embeddings: dict[str, tuple[float, ...]],
+    results: dict[str, Any],
+    outcomes: tuple[CaseOutcome, ...],
+    metrics: QualityMetrics,
+    *,
+    pdf_path: Path,
+) -> Path:
+    started_at = datetime.now(UTC)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = LOG_DIR / (
+        f"computer_architecture_pdf_quality-{started_at.strftime('%Y%m%d-%H%M%S-%f')}.json"
+    )
+    outcome_by_id = {outcome.case_id: outcome for outcome in outcomes}
+    payload = {
+        "started_at": started_at.isoformat(),
+        "finished_at": datetime.now(UTC).isoformat(),
+        "pdf_path": str(pdf_path),
+        "fixture_path": str(FIXTURE_PATH),
+        "case_count": len(cases),
+        "top_k": 6,
+        "cases": [
+            _case_log_record(
+                case,
+                embeddings[case.id],
+                results[case.id],
+                outcome_by_id[case.id],
+            )
+            for case in cases
+        ],
+        "metrics": {
+            "recall_at_6": metrics.recall_at_6,
+            "mrr_at_6": metrics.mrr_at_6,
+            "top1_page_hit": metrics.top1_page_hit,
+            "answer_coverage": metrics.answer_coverage,
+        },
+    }
+    log_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return log_path
+
+
+def test_case_log_record_preserves_embedding_and_top_k_details() -> None:
+    case = KnowledgeCase(
+        "arch-001", "第一章 计算机系统概论", "query", (1,), "answer", ("answer", "term")
+    )
+    evidence = type(
+        "Evidence",
+        (),
+        {
+            "chunk_id": "chunk-1",
+            "document_id": "document-1",
+            "index_version": 1,
+            "locator": type("Locator", (), {"page_number": 1})(),
+            "source_name": "source.pdf",
+            "scores": type(
+                "Scores",
+                (),
+                {
+                    "dense_score": 0.9,
+                    "sparse_score": 0.8,
+                    "fusion_score": 0.7,
+                    "rerank_score": None,
+                    "HasField": lambda self, name: name != "rerank_score",
+                },
+            )(),
+            "content_with_weight": "answer term",
+        },
+    )()
+    result = type("Result", (), {"evidence": [evidence]})()
+    outcome = CaseOutcome("arch-001", True, 1.0, True, True, (1,), ())
+
+    record = _case_log_record(case, (0.1, 0.2), result, outcome)
+
+    assert record["embedding"] == [0.1, 0.2]
+    assert record["top_k"][0]["rank"] == 1
+    assert record["top_k"][0]["chunk_id"] == "chunk-1"
+    assert record["top_k"][0]["scores"]["fusion_score"] == 0.7
+    assert record["top_k"][0]["content_with_weight"] == "answer term"
+
+
+def test_write_run_log_persists_json_with_completion_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(__import__(__name__), "LOG_DIR", tmp_path)
+    case = KnowledgeCase("arch-001", "第一章 计算机系统概论", "query", (1,), "answer", ("answer",))
+    outcome = CaseOutcome("arch-001", True, 1.0, True, True, (1,), ())
+    metrics = QualityMetrics(1.0, 1.0, 1.0, 1.0)
+    result = type("Result", (), {"evidence": []})()
+
+    log_path = _write_run_log(
+        (case,),
+        {"arch-001": (0.1, 0.2)},
+        {"arch-001": result},
+        (outcome,),
+        metrics,
+        pdf_path=Path("source.pdf"),
+    )
+
+    payload = json.loads(log_path.read_text(encoding="utf-8"))
+    assert log_path.parent == tmp_path
+    assert payload["finished_at"]
 
 
 def _compact_text(value: str) -> str:
@@ -188,9 +342,29 @@ async def test_real_computer_architecture_pdf_quality(
     await wait_for_job(rag_stub, job_id, deadline_seconds=600)
 
     outcomes: list[CaseOutcome] = []
-    for case in cases:
-        result = await retrieve(rag_stub, dataset_id, case.query)
-        outcomes.append(_evaluate_case(case, result, document_id))
+    results: dict[str, Any] = {}
+    embeddings: dict[str, tuple[float, ...]] = {}
+    endpoint = os.getenv("EMBEDDING_MODEL_URL", "").strip()
+    api_key = os.getenv("EMBEDDING_MODEL_API_KEY", "").strip()
+    if not endpoint or not api_key:
+        pytest.fail("real eval requires embedding endpoint and API key for query capture")
+    async with httpx.AsyncClient(
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=float(os.getenv("RAG_EMBEDDING_TIMEOUT_SECONDS", "30")),
+    ) as client:
+        gateway = OpenAICompatibleModelGateway(
+            client,
+            endpoint,
+            embedding_runtime.model,
+            embedding_runtime.dimension,
+            int(os.getenv("RAG_EMBEDDING_BATCH_SIZE", "32")),
+            int(os.getenv("RAG_EMBEDDING_MAX_RETRIES", "3")),
+        )
+        for case in cases:
+            embeddings[case.id] = (await gateway.embed([case.query]))[0]
+            result = await retrieve(rag_stub, dataset_id, case.query)
+            results[case.id] = result
+            outcomes.append(_evaluate_case(case, result, document_id))
 
     frozen_outcomes = tuple(outcomes)
     metrics = _aggregate(frozen_outcomes)
@@ -213,6 +387,15 @@ async def test_real_computer_architecture_pdf_quality(
         f"top1_page_hit={metrics.top1_page_hit:.3f} "
         f"answer_coverage={metrics.answer_coverage:.3f}"
     )
+    log_path = _write_run_log(
+        cases,
+        embeddings,
+        results,
+        frozen_outcomes,
+        metrics,
+        pdf_path=computer_architecture_pdf,
+    )
+    print(f"log={log_path}")
     print(summary)
     failures = []
     if metrics.recall_at_6 < RECALL_AT_6_THRESHOLD:
