@@ -217,7 +217,7 @@ Expected：暂存区只包含 fixture 与本计划；提交后记录 commit hash
 - Consumes: Task 1 的 JSONL；`tests.e2e.conftest.EmbeddingRuntime`、`create_dataset(stub, runtime, case_name) -> str`、`submit_document(stub, dataset_id, source) -> tuple[str, str]`、`wait_for_job(stub, job_id, deadline_seconds=240) -> JobResult`、`retrieve(stub, dataset_id, query) -> RetrieveResult`。
 - Produces: `_load_cases(path: Path) -> tuple[KnowledgeCase, ...]`、`QualityMetrics(recall_at_6, mrr_at_6, top1_page_hit, answer_coverage)` 和 `test_real_computer_architecture_pdf_quality()`；不产生生产 API。
 
-- [ ] **Step 1: 先确认新测试尚不存在**
+- [x] **Step 1: 先确认新测试尚不存在**
 
 运行：
 
@@ -227,7 +227,7 @@ uv run pytest tests/eval/test_real_computer_architecture_pdf_quality.py -q
 
 Expected：FAIL，pytest 明确报告测试文件不存在。这确认后续新增文件确实提供新的门禁，而不是覆盖既有测试。
 
-- [ ] **Step 2: 写入完整 JSONL loader、指标计算和真实评估测试**
+- [x] **Step 2: 写入完整 JSONL loader、指标计算和真实评估测试**
 
 使用 `apply_patch` 创建 `tests/eval/test_real_computer_architecture_pdf_quality.py`，内容如下：
 
@@ -459,7 +459,7 @@ async def test_real_computer_architecture_pdf_quality(
     assert not failures, "\n".join([summary, *failures, *diagnostics])
 ```
 
-- [ ] **Step 3: 运行静态检查和离线边界检查**
+- [x] **Step 3: 运行静态检查和离线边界检查**
 
 运行：
 
@@ -471,7 +471,7 @@ uv run pytest -m "eval and not e2e" tests/eval -q
 
 Expected：Ruff 两项通过；离线 eval 继续通过，新增真实测试因同时带 `e2e` marker 被 deselect，不读取 PDF、不调用模型。
 
-- [ ] **Step 4: 在真实 Docker 拓扑运行新增测试并记录初始指标**
+- [x] **Step 4: 在真实 Docker 拓扑运行新增测试并记录初始指标**
 
 先确保 `.env` 中配置了真实 embedding endpoint、模型名、API Key 和维度；然后运行：
 
@@ -490,7 +490,7 @@ Expected：完成一次 PDF 摄取、50 次 query embedding 与混合检索；�
 2. 检查 top-6 是否来自目标 `document_id`、locator 是否保留页码、短语是否仅因 chunk 边界或空白规范化未命中；修复测试聚合错误，但不得改生产检索算法来迎合评测。
 3. fixture 与计算均正确后，连续运行同一命令 3 次，记录每次四项指标。只有稳定低于初始阈值的指标才允许校准；最终阈值取三次最小观测值向下保留两位小数，并额外预留 `0.02` 波动空间，同时在设计 SPEC 的“阈值”段写入最终数值、三次观测值、模型名和日期。未低于初始阈值的指标保持原值。
 
-- [ ] **Step 5: 同步登记 `tests/TEST.md`**
+- [x] **Step 5: 同步登记 `tests/TEST.md`**
 
 使用 `apply_patch` 完成四处精确更新：
 
@@ -499,7 +499,7 @@ Expected：完成一次 PDF 摄取、50 次 query embedding 与混合检索；�
 3. 在“Eval 测试函数”表加入 `test_real_computer_architecture_pdf_quality.py` / `test_real_computer_architecture_pdf_quality`，职责写明一次完整 PDF 摄取、50 次 query embedding、Recall@6、MRR@6、Top-1 页命中率和答案包含度。
 4. 在“Fake 与 Fixture 的职责”表加入 `eval/fixtures/computer_architecture_knowledge.jsonl`，说明 50 条记录按 PdfParser 页码锚定，源 PDF 保持本地且不进 Git。
 
-- [ ] **Step 6: 运行最终离线与真实验证**
+- [x] **Step 6: 运行最终离线与真实验证**
 
 运行：
 
@@ -521,7 +521,7 @@ make docker-down
 
 Expected：服务停止但命名卷保留；禁止执行 `docker compose down -v`。
 
-- [ ] **Step 7: 检查最终改动范围和个人资料隔离**
+- [x] **Step 7: 检查最终改动范围和个人资料隔离**
 
 运行：
 
@@ -534,7 +534,7 @@ git check-ignore -v tests/object/计组复习.pdf
 
 Expected：本任务拥有的改动只有新测试、`tests/TEST.md`、本计划，以及仅在阈值确实校准时产生的设计 SPEC 阈值更新；PDF、`.env`、API Key、日志、缓存和 `data/` 均不出现在待提交文件中。
 
-- [ ] **Step 8: 提交真实评估模块**
+- [x] **Step 8: 提交真实评估模块**
 
 若阈值未改变：
 
