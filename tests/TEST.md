@@ -32,7 +32,7 @@ tests/
 ├─ eval/                                    # 固定问题集的检索质量评测
 │  ├─ conftest.py                            # 复用真实 E2E gRPC client 与模型运行配置
 │  ├─ fixtures/
-│  │  ├─ computer_architecture_knowledge.jsonl
+│  │  ├─ computer_architecture_knowledge.json
 │  │  └─ retrieval_quality.json
 │  ├─ test_retrieval_quality.py
 │  ├─ test_real_computer_architecture_pdf_quality.py
@@ -404,7 +404,7 @@ Eval 测试负责防止检索排序和 evidence 定位质量回退。不得以 L
 | `fixtures/golden_chunks/*.json` | 四种文档格式的切块和 locator 基准。 |
 | `fixtures/documents/*` | 真实 Docker E2E 的 TXT、Markdown、Python 与确定性生成 PDF 输入；`scripts/build_test_fixtures.py --check` 防止 PDF 漂移。 |
 | `fixtures/reliability_matrix.json` | SPEC T1～T25 与 Mock/真实测试节点、真实复验要求的可执行证据映射。 |
-| `eval/fixtures/computer_architecture_knowledge.jsonl` | 从本地真实计组 PDF 原文整理的 50 条问题、页码、参考答案和细粒度关键短语；源 PDF 保持本地且不进 Git。 |
+| `eval/fixtures/computer_architecture_knowledge.json` | 从本地真实计组 PDF 原文整理的 50 条问题、页码、参考答案和细粒度关键短语；源 PDF 保持本地且不进 Git。 |
 | `eval/fixtures/retrieval_quality.json` | 固定问题、相关 chunk 与 locator 的检索质量基线。 |
 
 ## 维护规则

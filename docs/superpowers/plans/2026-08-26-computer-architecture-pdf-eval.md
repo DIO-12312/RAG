@@ -4,9 +4,9 @@
 
 **Goal:** 基于本地真实 `计组复习.pdf` 建立 50 条可追溯知识点 fixture，并通过真实 gRPC、MySQL、Elasticsearch、NATS 和 Embedding 模型评估 Recall@6、MRR@6、Top-1 页命中率与答案包含度。
 
-**Architecture:** 测试数据以 UTF-8 JSONL 保存，每条记录绑定 PdfParser 的 1-based 页码与从答案拆出的细粒度关键名词、术语和事实短语。真实评估测试只复用 `tests/e2e/conftest.py` 的 generated gRPC helpers：一次上传并完整摄取 PDF，随后逐题调用 `Retrieve(top_k=6)`，在测试文件内计算四项聚合指标，不修改生产检索评估代码；Earthfile 的公开 eval suite 同时运行既有 30 问和新增 50 问评测。
+**Architecture:** 测试数据以 UTF-8 JSON 数组保存，每条记录绑定 PdfParser 的 1-based 页码与从答案拆出的细粒度关键名词、术语和事实短语。真实评估测试只复用 `tests/e2e/conftest.py` 的 generated gRPC helpers：一次上传并完整摄取 PDF，随后逐题调用 `Retrieve(top_k=6)`，在测试文件内计算四项聚合指标，不修改生产检索评估代码；Earthfile 的公开 eval suite 同时运行既有 30 问和新增 50 问评测。
 
-**Tech Stack:** Python 3.12、pytest、pytest-asyncio、generated gRPC client、MySQL 8、Elasticsearch 8、NATS JetStream、OpenAI-compatible Embedding、JSONL、现有 `PdfParser`
+**Tech Stack:** Python 3.12、pytest、pytest-asyncio、generated gRPC client、MySQL 8、Elasticsearch 8、NATS JetStream、OpenAI-compatible Embedding、JSON、现有 `PdfParser`
 
 **Spec:** `docs/superpowers/specs/2026-08-26-computer-architecture-pdf-eval-design.md`
 
@@ -14,7 +14,7 @@
 
 - 源文档固定为 44 页真实用户文件；优先读取 `RAG_E2E_PDF_PATH`，否则读取 `tests/object/计组复习.pdf`。
 - `tests/object/计组复习.pdf` 是个人资料，必须保持 untracked，不得加入 Git 暂存区或提交。
-- JSONL 固定为 UTF-8、50 行；ID 必须恰好为 `arch-001`～`arch-050` 且全局唯一。
+- JSON 固定为 UTF-8 数组、包含 50 条记录；ID 必须恰好为 `arch-001`～`arch-050` 且全局唯一。
 - 每条记录只包含 `id`、`chapter`、`query`、`pages`、`answer`、`required_phrases` 六个字段。
 - 每条 `required_phrases` 至少有 2 项、不设固定上限；按答案语义拆出重要名词、术语和事实动作，每项经空白规范化后同时是 `answer` 和对应 PDF 页原文的子串。
 - 章节分布固定为第一章 7 条、第四章 9 条、第五章 13 条、第六章 8 条、第七章 13 条。
@@ -37,8 +37,8 @@
 
 | 文件 | 操作 | 单一职责 |
 |---|---|---|
-| `tests/eval/fixtures/computer_architecture_knowledge.jsonl` | Create | 保存 50 条按章节、页码、答案和必含短语锚定的真实 PDF 知识点 |
-| `tests/eval/test_real_computer_architecture_pdf_quality.py` | Create | 加载并校验 JSONL，一次摄取 PDF，执行 50 次真实检索并聚合四项质量指标 |
+| `tests/eval/fixtures/computer_architecture_knowledge.json` | Create | 保存 50 条按章节、页码、答案和必含短语锚定的真实 PDF 知识点 |
+| `tests/eval/test_real_computer_architecture_pdf_quality.py` | Create | 加载并校验 JSON，一次摄取 PDF，执行 50 次真实检索并聚合四项质量指标 |
 | `tests/TEST.md` | Modify | 登记新增 eval 文件、测试函数、fixture、真实运行命令和本地 PDF 边界 |
 | `Earthfile` | Modify | 让公开 `eval` suite 同时收集既有 30 问和新增 50 问真实评测 |
 | `tests/contract/test_build_entrypoints.py` | Modify | 契约化 eval suite 的两个真实测试入口及 PDF 缺失时的 pytest skip 语义 |
@@ -52,12 +52,12 @@
 ### Task 1: 五十问真实 PDF 知识点 Fixture
 
 **Files:**
-- Create: `tests/eval/fixtures/computer_architecture_knowledge.jsonl`
+- Create: `tests/eval/fixtures/computer_architecture_knowledge.json`
 - Modify: `docs/superpowers/plans/2026-08-26-computer-architecture-pdf-eval.md`
 
 **Interfaces:**
 - Consumes: `PdfParser.parse(source_name: str, content: bytes) -> tuple[ParsedSegment, ...]`；每个 `ParsedSegment.locator.page_number` 是从 1 开始的 PDF 页码。
-- Produces: 50 行 JSONL；Task 2 的 `_load_cases(FIXTURE_PATH) -> tuple[KnowledgeCase, ...]` 直接消费六个固定字段。
+- Produces: 50 条 JSON 记录；Task 2 的 `_load_cases(FIXTURE_PATH) -> tuple[KnowledgeCase, ...]` 直接消费六个固定字段。
 
 - [x] **Step 1: 确认真实 PDF 前置条件且不触碰 Git 跟踪状态**
 
@@ -98,9 +98,9 @@ PY
 
 Expected：输出恰好覆盖 `PAGE 1`～`PAGE 44`，没有空页或 `INVALID_PDF`。若生产 Parser 跳过空页，先核对实际文件是否与设计 SPEC 所述 44 页文本型 PDF 相同，不修改 Parser 来迁就测试数据。
 
-- [x] **Step 3: 按固定 ID 与章节配额撰写 50 行 JSONL**
+- [x] **Step 3: 按固定 ID 与章节配额撰写 50 条 JSON 记录**
 
-使用 `apply_patch` 创建 `tests/eval/fixtures/computer_architecture_knowledge.jsonl`。逐行从 Step 2 的页原文选取明确知识点，分配必须严格遵循：
+使用 `apply_patch` 创建 `tests/eval/fixtures/computer_architecture_knowledge.json`。逐条从 Step 2 的页原文选取明确知识点，分配必须严格遵循：
 
 | ID 范围 | chapter 精确值 | 允许页码 | 行数 |
 |---|---|---:|---:|
@@ -132,7 +132,7 @@ from pathlib import Path
 from rag_mvp.adapters.parsers.pdf import PdfParser
 
 
-FIXTURE = Path("tests/eval/fixtures/computer_architecture_knowledge.jsonl")
+FIXTURE = Path("tests/eval/fixtures/computer_architecture_knowledge.json")
 PDF = Path("tests/object/计组复习.pdf")
 EXPECTED_COUNTS = {
     "第一章 计算机系统概论": 7,
@@ -178,7 +178,7 @@ asyncio.run(main())
 PY
 ```
 
-Expected：exit code 0，无 assertion；任何失败都只修正对应 JSONL 行，使短语与真实页原文一致，不放宽校验规则。
+Expected：exit code 0，无 assertion；任何失败都只修正对应 JSON 记录，使短语与真实页原文一致，不放宽校验规则。
 
 - [x] **Step 5: 检查 fixture diff 和敏感文件边界**
 
@@ -187,15 +187,15 @@ Expected：exit code 0，无 assertion；任何失败都只修正对应 JSONL �
 ```bash
 git diff --check
 git status --short
-git diff -- tests/eval/fixtures/computer_architecture_knowledge.jsonl
+git diff -- tests/eval/fixtures/computer_architecture_knowledge.json
 ```
 
-Expected：JSONL 恰好 50 行；`git status` 不包含 `tests/object/计组复习.pdf`；没有 `.env`、API Key、日志、缓存或对象数据。
+Expected：JSON 数组恰好包含 50 条记录；`git status` 不包含 `tests/object/计组复习.pdf`；没有 `.env`、API Key、日志、缓存或对象数据。
 
 - [x] **Step 6: 提交五十问 fixture 模块**
 
 ```bash
-git add tests/eval/fixtures/computer_architecture_knowledge.jsonl docs/superpowers/plans/2026-08-26-computer-architecture-pdf-eval.md
+git add tests/eval/fixtures/computer_architecture_knowledge.json docs/superpowers/plans/2026-08-26-computer-architecture-pdf-eval.md
 git diff --cached --check
 git diff --cached --name-only
 git commit -m "test(eval): 新增计组 PDF 五十问基准数据"
@@ -214,7 +214,7 @@ Expected：暂存区只包含 fixture 与本计划；提交后记录 commit hash
 - Modify: `docs/superpowers/plans/2026-08-26-computer-architecture-pdf-eval.md`
 
 **Interfaces:**
-- Consumes: Task 1 的 JSONL；`tests.e2e.conftest.EmbeddingRuntime`、`create_dataset(stub, runtime, case_name) -> str`、`submit_document(stub, dataset_id, source) -> tuple[str, str]`、`wait_for_job(stub, job_id, deadline_seconds=240) -> JobResult`、`retrieve(stub, dataset_id, query) -> RetrieveResult`。
+- Consumes: Task 1 的 JSON；`tests.e2e.conftest.EmbeddingRuntime`、`create_dataset(stub, runtime, case_name) -> str`、`submit_document(stub, dataset_id, source) -> tuple[str, str]`、`wait_for_job(stub, job_id, deadline_seconds=240) -> JobResult`、`retrieve(stub, dataset_id, query) -> RetrieveResult`。
 - Produces: `_load_cases(path: Path) -> tuple[KnowledgeCase, ...]`、`QualityMetrics(recall_at_6, mrr_at_6, top1_page_hit, answer_coverage)` 和 `test_real_computer_architecture_pdf_quality()`；不产生生产 API。
 
 - [x] **Step 1: 先确认新测试尚不存在**
@@ -227,7 +227,7 @@ uv run pytest tests/eval/test_real_computer_architecture_pdf_quality.py -q
 
 Expected：FAIL，pytest 明确报告测试文件不存在。这确认后续新增文件确实提供新的门禁，而不是覆盖既有测试。
 
-- [x] **Step 2: 写入完整 JSONL loader、指标计算和真实评估测试**
+- [x] **Step 2: 写入完整 JSON loader、指标计算和真实评估测试**
 
 使用 `apply_patch` 创建 `tests/eval/test_real_computer_architecture_pdf_quality.py`，内容如下：
 
@@ -253,7 +253,7 @@ from tests.e2e.conftest import (
     wait_for_job,
 )
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "computer_architecture_knowledge.jsonl"
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "computer_architecture_knowledge.json"
 LOCAL_PDF_ENV = "RAG_E2E_PDF_PATH"
 DEFAULT_LOCAL_PDF = Path(__file__).resolve().parents[1] / "object" / "计组复习.pdf"
 EXPECTED_CHAPTER_COUNTS = {
@@ -494,10 +494,10 @@ Expected：完成一次 PDF 摄取、50 次 query embedding 与混合检索；�
 
 使用 `apply_patch` 完成四处精确更新：
 
-1. 在 eval 目录树的 `fixtures/` 下加入 `computer_architecture_knowledge.jsonl`，并加入 `test_real_computer_architecture_pdf_quality.py`。
+1. 在 eval 目录树的 `fixtures/` 下加入 `computer_architecture_knowledge.json`，并加入 `test_real_computer_architecture_pdf_quality.py`。
 2. 将 Eval 层职责扩展为“固定 30 问算法基线 + 本地真实 PDF 五十问页码/答案包含度门禁”，并注明新增测试的直接 Docker 命令；不要声称现有 `make docker-test SUITE=eval` 已包含它。
 3. 在“Eval 测试函数”表加入 `test_real_computer_architecture_pdf_quality.py` / `test_real_computer_architecture_pdf_quality`，职责写明一次完整 PDF 摄取、50 次 query embedding、Recall@6、MRR@6、Top-1 页命中率和答案包含度。
-4. 在“Fake 与 Fixture 的职责”表加入 `eval/fixtures/computer_architecture_knowledge.jsonl`，说明 50 条记录按 PdfParser 页码锚定，源 PDF 保持本地且不进 Git。
+4. 在“Fake 与 Fixture 的职责”表加入 `eval/fixtures/computer_architecture_knowledge.json`，说明 50 条记录按 PdfParser 页码锚定，源 PDF 保持本地且不进 Git。
 
 - [x] **Step 6: 运行最终离线与真实验证**
 
@@ -631,7 +631,7 @@ Expected：提交不包含 PDF、`.env`、Secret、日志或数据卷。
 
 ## Completion Criteria
 
-- JSONL 恰好 50 行，ID、章节配额、页码范围、字段集合和细粒度关键短语约束全部通过校验。
+- JSON 数组恰好 50 条记录，ID、章节配额、页码范围、字段集合和细粒度关键短语约束全部通过校验。
 - 每个必含短语经空白压缩后同时存在于参考答案和指定 PDF 页原文。
 - 新测试只通过 generated gRPC helper 驱动真实服务；PDF 只摄取一次，50 个 query 各检索一次 top-6。
 - Recall@6、MRR@6、Top-1 页命中率和答案包含度使用 50 条 case 聚合，失败信息能定位 case、返回页码和缺失短语。

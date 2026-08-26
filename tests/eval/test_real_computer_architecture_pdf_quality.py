@@ -19,7 +19,7 @@ from tests.e2e.conftest import (
     wait_for_job,
 )
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "computer_architecture_knowledge.jsonl"
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "computer_architecture_knowledge.json"
 LOCAL_PDF_ENV = "RAG_E2E_PDF_PATH"
 DEFAULT_LOCAL_PDF = Path(__file__).resolve().parents[1] / "object" / "计组复习.pdf"
 EXPECTED_CHAPTER_COUNTS = {
@@ -76,11 +76,12 @@ def _compact_text(value: str) -> str:
 
 
 def _load_cases(path: Path) -> tuple[KnowledgeCase, ...]:
-    raw_lines = path.read_text(encoding="utf-8").splitlines()
-    assert len(raw_lines) == 50
+    payloads = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(payloads, list)
+    assert len(payloads) == 50
     cases: list[KnowledgeCase] = []
-    for line_number, raw_line in enumerate(raw_lines, start=1):
-        payload = json.loads(raw_line)
+    for item_number, payload in enumerate(payloads, start=1):
+        assert isinstance(payload, dict), item_number
         assert set(payload) == {
             "id",
             "chapter",
@@ -88,7 +89,7 @@ def _load_cases(path: Path) -> tuple[KnowledgeCase, ...]:
             "pages",
             "answer",
             "required_phrases",
-        }, line_number
+        }, item_number
         case = KnowledgeCase(
             id=str(payload["id"]),
             chapter=str(payload["chapter"]),

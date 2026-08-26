@@ -5,7 +5,7 @@
 
 ## 目标
 
-基于真实用户文档 `tests/object/计组复习.pdf`（44 页，覆盖第 1/4/5/6/7 章）构建 50 条知识点的 JSONL 测试集，并新增一个真实评估测试：提交真实 PDF 完整摄取并向量化，对 50 个问题逐个向量化检索，按阈值评估检索质量与答案包含度。
+基于真实用户文档 `tests/object/计组复习.pdf`（44 页，覆盖第 1/4/5/6/7 章）构建 50 条知识点的 JSON 测试集，并新增一个真实评估测试：提交真实 PDF 完整摄取并向量化，对 50 个问题逐个向量化检索，按阈值评估检索质量与答案包含度。
 
 ## 系统边界
 
@@ -13,9 +13,9 @@
 
 ## 数据文件
 
-路径：`tests/eval/fixtures/computer_architecture_knowledge.jsonl`（50 行，UTF-8）
+路径：`tests/eval/fixtures/computer_architecture_knowledge.json`（50 条记录的 JSON 数组，UTF-8）
 
-每行 schema：
+每条记录 schema：
 
 ```json
 {
@@ -67,7 +67,7 @@
 2. 解析 PDF 路径：复用 e2e 逻辑（`RAG_E2E_PDF_PATH` 环境变量优先，否则 `tests/object/计组复习.pdf`；文件不存在则 skip）。
 3. `create_dataset` 创建绑定真实 embedding 模型的 dataset（dense_top_k=20, sparse_top_k=20, rrf_k=60, max_context_tokens=4000）。
 4. `submit_document` 上传 PDF，`wait_for_job` 等待摄取完成——此即"完整摄取 + 一次向量化"。
-5. 读取 JSONL，对每条 case：
+5. 读取 JSON 数组，对每条 case：
    - `retrieve(query, top_k=6)` —— 每次查询都做 query 向量化 + 混合检索。
    - 收集 top-6 证据；每条证据携带 `locator.page_number`（PDF 按页解析，分块后同页 chunk 的 `page_number` 相同），按页码匹配，不依赖 `chunk_id` 精确匹配：
      - `hits` = 证据中 `locator.page_number ∈ case.pages` 的 chunk。
@@ -94,7 +94,7 @@
 
 新增文件：
 
-- `tests/eval/fixtures/computer_architecture_knowledge.jsonl`
+- `tests/eval/fixtures/computer_architecture_knowledge.json`
 - `tests/eval/test_real_computer_architecture_pdf_quality.py`
 
 修改文件：
