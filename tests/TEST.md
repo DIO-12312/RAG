@@ -141,7 +141,7 @@ tests/
 | E2E | 四格式及可选本地长 PDF 的 upload → 异步摄取 → hybrid Retrieve 容器业务闭环 | `docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e -q` | generated gRPC client + 真实 MySQL/ES/NATS/模型；禁止 Fake；本地 PDF 缺失时仅跳过对应用户场景 |
 | Resilience | failpoint、重投、取消、并发、generation fence 与恢复不变量 | `uv run pytest -m resilience tests/resilience` | Mock Reliability；不替代进程强杀和真实中间件恢复 |
 | Docker Resilience | Worker/Relay KILL、NATS 停启和真实并发栅栏 | `docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q` | test-only Docker socket + barrier 卷；必须显式选择 marker，禁止删除数据卷 |
-| Eval | 固定 30 问检索集及本地真实 PDF 五十问的 Recall@6、MRR@6、locator/page accuracy 与答案包含度 | 离线：`EVAL_FIXTURE=original uv run pytest -m "eval and not e2e" tests/eval` 或默认改写集；真实：`make docker-test SUITE=eval EVAL_FIXTURE=original` | 离线 fixture 负责算法门槛；真实评测通过 gRPC 使用真实 MySQL/ES/NATS/模型，禁止 Fake；本地 PDF 缺失时只 skip 五十问用例 |
+| Eval | 固定 30 问检索集及本地真实 PDF 五十问的 Recall@6、MRR@6、locator/page accuracy 与答案包含度 | 离线：`EVAL_FIXTURE=original uv run pytest -m "eval and not e2e" tests/eval` 或默认改写集；真实：`make docker-test SUITE=eval EVAL_FIXTURE=original`；日志清理：`make clear` | 离线 fixture 负责算法门槛；真实评测通过 gRPC 使用真实 MySQL/ES/NATS/模型，禁止 Fake；本地 PDF 缺失时只 skip 五十问用例；`make clear` 只清理 `tests/**/log` 下的文件 |
 
 ## Unit 测试函数
 

@@ -4,7 +4,7 @@ EARTHLY_FLAGS ?=
 SUITE ?= integration
 EVAL_FIXTURE ?= rephrased
 
-.PHONY: proto lint test ci docker-up docker-test docker-down help
+.PHONY: proto lint test ci docker-up docker-test docker-down clear help
 
 # Regenerate and verify protobuf generated code.
 proto:
@@ -34,6 +34,10 @@ docker-test:
 docker-down:
 	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +docker-down
 
+# Remove files from every tests/**/log directory while keeping the directories.
+clear:
+	find tests -type d -name log -exec find {} -maxdepth 1 -type f -delete \;
+
 # Show the stable public commands without requiring Earthly to be installed.
 help:
 	@echo make proto  - regenerate and verify protobuf code
@@ -43,4 +47,5 @@ help:
 	@echo make docker-up                  - validate, build, and start all services
 	@echo make docker-test SUITE=VALUE EVAL_FIXTURE=original	real eval dataset selector
 	@echo make docker-down                - scan logs and stop services without deleting volumes
+	@echo make clear                      - remove files from tests/**/log directories
 	@echo make help   - show this command list

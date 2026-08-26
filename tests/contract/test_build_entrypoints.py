@@ -91,6 +91,7 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
         "docker-up",
         "docker-test",
         "docker-down",
+        "clear",
         "help",
     }
 
