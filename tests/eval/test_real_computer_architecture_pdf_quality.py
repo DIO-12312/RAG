@@ -22,7 +22,24 @@ from tests.e2e.conftest import (
     wait_for_job,
 )
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "computer_architecture_knowledge.json"
+FIXTURE_DIR = Path(__file__).parent / "fixtures"
+FIXTURE_VARIANT_ENV = "EVAL_FIXTURE"
+FIXTURE_VARIANT_PATHS = {
+    "original": FIXTURE_DIR / "computer_architecture_knowledge_original.json",
+    "rephrased": FIXTURE_DIR / "computer_architecture_knowledge.json",
+}
+
+
+def _fixture_path_for_variant(variant: str) -> Path:
+    try:
+        return FIXTURE_VARIANT_PATHS[variant]
+    except KeyError as exc:
+        supported = ", ".join(sorted(FIXTURE_VARIANT_PATHS))
+        raise ValueError(f"unsupported {FIXTURE_VARIANT_ENV}={variant!r}; use {supported}") from exc
+
+
+FIXTURE_VARIANT = os.getenv(FIXTURE_VARIANT_ENV, "rephrased").strip().lower()
+FIXTURE_PATH = _fixture_path_for_variant(FIXTURE_VARIANT)
 LOG_DIR = Path(__file__).parent / "log"
 LOCAL_PDF_ENV = "RAG_E2E_PDF_PATH"
 DEFAULT_LOCAL_PDF = Path(__file__).resolve().parents[1] / "object" / "计组复习.pdf"
@@ -91,7 +108,7 @@ def _case_log_record(
         "id": case.id,
         "query": case.query,
         "expected_pages": list(case.pages),
-        "embedding": list(embedding),
+        "embedding": list(embedding[:20]),
         "top_k": [
             {
                 "rank": rank,
@@ -202,6 +219,20 @@ def test_case_log_record_preserves_embedding_and_top_k_details() -> None:
     assert record["top_k"][0]["content_with_weight"] == "answer term"
 
 
+def test_case_log_record_truncates_embedding_to_first_20_dimensions() -> None:
+    case = KnowledgeCase(
+        "arch-001", "第一章 计算机系统概论", "query", (1,), "answer", ("answer", "term")
+    )
+    outcome = CaseOutcome("arch-001", True, 1.0, True, True, (1,), ())
+    result = type("Result", (), {"evidence": []})()
+    embedding = tuple(float(index) for index in range(24))
+
+    record = _case_log_record(case, embedding, result, outcome)
+
+    assert record["embedding"] == [float(index) for index in range(20)]
+    assert len(record["embedding"]) == 20
+
+
 def test_write_run_log_persists_json_with_completion_time(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -223,6 +254,17 @@ def test_write_run_log_persists_json_with_completion_time(
     payload = json.loads(log_path.read_text(encoding="utf-8"))
     assert log_path.parent == tmp_path
     assert payload["finished_at"]
+
+
+def test_original_and_rephrased_fixtures_only_change_query() -> None:
+    original = json.loads(_fixture_path_for_variant("original").read_text(encoding="utf-8"))
+    rephrased = json.loads(_fixture_path_for_variant("rephrased").read_text(encoding="utf-8"))
+
+    assert len(original) == len(rephrased) == 50
+    for original_case, rephrased_case in zip(original, rephrased, strict=True):
+        assert original_case["id"] == rephrased_case["id"]
+        assert original_case["query"] != rephrased_case["query"]
+        assert {**original_case, "query": None} == {**rephrased_case, "query": None}
 
 
 def _compact_text(value: str) -> str:

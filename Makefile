@@ -2,6 +2,7 @@ EARTHLY ?= earthly
 EARTHLY_ENV_FILE ?= .earthly.env
 EARTHLY_FLAGS ?=
 SUITE ?= integration
+EVAL_FIXTURE ?= rephrased
 
 .PHONY: proto lint test ci docker-up docker-test docker-down help
 
@@ -27,7 +28,7 @@ docker-up:
 
 # Run a real Docker suite; SUITE accepts integration, resilience, eval, or all.
 docker-test:
-	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +docker-test --SUITE=$(SUITE)
+	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +docker-test --SUITE=$(SUITE) --EVAL_FIXTURE=$(EVAL_FIXTURE)
 
 # Scan service logs and stop Compose services without deleting persistent volumes.
 docker-down:
@@ -40,6 +41,6 @@ help:
 	@echo make test   - run all deterministic offline tests and coverage
 	@echo make ci     - run the complete Secret-free quality gate
 	@echo make docker-up                  - validate, build, and start all services
-	@echo make docker-test SUITE=VALUE    - run integration, resilience, eval, or all
+	@echo make docker-test SUITE=VALUE EVAL_FIXTURE=original	real eval dataset selector
 	@echo make docker-down                - scan logs and stop services without deleting volumes
 	@echo make help   - show this command list

@@ -96,8 +96,13 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
 
     assert _make_targets(makefile) == public
     assert "SUITE ?= integration" in makefile
+    assert "EVAL_FIXTURE ?= rephrased" in makefile
     assert "+docker-test --SUITE=$(SUITE)" in makefile
+    assert "--EVAL_FIXTURE=$(EVAL_FIXTURE)" in makefile
     assert re.search(r"^# .+\nDOCKER_START:\n\s+FUNCTION$", earthfile, re.MULTILINE)
+    assert "ARG EVAL_FIXTURE=rephrased" in earthfile
+    assert 'case "$EVAL_FIXTURE" in original|rephrased)' in earthfile
+    assert '-e EVAL_FIXTURE="$EVAL_FIXTURE"' in earthfile
     assert earthfile.count("DO +DOCKER_START") == 2
     assert "docker-start:\n    FUNCTION" not in earthfile
     for target in ("docker-up", "docker-test", "docker-down"):

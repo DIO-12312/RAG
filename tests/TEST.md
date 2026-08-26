@@ -33,6 +33,7 @@ tests/
 │  ├─ conftest.py                            # 复用真实 E2E gRPC client 与模型运行配置
 │  ├─ fixtures/
 │  │  ├─ computer_architecture_knowledge.json
+│  │  ├─ computer_architecture_knowledge_original.json
 │  │  └─ retrieval_quality.json
 │  ├─ test_retrieval_quality.py
 │  ├─ test_real_computer_architecture_pdf_quality.py
@@ -140,7 +141,7 @@ tests/
 | E2E | 四格式及可选本地长 PDF 的 upload → 异步摄取 → hybrid Retrieve 容器业务闭环 | `docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e -q` | generated gRPC client + 真实 MySQL/ES/NATS/模型；禁止 Fake；本地 PDF 缺失时仅跳过对应用户场景 |
 | Resilience | failpoint、重投、取消、并发、generation fence 与恢复不变量 | `uv run pytest -m resilience tests/resilience` | Mock Reliability；不替代进程强杀和真实中间件恢复 |
 | Docker Resilience | Worker/Relay KILL、NATS 停启和真实并发栅栏 | `docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q` | test-only Docker socket + barrier 卷；必须显式选择 marker，禁止删除数据卷 |
-| Eval | 固定 30 问检索集及本地真实 PDF 五十问的 Recall@6、MRR@6、locator/page accuracy 与答案包含度 | 离线：`uv run pytest -m "eval and not e2e" tests/eval`；真实：`make docker-test SUITE=eval` | 离线 fixture 负责算法门槛；真实评测通过 gRPC 使用真实 MySQL/ES/NATS/模型，禁止 Fake；本地 PDF 缺失时只 skip 五十问用例 |
+| Eval | 固定 30 问检索集及本地真实 PDF 五十问的 Recall@6、MRR@6、locator/page accuracy 与答案包含度 | 离线：`EVAL_FIXTURE=original uv run pytest -m "eval and not e2e" tests/eval` 或默认改写集；真实：`make docker-test SUITE=eval EVAL_FIXTURE=original` | 离线 fixture 负责算法门槛；真实评测通过 gRPC 使用真实 MySQL/ES/NATS/模型，禁止 Fake；本地 PDF 缺失时只 skip 五十问用例 |
 
 ## Unit 测试函数
 
@@ -388,9 +389,11 @@ Eval 测试负责防止检索排序和 evidence 定位质量回退。不得以 L
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
 | `test_retrieval_quality.py` | `test_fixed_thirty_question_quality_baseline` | 在固定 30 问集上验证 Recall@6、MRR@6 和 locator accuracy 门槛。 |
-| `test_real_computer_architecture_pdf_quality.py` | `test_real_computer_architecture_pdf_quality` | 一次完整摄取本地 44 页计组 PDF，执行 50 次真实 query embedding 与混合检索，记录每条 query 的完整 embedding 和服务实际 Top-K evidence 到 `eval/log/`，并按 PdfParser 页码和细粒度关键短语聚合 Recall@6、MRR@6、Top-1 页命中率及答案包含度。 |
-| 同上 | `test_case_log_record_preserves_embedding_and_top_k_details` | 离线验证单条日志记录保留完整 embedding、Top-K 排名、分数和 evidence 原文。 |
+| `test_real_computer_architecture_pdf_quality.py` | `test_real_computer_architecture_pdf_quality` | 一次完整摄取本地 44 页计组 PDF，执行 50 次 query embedding 与混合检索；默认使用语义改写集，也可通过 `EVAL_FIXTURE=original` 选择原始问题集，记录每条 query 的前 20 个 embedding 维度和服务实际 Top-K evidence 到 `eval/log/`，并按 PdfParser 页码和细粒度关键短语聚合 Recall@6、MRR@6、Top-1 页命中率及答案包含度。 |
+| 同上 | `test_case_log_record_preserves_embedding_and_top_k_details` | 离线验证单条日志记录保留前 20 个 embedding 维度、Top-K 排名、分数和 evidence 原文。 |
+| 同上 | `test_case_log_record_truncates_embedding_to_first_20_dimensions` | 离线验证超过 20 维的 embedding 只写入前 20 个维度。 |
 | 同上 | `test_write_run_log_persists_json_with_completion_time` | 离线验证评测日志可写入 JSON 文件并包含完成时间。 |
+| 同上 | `test_original_and_rephrased_fixtures_only_change_query` | 离线验证原始集与语义改写集的 50 条记录除 `query` 外完全一致。 |
 | `test_real_retrieval_quality.py` | `test_real_thirty_question_quality_baseline` | 十份固定语料经真实 gRPC 摄取后执行 30 问，使用真实 chunk_id 验证 Recall@6、MRR@6 和来源行定位。 |
 
 ## Fake 与 Fixture 的职责
@@ -406,7 +409,7 @@ Eval 测试负责防止检索排序和 evidence 定位质量回退。不得以 L
 | `fixtures/golden_chunks/*.json` | 四种文档格式的切块和 locator 基准。 |
 | `fixtures/documents/*` | 真实 Docker E2E 的 TXT、Markdown、Python 与确定性生成 PDF 输入；`scripts/build_test_fixtures.py --check` 防止 PDF 漂移。 |
 | `fixtures/reliability_matrix.json` | SPEC T1～T25 与 Mock/真实测试节点、真实复验要求的可执行证据映射。 |
-| `eval/fixtures/computer_architecture_knowledge.json` | 从本地真实计组 PDF 原文整理的 50 条问题、页码、参考答案和细粒度关键短语；源 PDF 保持本地且不进 Git。 |
+| `eval/fixtures/computer_architecture_knowledge.json`、`computer_architecture_knowledge_original.json` | 同一批 50 条计组评测样本的语义改写集与原始问题集；两者仅 `query` 不同，页码、参考答案和细粒度关键短语保持一致；源 PDF 保持本地且不进 Git。 |
 | `eval/fixtures/retrieval_quality.json` | 固定问题、相关 chunk 与 locator 的检索质量基线。 |
 
 ## 维护规则
