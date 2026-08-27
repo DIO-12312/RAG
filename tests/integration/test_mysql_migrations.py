@@ -21,6 +21,7 @@ class SchemaSnapshot:
     engines: dict[str, str]
     revision: str
     tenant_ids: tuple[str, ...]
+    columns: dict[str, dict[str, bool]]
 
 
 def _inspect_constraints(
@@ -38,11 +39,23 @@ def _inspect_constraints(
     return tables, unique_constraints
 
 
+def _inspect_lifecycle_columns(connection: Connection) -> dict[str, dict[str, bool]]:
+    inspector = inspect(connection)
+    return {
+        table_name: {
+            str(column["name"]): bool(column["nullable"])
+            for column in inspector.get_columns(table_name)
+        }
+        for table_name in ("datasets", "jobs", "idempotency_records")
+    }
+
+
 async def _schema_snapshot(dsn: str) -> SchemaSnapshot:
     engine = create_mysql_engine(dsn)
     try:
         async with engine.connect() as connection:
             tables, unique_constraints = await connection.run_sync(_inspect_constraints)
+            columns = await connection.run_sync(_inspect_lifecycle_columns)
             engine_rows = await connection.execute(
                 text(
                     "SELECT table_name, engine FROM information_schema.tables "
@@ -57,6 +70,7 @@ async def _schema_snapshot(dsn: str) -> SchemaSnapshot:
                 engines={str(row[0]): str(row[1]) for row in engine_rows},
                 revision=str(revision),
                 tenant_ids=tuple(str(row[0]) for row in tenant_rows),
+                columns=columns,
             )
     finally:
         await engine.dispose()
@@ -73,7 +87,7 @@ def test_upgrade_head_is_idempotent_and_creates_innodb_schema(
     snapshot = asyncio.run(_schema_snapshot(mysql_dsn))
 
     assert snapshot.tables >= EXPECTED_TABLES
-    assert snapshot.revision == "0001_core_schema"
+    assert snapshot.revision == "0002_delete_dataset"
     assert snapshot.tenant_ids == ("default_tenant",)
     assert all(snapshot.engines[table_name] == "InnoDB" for table_name in EXPECTED_TABLES)
     assert snapshot.unique_constraints["ingestion_fingerprints"] == {
@@ -83,3 +97,7 @@ def test_upgrade_head_is_idempotent_and_creates_innodb_schema(
     assert snapshot.unique_constraints["idempotency_records"] == {
         ("operation_type", "idempotency_key")
     }
+    assert {"status", "lifecycle_generation"} <= snapshot.columns["datasets"].keys()
+    assert snapshot.columns["jobs"]["document_id"] is True
+    assert snapshot.columns["jobs"]["dataset_id"] is False
+    assert snapshot.columns["idempotency_records"]["dataset_id"] is False

@@ -50,9 +50,9 @@
 - Produces `DeleteDatasetCommand(request_id, idempotency_key, dataset_id, now)` and `DeleteDatasetResult(dataset_id, job_id, reused)`.
 - Produces `MetadataRepository.delete_dataset()`, `dataset_cleanup_snapshot()` and `finalize_dataset_cleanup()`; `SearchEngine.delete_dataset(dataset_id)`.
 
-- [ ] Write failing tests asserting `Dataset(status=ACTIVE, lifecycle_generation=0)`, the new proto RPC/messages/enums, and that a dataset Job has `dataset_id` plus no `document_id`.
-- [ ] Run `uv run pytest tests/unit/domain/test_models.py tests/contract/test_proto_contract.py -q`; expect failures for missing symbols/RPC.
-- [ ] Add the exact enums, domain fields, DTOs and Protocol signatures. Make `Job.document_id: str | None`, require `dataset_id`, and reject document jobs without a document or dataset jobs with one.
+- [x] Write failing tests asserting `Dataset(status=ACTIVE, lifecycle_generation=0)`, the new proto RPC/messages/enums, and that a dataset Job has `dataset_id` plus no `document_id`.
+- [x] Run `uv run pytest tests/unit/domain/test_models.py tests/contract/test_proto_contract.py -q`; expect failures for missing symbols/RPC.
+- [x] Add the exact enums, domain fields, DTOs and Protocol signatures. Make `Job.document_id: str | None`, require `dataset_id`, and reject document jobs without a document or dataset jobs with one.
 
 ```python
 class TaskType(StrEnum):
@@ -65,9 +65,9 @@ class DeleteDatasetCommand:
     dataset_id: str
     now: datetime
 ```
-- [ ] Regenerate protobuf using the repository’s existing `make proto` entrypoint; do not hand-edit generated files. Extend generated-comparison and gRPC contract tests to require `DeleteDataset`, field numbers 1/2 and `JobResult.dataset_id = 11`.
-- [ ] Run `make proto` and `uv run pytest tests/unit/domain/test_models.py tests/unit/test_generated_comparison.py tests/contract/test_proto_contract.py tests/contract/test_grpc_application_contract.py -q`; expect PASS.
-- [ ] Update `tests/TEST.md`, inspect `git status --short`, then commit only this task: `feat(rpc): 定义数据集删除契约`.
+- [x] Regenerate protobuf using the repository’s existing `make proto` entrypoint; do not hand-edit generated files. Extend generated-comparison and gRPC contract tests to require `DeleteDataset`, field numbers 1/2 and `JobResult.dataset_id = 11`.
+- [x] Run `make proto` and `uv run pytest tests/unit/domain/test_models.py tests/unit/test_generated_comparison.py tests/contract/test_proto_contract.py tests/contract/test_grpc_application_contract.py -q`; expect PASS.
+- [x] Update `tests/TEST.md`, inspect `git status --short`, then commit only this task: `feat(rpc): 定义数据集删除契约`.
 
 ### Task 2: MySQL 生命周期、迁移与立即不可见性
 
@@ -80,9 +80,9 @@ class DeleteDatasetCommand:
 - Consumes Task 1 contracts.
 - Produces `delete_dataset(DeleteDatasetRequest) -> DeleteDatasetResult`; a `DELETING` Dataset cannot be submitted, retrieved or made visible.
 
-- [ ] Write integration failures for: deletion atomically creates one READY dataset cleanup outbox; immediately hides all versions; cancels active document tasks/outbox; same key reuses; different key returns `DATASET_DELETION_IN_PROGRESS`.
-- [ ] Run `uv run pytest -m integration tests/integration/test_mysql_lifecycle.py tests/integration/test_mysql_concurrency.py -q`; expect missing migration/behavior failures.
-- [ ] Add migration fields (`datasets.status`, `datasets.lifecycle_generation`, `jobs.dataset_id`, nullable `jobs.document_id`, `idempotency_records.dataset_id`), backfill existing jobs and idempotency rows from their existing document/dataset result, add constraints/indexes, and provide downgrade. Update ORM conversion functions and Fake repository identically.
+- [x] Write integration failures for: deletion atomically creates one READY dataset cleanup outbox; immediately hides all versions; cancels active document tasks/outbox; same key reuses; different key returns `DATASET_DELETION_IN_PROGRESS`.
+- [x] Run `uv run pytest -m integration tests/integration/test_mysql_lifecycle.py tests/integration/test_mysql_concurrency.py -q`; expect missing migration/behavior failures.
+- [x] Add migration fields (`datasets.status`, `datasets.lifecycle_generation`, `jobs.dataset_id`, nullable `jobs.document_id`, `idempotency_records.dataset_id`), backfill existing jobs and idempotency rows from their existing document/dataset result, add constraints/indexes, and provide downgrade. Update ORM conversion functions and Fake repository identically.
 
 ```python
 await session.execute(
@@ -91,9 +91,11 @@ await session.execute(
     .values(status=DatasetStatus.DELETING, lifecycle_generation=DatasetTable.lifecycle_generation + 1)
 )
 ```
-- [ ] In one locked MySQL transaction implement the four ordered operations in the design: fence Dataset, fence documents/release fingerprints, cancel unfinished work, create dataset Job/Task/Outbox + idempotency record. Make submit/retrieve/visible-version checks reject non-ACTIVE Dataset.
-- [ ] Run `uv run pytest tests/unit/adapters/test_mysql_schema.py -q` and `uv run pytest -m integration tests/integration/test_mysql_migrations.py tests/integration/test_mysql_lifecycle.py tests/integration/test_mysql_concurrency.py -q`; expect PASS with Docker MySQL available.
-- [ ] Update `tests/TEST.md`, inspect status, commit: `feat(mysql): 隔离待删除知识库`.
+- [x] In one locked MySQL transaction implement the four ordered operations in the design: fence Dataset, fence documents/release fingerprints, cancel unfinished work, create dataset Job/Task/Outbox + idempotency record. Make submit/retrieve/visible-version checks reject non-ACTIVE Dataset.
+- [x] Run `uv run pytest tests/unit/adapters/test_mysql_schema.py -q` and `uv run pytest -m integration tests/integration/test_mysql_migrations.py tests/integration/test_mysql_lifecycle.py tests/integration/test_mysql_concurrency.py -q`; expect PASS with Docker MySQL available.（本次：25 个相关 unit PASS；12 个真实 MySQL integration PASS。）
+- [x] Update `tests/TEST.md`, inspect status, commit: `feat(mysql): 隔离待删除知识库`.
+
+> 执行顺序更新（2026-08-27）：Task 1 的生成 gRPC 注册代码会立即访问 `RagService.DeleteDataset`，因此 Task 4 必须在 Task 2 后、Task 3 前执行，避免中间分支无法启动 gRPC server。任务编号和各自提交边界保持不变。
 
 ### Task 3: Worker 的 dataset 外部清理与最终物理 purge
 

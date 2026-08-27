@@ -35,6 +35,7 @@ from rag_mvp.adapters.metadata.tables import (
     TaskTable,
 )
 from rag_mvp.domain.enums import (
+    DatasetStatus,
     DocumentStatus,
     FingerprintState,
     IndexBuildStatus,
@@ -50,6 +51,8 @@ from rag_mvp.domain.models import Chunk, Dataset, Document, Job, OutboxEvent, Ta
 from rag_mvp.ports.metadata import (
     CancelJobRequest,
     CancelJobResult,
+    DeleteDatasetRequest,
+    DeleteDatasetResult,
     DeleteDocumentRequest,
     DeleteDocumentResult,
     RetryJobRequest,
@@ -63,6 +66,7 @@ SUBMIT_OPERATION = "SUBMIT_INGESTION"
 RETRY_OPERATION = "RETRY_JOB"
 CANCEL_OPERATION = "CANCEL_JOB"
 DELETE_OPERATION = "DELETE_DOCUMENT"
+DELETE_DATASET_OPERATION = "DELETE_DATASET"
 MYSQL_DUPLICATE_KEY = 1062
 
 
@@ -114,6 +118,8 @@ class MySQLMetadataRepository:
                 embedding_model=dataset.embedding_model,
                 embedding_dimension=dataset.embedding_dimension,
                 search_schema_version=dataset.search_schema_version,
+                status=dataset.status,
+                lifecycle_generation=dataset.lifecycle_generation,
                 created_at=dataset.created_at,
                 updated_at=dataset.created_at,
             )
@@ -157,6 +163,8 @@ class MySQLMetadataRepository:
             )
             if dataset is None:
                 raise DomainError(DomainFailure("DATASET_NOT_FOUND", "dataset does not exist"))
+            if dataset.status != DatasetStatus.ACTIVE:
+                raise DomainError(DomainFailure("DATASET_DELETING", "dataset is being deleted"))
 
             fingerprint: IngestionFingerprintTable | None = None
             if command.target_document_id is None:
@@ -175,6 +183,7 @@ class MySQLMetadataRepository:
             job = JobTable(
                 id=job_id,
                 type=JobType.INGEST_DOCUMENT,
+                dataset_id=command.dataset_id,
                 document_id=document.id,
                 config_digest=command.config_digest,
                 index_version=index_version,
@@ -261,6 +270,7 @@ class MySQLMetadataRepository:
             session.add(
                 self._new_idempotency_record(
                     command.idempotency_key,
+                    command.dataset_id,
                     request_digest,
                     result,
                     command.now,
@@ -364,6 +374,7 @@ class MySQLMetadataRepository:
         session.add(
             self._new_idempotency_record(
                 command.idempotency_key,
+                command.dataset_id,
                 request_digest,
                 result,
                 command.now,
@@ -422,6 +433,7 @@ class MySQLMetadataRepository:
     @staticmethod
     def _new_idempotency_record(
         idempotency_key: str,
+        dataset_id: str,
         request_digest: str,
         result: SubmitResult,
         now: datetime,
@@ -429,6 +441,7 @@ class MySQLMetadataRepository:
         return MySQLMetadataRepository._new_operation_idempotency_record(
             SUBMIT_OPERATION,
             idempotency_key,
+            dataset_id,
             request_digest,
             {
                 "document_id": result.document_id,
@@ -442,11 +455,13 @@ class MySQLMetadataRepository:
     def _new_operation_idempotency_record(
         operation: str,
         idempotency_key: str,
+        dataset_id: str,
         request_digest: str,
         result_json: dict[str, object],
         now: datetime,
     ) -> IdempotencyRecordTable:
         return IdempotencyRecordTable(
+            dataset_id=dataset_id,
             operation_type=operation,
             idempotency_key=idempotency_key,
             request_digest=request_digest,
@@ -500,8 +515,7 @@ class MySQLMetadataRepository:
         async with self._session_factory() as session:
             row = await session.scalar(
                 select(JobTable)
-                .join(DocumentTable, DocumentTable.id == JobTable.document_id)
-                .join(DatasetTable, DatasetTable.id == DocumentTable.dataset_id)
+                .join(DatasetTable, DatasetTable.id == JobTable.dataset_id)
                 .where(
                     JobTable.id == job_id,
                     DatasetTable.tenant_id == self._default_tenant_id,
@@ -514,8 +528,7 @@ class MySQLMetadataRepository:
             row = await session.scalar(
                 select(TaskTable)
                 .join(JobTable, JobTable.id == TaskTable.job_id)
-                .join(DocumentTable, DocumentTable.id == JobTable.document_id)
-                .join(DatasetTable, DatasetTable.id == DocumentTable.dataset_id)
+                .join(DatasetTable, DatasetTable.id == JobTable.dataset_id)
                 .where(
                     TaskTable.id == task_id,
                     DatasetTable.tenant_id == self._default_tenant_id,
@@ -528,8 +541,7 @@ class MySQLMetadataRepository:
             row = await session.scalar(
                 select(TaskTable)
                 .join(JobTable, JobTable.id == TaskTable.job_id)
-                .join(DocumentTable, DocumentTable.id == JobTable.document_id)
-                .join(DatasetTable, DatasetTable.id == DocumentTable.dataset_id)
+                .join(DatasetTable, DatasetTable.id == JobTable.dataset_id)
                 .where(
                     TaskTable.job_id == job_id,
                     DatasetTable.tenant_id == self._default_tenant_id,
@@ -938,6 +950,7 @@ class MySQLMetadataRepository:
                     self._new_operation_idempotency_record(
                         RETRY_OPERATION,
                         request.idempotency_key,
+                        original.job.dataset_id,
                         request_digest,
                         {"job_id": result.job_id, "task_id": result.task_id},
                         request.now,
@@ -957,6 +970,7 @@ class MySQLMetadataRepository:
             child = JobTable(
                 id=new_id(),
                 type=original.job.type,
+                dataset_id=original.job.dataset_id,
                 document_id=original.document.id,
                 config_digest=original.job.config_digest,
                 index_version=original.job.index_version,
@@ -1013,6 +1027,7 @@ class MySQLMetadataRepository:
                 self._new_operation_idempotency_record(
                     RETRY_OPERATION,
                     request.idempotency_key,
+                    original.job.dataset_id,
                     request_digest,
                     {"job_id": result.job_id, "task_id": result.task_id},
                     request.now,
@@ -1091,6 +1106,7 @@ class MySQLMetadataRepository:
                 self._new_operation_idempotency_record(
                     CANCEL_OPERATION,
                     request.idempotency_key,
+                    aggregate.job.dataset_id,
                     request_digest,
                     {"job_id": result.job_id},
                     request.now,
@@ -1186,6 +1202,7 @@ class MySQLMetadataRepository:
             cleanup_job = JobTable(
                 id=new_id(),
                 type=JobType.DELETE_DOCUMENT,
+                dataset_id=document.dataset_id,
                 document_id=document.id,
                 config_digest="0" * 64,
                 index_version=document.active_version or 1,
@@ -1219,9 +1236,166 @@ class MySQLMetadataRepository:
                 self._new_operation_idempotency_record(
                     DELETE_OPERATION,
                     request.idempotency_key,
+                    document.dataset_id,
                     request_digest,
                     {
                         "document_id": result.document_id,
+                        "job_id": result.job_id,
+                        "task_id": result.task_id,
+                    },
+                    request.now,
+                )
+            )
+            return result
+
+    async def delete_dataset(self, request: DeleteDatasetRequest) -> DeleteDatasetResult:
+        request_digest = self._command_digest(DELETE_DATASET_OPERATION, request.dataset_id)
+        async with self._session_factory() as session, session.begin():
+            idempotent = await self._locked_operation_idempotency(
+                session,
+                DELETE_DATASET_OPERATION,
+                request.idempotency_key,
+            )
+            if idempotent is not None:
+                self._validate_operation_record(idempotent, request_digest)
+                return DeleteDatasetResult(
+                    dataset_id=str(idempotent.result_json["dataset_id"]),
+                    job_id=str(idempotent.result_json["job_id"]),
+                    task_id=str(idempotent.result_json["task_id"]),
+                    reused=True,
+                )
+
+            dataset = cast(
+                DatasetTable | None,
+                await session.scalar(
+                    select(DatasetTable)
+                    .where(
+                        DatasetTable.id == request.dataset_id,
+                        DatasetTable.tenant_id == self._default_tenant_id,
+                    )
+                    .with_for_update()
+                ),
+            )
+            if dataset is None:
+                raise DomainError(DomainFailure("DATASET_NOT_FOUND", "dataset does not exist"))
+            if dataset.status != DatasetStatus.ACTIVE:
+                raise DomainError(
+                    DomainFailure(
+                        "DATASET_DELETION_IN_PROGRESS",
+                        "dataset deletion is already in progress",
+                    )
+                )
+
+            dataset.status = DatasetStatus.DELETING
+            dataset.lifecycle_generation += 1
+            dataset.updated_at = request.now
+            documents = list(
+                (
+                    await session.scalars(
+                        select(DocumentTable)
+                        .where(DocumentTable.dataset_id == dataset.id)
+                        .with_for_update()
+                    )
+                ).all()
+            )
+            document_ids = [document.id for document in documents]
+            for document in documents:
+                document.status = DocumentStatus.DELETED
+                document.lifecycle_generation += 1
+                document.updated_at = request.now
+
+            await session.execute(
+                update(IngestionFingerprintTable)
+                .where(IngestionFingerprintTable.dataset_id == dataset.id)
+                .values(state=FingerprintState.RELEASED, updated_at=request.now)
+            )
+            active_rows = (
+                await session.execute(
+                    select(JobTable, TaskTable)
+                    .join(TaskTable, TaskTable.job_id == JobTable.id)
+                    .where(
+                        JobTable.dataset_id == dataset.id,
+                        JobTable.status.in_((JobStatus.PENDING, JobStatus.RUNNING)),
+                        TaskTable.status.in_((TaskStatus.PENDING, TaskStatus.RUNNING)),
+                    )
+                    .with_for_update()
+                )
+            ).all()
+            failure = failure_to_json(
+                DomainFailure("DATASET_DELETED", "dataset was deleted before work completed")
+            )
+            cancelled_task_ids: list[str] = []
+            for job, task in active_rows:
+                job.status = JobStatus.CANCELLED
+                job.error = failure
+                job.active_retry_parent_id = None
+                job.updated_at = request.now
+                task.status = TaskStatus.CANCELLED
+                task.error = failure
+                task.updated_at = request.now
+                cancelled_task_ids.append(task.id)
+            if cancelled_task_ids:
+                await session.execute(
+                    update(OutboxEventTable)
+                    .where(
+                        OutboxEventTable.task_id.in_(cancelled_task_ids),
+                        OutboxEventTable.status.in_(
+                            (OutboxStatus.WAITING_OBJECT, OutboxStatus.READY_TO_PUBLISH)
+                        ),
+                    )
+                    .values(status=OutboxStatus.CANCELLED, updated_at=request.now)
+                )
+            if document_ids:
+                await session.execute(
+                    update(IndexBuildTable)
+                    .where(
+                        IndexBuildTable.document_id.in_(document_ids),
+                        IndexBuildTable.status == IndexBuildStatus.BUILDING,
+                    )
+                    .values(status=IndexBuildStatus.ABANDONED, updated_at=request.now)
+                )
+
+            cleanup_job = JobTable(
+                id=new_id(),
+                type=JobType.DELETE_DATASET,
+                dataset_id=dataset.id,
+                document_id=None,
+                config_digest="0" * 64,
+                index_version=1,
+                document_generation=dataset.lifecycle_generation,
+                status=JobStatus.PENDING,
+                progress=Decimal("0"),
+                error=None,
+                retryable=False,
+                retry_count=0,
+                cancel_requested_at=None,
+                retry_of_job_id=None,
+                active_retry_parent_id=None,
+                is_system=False,
+                created_at=request.now,
+                updated_at=request.now,
+            )
+            cleanup_task = await self._add_job_task_outbox(
+                session,
+                cleanup_job,
+                TaskType.CLEANUP_DATASET,
+                OutboxStatus.READY_TO_PUBLISH,
+                request.now,
+            )
+            result = DeleteDatasetResult(
+                dataset_id=dataset.id,
+                job_id=cleanup_job.id,
+                task_id=cleanup_task.id,
+                reused=False,
+            )
+            session.add(
+                self._new_operation_idempotency_record(
+                    DELETE_DATASET_OPERATION,
+                    request.idempotency_key,
+                    dataset.id,
+                    request_digest,
+                    {
+                        "dataset_id": result.dataset_id,
                         "job_id": result.job_id,
                         "task_id": result.task_id,
                     },
@@ -1280,6 +1454,7 @@ class MySQLMetadataRepository:
                     DocumentTable.status == DocumentStatus.READY,
                     DocumentTable.active_version.is_not(None),
                     DatasetTable.tenant_id == self._default_tenant_id,
+                    DatasetTable.status == DatasetStatus.ACTIVE,
                 )
             )
             return {document_id: cast(int, version) for document_id, version in rows}
@@ -1372,6 +1547,7 @@ class MySQLMetadataRepository:
         cleanup_job = JobTable(
             id=new_id(),
             type=JobType.CLEANUP_INDEX_VERSION,
+            dataset_id=aggregate.document.dataset_id,
             document_id=aggregate.document.id,
             config_digest=aggregate.job.config_digest,
             index_version=aggregate.job.index_version,

@@ -11,9 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from rag_mvp.adapters.metadata.mysql import MySQLMetadataRepository
 from rag_mvp.domain.enums import DocumentStatus, JobStatus, TaskStatus
-from rag_mvp.domain.errors import DomainFailure
+from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.models import Chunk, Dataset, Locator
 from rag_mvp.ports.metadata import (
+    DeleteDatasetRequest,
     DeleteDocumentRequest,
     RetryJobRequest,
     SubmitIngestion,
@@ -282,3 +283,35 @@ async def test_delete_and_finalizer_race_never_leaves_ingest_outbox_ready(
         "CLEANUP_DOCUMENT": "READY_TO_PUBLISH",
         "INGEST_DOCUMENT": "CANCELLED",
     }
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_concurrent_dataset_delete_keys_create_one_cleanup_job(
+    mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
+) -> None:
+    repository, engine = mysql_repository
+    now = datetime.now(UTC)
+    await _submitted(repository, now)
+
+    results = await asyncio.gather(
+        *(
+            repository.delete_dataset(
+                DeleteDatasetRequest(f"delete-dataset-{index}", "dataset-1", now)
+            )
+            for index in range(8)
+        ),
+        return_exceptions=True,
+    )
+
+    successes = [result for result in results if not isinstance(result, Exception)]
+    failures = [result for result in results if isinstance(result, DomainError)]
+    assert len(successes) == 1
+    assert len(failures) == 7
+    assert {failure.failure.code for failure in failures} == {
+        "DATASET_DELETION_IN_PROGRESS"
+    }
+    async with engine.connect() as connection:
+        assert await connection.scalar(
+            text("SELECT COUNT(*) FROM jobs WHERE type = 'DELETE_DATASET'")
+        ) == 1

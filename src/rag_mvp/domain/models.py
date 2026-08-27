@@ -120,6 +120,7 @@ class Job:
     dataset_id: str = ""
 
     def __post_init__(self) -> None:
+        _require_text(self.dataset_id, "dataset_id")
         _require_digest(self.config_digest, "config_digest")
         if self.index_version < 1:
             raise ValueError("index_version must be at least 1")

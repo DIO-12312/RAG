@@ -76,6 +76,8 @@ class DatasetTable(TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint("embedding_dimension > 0", name="embedding_dimension_positive"),
         CheckConstraint("search_schema_version > 0", name="search_schema_version_positive"),
+        CheckConstraint("lifecycle_generation >= 0", name="lifecycle_generation_non_negative"),
+        Index("ix_datasets_tenant_status", "tenant_id", "status"),
         MYSQL_TABLE_OPTIONS,
     )
 
@@ -90,6 +92,8 @@ class DatasetTable(TimestampMixin, Base):
     embedding_model: Mapped[str] = mapped_column(String(255), nullable=False)
     embedding_dimension: Mapped[int] = mapped_column(Integer, nullable=False)
     search_schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ACTIVE")
+    lifecycle_generation: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
 
 
 class DocumentTable(TimestampMixin, Base):
@@ -129,15 +133,21 @@ class JobTable(TimestampMixin, Base):
         CheckConstraint("progress >= 0 AND progress <= 1", name="progress_range"),
         CheckConstraint("retry_count >= 0", name="retry_count_non_negative"),
         Index("ix_jobs_document_status", "document_id", "status"),
+        Index("ix_jobs_dataset_status", "dataset_id", "status"),
         MYSQL_TABLE_OPTIONS,
     )
 
     id: Mapped[str] = mapped_column(ID, primary_key=True)
     type: Mapped[str] = mapped_column(String(32), nullable=False)
-    document_id: Mapped[str] = mapped_column(
+    dataset_id: Mapped[str] = mapped_column(
+        ID,
+        ForeignKey("datasets.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    document_id: Mapped[str | None] = mapped_column(
         ID,
         ForeignKey("documents.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
     config_digest: Mapped[str] = mapped_column(DIGEST, nullable=False)
     index_version: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -315,6 +325,12 @@ class IdempotencyRecordTable(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    dataset_id: Mapped[str] = mapped_column(
+        ID,
+        ForeignKey("datasets.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     operation_type: Mapped[str] = mapped_column(String(32), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     request_digest: Mapped[str | None] = mapped_column(DIGEST, nullable=True)

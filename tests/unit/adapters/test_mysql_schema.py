@@ -71,9 +71,21 @@ def test_schema_declares_aggregate_foreign_keys() -> None:
     assert ("tenant_id", "tenants.id") in _foreign_key_targets("datasets")
     assert ("dataset_id", "datasets.id") in _foreign_key_targets("documents")
     assert ("document_id", "documents.id") in _foreign_key_targets("jobs")
+    assert ("dataset_id", "datasets.id") in _foreign_key_targets("jobs")
     assert ("job_id", "jobs.id") in _foreign_key_targets("tasks")
     assert ("task_id", "tasks.id") in _foreign_key_targets("outbox_events")
     assert ("document_id", "documents.id") in _foreign_key_targets("chunk_manifests")
+
+
+def test_dataset_deletion_schema_tracks_lifecycle_and_dataset_ownership() -> None:
+    datasets = Base.metadata.tables["datasets"].c
+    jobs = Base.metadata.tables["jobs"].c
+    idempotency = Base.metadata.tables["idempotency_records"].c
+
+    assert {"status", "lifecycle_generation"} <= set(datasets.keys())
+    assert jobs.document_id.nullable is True
+    assert jobs.dataset_id.nullable is False
+    assert idempotency.dataset_id.nullable is False
 
 
 def test_schema_uses_precise_json_time_and_digest_columns_without_vectors() -> None:

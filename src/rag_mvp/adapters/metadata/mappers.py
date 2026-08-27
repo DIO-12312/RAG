@@ -14,6 +14,7 @@ from rag_mvp.adapters.metadata.tables import (
     TaskTable,
 )
 from rag_mvp.domain.enums import (
+    DatasetStatus,
     DocumentStatus,
     JobStatus,
     JobType,
@@ -61,6 +62,8 @@ def dataset_from_table(row: DatasetTable) -> Dataset:
         embedding_model=row.embedding_model,
         embedding_dimension=row.embedding_dimension,
         search_schema_version=row.search_schema_version,
+        status=DatasetStatus(row.status),
+        lifecycle_generation=row.lifecycle_generation,
         created_at=as_utc(row.created_at),
     )
 
@@ -85,6 +88,7 @@ def job_from_table(row: JobTable) -> Job:
         id=row.id,
         type=JobType(row.type),
         document_id=row.document_id,
+        dataset_id=row.dataset_id,
         config_digest=row.config_digest,
         index_version=row.index_version,
         document_generation=row.document_generation,

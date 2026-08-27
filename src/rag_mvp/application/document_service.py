@@ -9,16 +9,20 @@ from time import perf_counter
 from rag_mvp.application.dto import (
     CreateDatasetCommand,
     CreateDatasetResult,
+    DeleteDatasetCommand,
+    DeleteDatasetResult,
     DeleteDocumentCommand,
     DeleteDocumentResult,
     SubmitDocumentCommand,
     SubmitDocumentResult,
 )
+from rag_mvp.domain.enums import DatasetStatus
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.ids import config_digest, file_sha256
 from rag_mvp.domain.models import Dataset
 from rag_mvp.observability import emit_event
 from rag_mvp.ports.metadata import (
+    DeleteDatasetRequest,
     DeleteDocumentRequest,
     MetadataRepository,
     SubmitIngestion,
@@ -122,6 +126,8 @@ class DocumentService:
         dataset = await self._metadata.get_dataset(command.dataset_id)
         if dataset is None:
             raise DomainError(DomainFailure("DATASET_NOT_FOUND", "dataset does not exist"))
+        if dataset.status is not DatasetStatus.ACTIVE:
+            raise DomainError(DomainFailure("DATASET_DELETING", "dataset is being deleted"))
         if (
             command.embedding_model is not None
             and command.embedding_model != dataset.embedding_model
@@ -235,3 +241,20 @@ class DocumentService:
             stage="delete_document",
         )
         return DeleteDocumentResult(deleted.document_id, deleted.job_id, deleted.reused)
+
+    async def delete_dataset(self, command: DeleteDatasetCommand) -> DeleteDatasetResult:
+        if not command.idempotency_key:
+            raise DomainError(
+                DomainFailure("IDEMPOTENCY_KEY_REQUIRED", "idempotency key is required")
+            )
+        deleted = await self._metadata.delete_dataset(
+            DeleteDatasetRequest(command.idempotency_key, command.dataset_id, command.now)
+        )
+        emit_event(
+            "dataset_deleted",
+            request_id=command.request_id,
+            job_id=deleted.job_id,
+            dataset_id=deleted.dataset_id,
+            stage="delete_dataset",
+        )
+        return DeleteDatasetResult(deleted.dataset_id, deleted.job_id, deleted.reused)

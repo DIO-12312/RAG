@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from rag_mvp.domain.enums import (
+    DatasetStatus,
     DocumentStatus,
     FingerprintState,
     IndexBuildStatus,
@@ -32,6 +33,8 @@ from rag_mvp.domain.models import (
 from rag_mvp.ports.metadata import (
     CancelJobRequest,
     CancelJobResult,
+    DeleteDatasetRequest,
+    DeleteDatasetResult,
     DeleteDocumentRequest,
     DeleteDocumentResult,
     RetryJobRequest,
@@ -62,8 +65,14 @@ class FakeMetadataRepository:
         self._idempotency: dict[str, SubmitResult] = {}
         self._retry_idempotency: dict[str, RetryJobResult] = {}
         self._delete_idempotency: dict[str, DeleteDocumentResult] = {}
+        self._dataset_delete_idempotency: dict[str, DeleteDatasetResult] = {}
         self._cancel_idempotency: dict[str, CancelJobResult] = {}
         self.fail_next_submit = False
+
+    def _document_for_job(self, job: Job) -> Document:
+        if job.document_id is None:
+            raise RuntimeError("document-scoped operation received a dataset job")
+        return self.documents[job.document_id]
 
     async def create_dataset(self, dataset: Dataset) -> Dataset:
         async with self._lock:
@@ -78,8 +87,11 @@ class FakeMetadataRepository:
 
     async def submit_ingestion(self, command: SubmitIngestion) -> SubmitResult:
         async with self._lock:
-            if command.dataset_id not in self.datasets:
+            dataset = self.datasets.get(command.dataset_id)
+            if dataset is None:
                 raise KeyError(command.dataset_id)
+            if dataset.status is not DatasetStatus.ACTIVE:
+                raise DomainError(DomainFailure("DATASET_DELETING", "dataset is being deleted"))
             idempotent = self._idempotency.get(command.idempotency_key)
             if idempotent is not None:
                 return replace(idempotent, reused=True, staging_referenced=False)
@@ -166,6 +178,7 @@ class FakeMetadataRepository:
                 status=JobStatus.PENDING,
                 progress=0.0,
                 created_at=command.now,
+                dataset_id=command.dataset_id,
             )
             task = Task(
                 id=task_id,
@@ -243,7 +256,7 @@ class FakeMetadataRepository:
                 return False
             task = self.tasks[event.task_id]
             job = self.jobs[task.job_id]
-            document = self.documents[job.document_id]
+            document = self._document_for_job(job)
             if document.status is DocumentStatus.DELETED:
                 return False
             self.documents[document.id] = replace(document, object_key=object_key)
@@ -270,7 +283,7 @@ class FakeMetadataRepository:
             )
             task = self.tasks[event.task_id]
             job = self.jobs[task.job_id]
-            document = self.documents[job.document_id]
+            document = self._document_for_job(job)
             self.outbox[event_id] = replace(event, attempt=attempt, status=OutboxStatus.CANCELLED)
             self.tasks[task.id] = replace(task, status=TaskStatus.FAILED, error=failure)
             self.jobs[job.id] = replace(
@@ -320,7 +333,7 @@ class FakeMetadataRepository:
             ):
                 return None
             job = self.jobs[task.job_id]
-            document = self.documents[job.document_id]
+            document = self._document_for_job(job)
             if job.cancel_requested_at is not None or (
                 document.status is DocumentStatus.DELETED and task.type is TaskType.INGEST_DOCUMENT
             ):
@@ -348,7 +361,7 @@ class FakeMetadataRepository:
             if task is None or task.status is not TaskStatus.RUNNING:
                 return False
             job = self.jobs[task.job_id]
-            document = self.documents[job.document_id]
+            document = self._document_for_job(job)
             if job.cancel_requested_at is not None:
                 failure = DomainFailure("JOB_CANCELLED", "ingestion was cancelled")
                 self.tasks[task.id] = replace(task, status=TaskStatus.CANCELLED, error=failure)
@@ -398,6 +411,7 @@ class FakeMetadataRepository:
             progress=0.0,
             created_at=now,
             is_system=True,
+            dataset_id=document.dataset_id,
         )
         task = Task(
             id=task_id,
@@ -433,7 +447,7 @@ class FakeMetadataRepository:
             if task is None or task.status not in {TaskStatus.PENDING, TaskStatus.RUNNING}:
                 return False
             job = self.jobs[task.job_id]
-            document = self.documents[job.document_id]
+            document = self._document_for_job(job)
             self.tasks[task_id] = replace(task, status=TaskStatus.FAILED, error=failure)
             self.jobs[job.id] = replace(
                 job,
@@ -470,7 +484,7 @@ class FakeMetadataRepository:
                 raise DomainError(
                     DomainFailure("JOB_NOT_RETRYABLE", "job failure is not retryable")
                 )
-            document = self.documents[original.document_id]
+            document = self._document_for_job(original)
             if document.object_key is None:
                 raise DomainError(
                     DomainFailure(
@@ -513,6 +527,7 @@ class FakeMetadataRepository:
                 created_at=request.now,
                 retry_count=retry_count,
                 retry_of_job_id=original.id,
+                dataset_id=original.dataset_id,
             )
             task = Task(
                 id=task_id,
@@ -654,6 +669,7 @@ class FakeMetadataRepository:
                 status=JobStatus.PENDING,
                 progress=0.0,
                 created_at=request.now,
+                dataset_id=document.dataset_id,
             )
             task = Task(
                 id=task_id,
@@ -680,6 +696,113 @@ class FakeMetadataRepository:
             self._delete_idempotency[request.idempotency_key] = result
             return result
 
+    async def delete_dataset(self, request: DeleteDatasetRequest) -> DeleteDatasetResult:
+        async with self._lock:
+            repeated = self._dataset_delete_idempotency.get(request.idempotency_key)
+            if repeated is not None:
+                return replace(repeated, reused=True)
+            dataset = self.datasets.get(request.dataset_id)
+            if dataset is None:
+                raise DomainError(DomainFailure("DATASET_NOT_FOUND", "dataset does not exist"))
+            if dataset.status is not DatasetStatus.ACTIVE:
+                raise DomainError(
+                    DomainFailure(
+                        "DATASET_DELETION_IN_PROGRESS",
+                        "dataset deletion is already in progress",
+                    )
+                )
+
+            self.datasets[dataset.id] = replace(
+                dataset,
+                status=DatasetStatus.DELETING,
+                lifecycle_generation=dataset.lifecycle_generation + 1,
+            )
+            document_ids = {
+                document.id
+                for document in self.documents.values()
+                if document.dataset_id == dataset.id
+            }
+            for document_id in document_ids:
+                document = self.documents[document_id]
+                self.documents[document_id] = replace(
+                    document,
+                    status=DocumentStatus.DELETED,
+                    lifecycle_generation=document.lifecycle_generation + 1,
+                )
+            for key, fingerprint in tuple(self.fingerprints.items()):
+                if fingerprint.dataset_id == dataset.id:
+                    self.fingerprints[key] = replace(
+                        fingerprint, state=FingerprintState.RELEASED
+                    )
+
+            failure = DomainFailure(
+                "DATASET_DELETED", "dataset was deleted before work completed"
+            )
+            cancelled_task_ids: set[str] = set()
+            for task_id, task in tuple(self.tasks.items()):
+                job = self.jobs[task.job_id]
+                if job.dataset_id == dataset.id and task.status in {
+                    TaskStatus.PENDING,
+                    TaskStatus.RUNNING,
+                }:
+                    self.tasks[task_id] = replace(
+                        task, status=TaskStatus.CANCELLED, error=failure
+                    )
+                    self.jobs[job.id] = replace(
+                        job, status=JobStatus.CANCELLED, error=failure
+                    )
+                    cancelled_task_ids.add(task_id)
+            for event_id, event in tuple(self.outbox.items()):
+                if event.task_id in cancelled_task_ids and event.status in {
+                    OutboxStatus.WAITING_OBJECT,
+                    OutboxStatus.READY_TO_PUBLISH,
+                }:
+                    self.outbox[event_id] = replace(event, status=OutboxStatus.CANCELLED)
+            for build_key, build in tuple(self.index_builds.items()):
+                if build.document_id in document_ids and build.status is IndexBuildStatus.BUILDING:
+                    self.index_builds[build_key] = replace(
+                        build, status=IndexBuildStatus.ABANDONED
+                    )
+
+            job_id = new_id()
+            task_id = new_id()
+            cleanup_job = Job(
+                id=job_id,
+                type=JobType.DELETE_DATASET,
+                dataset_id=dataset.id,
+                document_id=None,
+                config_digest="0" * 64,
+                index_version=1,
+                document_generation=dataset.lifecycle_generation + 1,
+                status=JobStatus.PENDING,
+                progress=0.0,
+                created_at=request.now,
+            )
+            cleanup_task = Task(
+                id=task_id,
+                job_id=job_id,
+                type=TaskType.CLEANUP_DATASET,
+                status=TaskStatus.PENDING,
+                attempt=0,
+                last_delivery_sequence=None,
+                checkpoint=None,
+                created_at=request.now,
+            )
+            event = OutboxEvent(
+                id=new_id(),
+                task_id=task_id,
+                status=OutboxStatus.READY_TO_PUBLISH,
+                attempt=0,
+                staging_key=None,
+                created_at=request.now,
+            )
+            self.jobs[job_id] = cleanup_job
+            self.tasks[task_id] = cleanup_task
+            self.outbox[event.id] = event
+            result = DeleteDatasetResult(dataset.id, job_id, task_id, reused=False)
+            self._dataset_delete_idempotency[request.idempotency_key] = result
+            return result
+
     async def complete_cleanup(self, task_id: str, now: datetime) -> bool:
         del now
         async with self._lock:
@@ -691,7 +814,7 @@ class FakeMetadataRepository:
             ):
                 return False
             job = self.jobs[task.job_id]
-            document = self.documents[job.document_id]
+            document = self._document_for_job(job)
             if document.lifecycle_generation != job.document_generation:
                 return False
             if task.type is TaskType.CLEANUP_DOCUMENT:
@@ -721,6 +844,7 @@ class FakeMetadataRepository:
             if (document := self.documents.get(document_id)) is not None
             and document.status is DocumentStatus.READY
             and document.active_version is not None
+            and self.datasets[document.dataset_id].status is DatasetStatus.ACTIVE
         }
 
     def counts(self) -> dict[str, int]:

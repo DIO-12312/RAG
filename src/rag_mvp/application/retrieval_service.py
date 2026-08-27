@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from time import perf_counter
 
 from rag_mvp.application.dto import RetrieveQuery
+from rag_mvp.domain.enums import DatasetStatus
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.models import Evidence
 from rag_mvp.observability import emit_event
@@ -43,6 +44,8 @@ class RetrievalService:
         dataset = await self._metadata.get_dataset(query.dataset_id)
         if dataset is None:
             raise DomainError(DomainFailure("DATASET_NOT_FOUND", "dataset does not exist"))
+        if dataset.status is not DatasetStatus.ACTIVE:
+            raise DomainError(DomainFailure("DATASET_DELETING", "dataset is being deleted"))
         vectors = await self._model.embed([query.query])
         if len(vectors) != 1 or len(vectors[0]) != dataset.embedding_dimension:
             raise DomainError(

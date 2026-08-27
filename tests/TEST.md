@@ -159,6 +159,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | `adapters/test_mysql_schema.py` | `test_core_schema_declares_all_authoritative_tables_and_innodb` | ORM metadata 声明全部权威表，并固定为 InnoDB。 |
 | 同上 | `test_schema_declares_business_uniqueness_constraints` | Fingerprint、版本、幂等记录、manifest 和 Outbox 具有业务唯一约束。 |
 | 同上 | `test_schema_declares_aggregate_foreign_keys` | Dataset、Document、Job、Task、Outbox 和 manifest 的聚合外键完整。 |
+| 同上 | `test_dataset_deletion_schema_tracks_lifecycle_and_dataset_ownership` | Dataset 生命周期、可空 document Job 与强制 dataset 归属列完整。 |
 | 同上 | `test_schema_uses_precise_json_time_and_digest_columns_without_vectors` | JSON、DATETIME(6) 与 64 位摘要字段类型正确，manifest 不保存向量。 |
 | `adapters/test_openai_compatible_model.py` | `test_embed_normalizes_url_preserves_batch_order_and_bearer_header` | 规范 endpoint、仅以 Bearer header 鉴权，并对分批乱序响应恢复全局输入顺序。 |
 | 同上 | `test_embed_bisects_provider_rejected_multi_input_batches` | 多输入批次被供应商以 HTTP 400 拒绝时按顺序二分，成功后恢复完整向量顺序。 |
@@ -175,6 +176,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_same_idempotency_key_with_different_bytes_is_rejected_without_overwrite` | 同一幂等键不同字节被稳定拒绝，已有对象不被覆盖。 |
 | 同上 | `test_sha_and_size_validation_happen_before_metadata_creation` | 大小和 SHA 校验必须先于元数据创建。 |
 | 同上 | `test_repository_failure_cleans_staging_object` | Repository 失败后清理本次 staging object。 |
+| 同上 | `test_delete_dataset_is_idempotent_and_blocks_new_submissions` | Dataset 删除受理支持同 key 幂等复用，并立即拒绝新上传。 |
 | `application/test_job_service.py` | `test_job_service_returns_job_and_task_snapshot` | 查询返回 Job 及 Task 快照。 |
 | 同上 | `test_job_service_returns_stable_not_found_failure` | 不存在 Job 返回稳定业务错误。 |
 | `application/test_retrieval_service.py` | `test_dense_retrieve_filters_stale_versions_and_preserves_scores` | 过滤已删除或非 active version 命中，同时保留阶段分数。 |
@@ -187,6 +189,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | `domain/test_models.py` | `test_dataset_requires_embedding_dimension_and_model` | Dataset 必须具有 embedding 模型及维度。 |
 | 同上 | `test_dataset_starts_active_with_a_non_negative_lifecycle_generation` | Dataset 生命周期初始为 ACTIVE，generation 不得为负。 |
 | 同上 | `test_dataset_cleanup_job_has_dataset_scope_but_no_document` | dataset cleanup Job 关联 Dataset 而不关联 Document。 |
+| 同上 | `test_every_job_requires_dataset_scope` | 所有 Job 必须显式携带 Dataset 作用域。 |
 | 同上 | `test_dataset_preserves_tenant_boundary` | Dataset 显式保留所属 tenant，防止后续持久化丢失租户边界。 |
 | 同上 | `test_document_versions_and_generation_are_non_negative` | Document 版本号和 generation 不允许为负。 |
 | 同上 | `test_job_progress_is_normalized` | Job 进度被规范化到有效范围。 |
@@ -315,10 +318,13 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | 同上 | `test_concurrent_rebuilds_allocate_distinct_index_versions` | 四个并发重建在 Document 行锁下分配互不重复的 index version，旧 active version 保持可见。 |
 | 同上 | `test_out_of_order_rebuild_completion_never_regresses_active_version` | 高版本先完成、低版本迟到时 active version 只前进，迟到 IndexBuild 被废弃并创建版本清理 Job。 |
 | 同上 | `test_delete_and_finalizer_race_never_leaves_ingest_outbox_ready` | 删除与 Finalizer 并发时，摄取 Outbox 最终必为 CANCELLED，且仅删除清理 Outbox 可发布。 |
+| 同上 | `test_concurrent_dataset_delete_keys_create_one_cleanup_job` | 并发不同删除 key 只允许一个受理并创建一个 Dataset 清理 Job。 |
 | `test_mysql_lifecycle.py` | `test_pending_cancel_is_immediate_idempotent_and_withdraws_outbox` | PENDING 取消原子终止 Job/Task、撤销未发布 Outbox，并支持同 key 幂等回放。 |
 | 同上 | `test_running_cancel_converges_at_completion_without_activating_version` | RUNNING 取消先记录请求，再由完成 checkpoint 收敛为 CANCELLED、放弃索引版本并创建清理任务。 |
 | 同上 | `test_delete_hides_immediately_cancels_ingest_and_cleanup_honors_generation` | 删除立即隐藏文档、阻断旧摄取完成，并由 generation 匹配的清理 Task 收敛终态。 |
 | 同上 | `test_new_delete_key_for_deleted_document_is_rejected` | 已删除 Document 只允许原幂等 key 回放，新 key 返回稳定冲突。 |
+| 同上 | `test_delete_dataset_atomically_fences_children_and_enqueues_cleanup` | Dataset 删除原子隔离子聚合、撤销旧 Outbox，并创建唯一 READY 清理任务。 |
+| 同上 | `test_delete_dataset_rejects_new_key_and_new_ingestion` | DELETING Dataset 拒绝新删除 key 与新摄取。 |
 | `test_mysql_migrations.py` | `test_upgrade_head_is_idempotent_and_creates_innodb_schema` | 对真实 MySQL 连续升级两次，验证 revision、默认租户、InnoDB 表和关键唯一约束。 |
 | `test_mysql_outbox_worker.py` | `test_outbox_transitions_delivery_dedup_and_atomic_completion` | 验证 WAITING→READY→PUBLISHED、delivery 去重，以及 manifest/version/Job/Task 原子完成。 |
 | 同上 | `test_finalizer_exhaustion_atomically_fails_and_releases_fingerprint` | Finalizer 耗尽后原子写 Task/Job FAILED、Outbox CANCELLED、Fingerprint RELEASED。 |

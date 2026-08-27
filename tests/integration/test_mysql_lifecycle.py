@@ -9,11 +9,21 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from rag_mvp.adapters.metadata.mysql import MySQLMetadataRepository
-from rag_mvp.domain.enums import DocumentStatus, JobStatus, TaskStatus
+from rag_mvp.domain.enums import (
+    DatasetStatus,
+    DocumentStatus,
+    FingerprintState,
+    JobStatus,
+    JobType,
+    OutboxStatus,
+    TaskStatus,
+    TaskType,
+)
 from rag_mvp.domain.errors import DomainError
 from rag_mvp.domain.models import Chunk, Dataset, Locator
 from rag_mvp.ports.metadata import (
     CancelJobRequest,
+    DeleteDatasetRequest,
     DeleteDocumentRequest,
     SubmitIngestion,
     SubmitResult,
@@ -197,3 +207,85 @@ async def test_new_delete_key_for_deleted_document_is_rejected(
         )
 
     assert error.value.failure.code == "DOCUMENT_ALREADY_DELETED"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_delete_dataset_atomically_fences_children_and_enqueues_cleanup(
+    mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
+) -> None:
+    repository, engine = mysql_repository
+    now = datetime.now(UTC)
+    submitted = await _submitted(repository, now)
+
+    deleted = await repository.delete_dataset(
+        DeleteDatasetRequest("delete-dataset-key", "dataset-1", now)
+    )
+    repeated = await repository.delete_dataset(
+        DeleteDatasetRequest("delete-dataset-key", "dataset-1", now)
+    )
+
+    dataset = await repository.get_dataset("dataset-1")
+    document = await repository.get_document(submitted.document_id)
+    ingest_job = await repository.get_job(submitted.job_id)
+    ingest_task = await repository.get_task(submitted.task_id)
+    cleanup_job = await repository.get_job(deleted.job_id)
+    cleanup_task = await repository.get_task(deleted.task_id)
+    assert repeated == type(deleted)(
+        deleted.dataset_id,
+        deleted.job_id,
+        deleted.task_id,
+        True,
+    )
+    assert dataset is not None and dataset.status is DatasetStatus.DELETING
+    assert dataset.lifecycle_generation == 1
+    assert document is not None and document.status is DocumentStatus.DELETED
+    assert document.lifecycle_generation == 1
+    assert ingest_job is not None and ingest_job.status is JobStatus.CANCELLED
+    assert ingest_task is not None and ingest_task.status is TaskStatus.CANCELLED
+    assert cleanup_job is not None and cleanup_job.type is JobType.DELETE_DATASET
+    assert cleanup_job.document_id is None and cleanup_job.dataset_id == "dataset-1"
+    assert cleanup_task is not None and cleanup_task.type is TaskType.CLEANUP_DATASET
+    assert await repository.visible_document_versions([submitted.document_id]) == {}
+
+    async with engine.connect() as connection:
+        assert await connection.scalar(
+            text("SELECT state FROM ingestion_fingerprints LIMIT 1")
+        ) == FingerprintState.RELEASED
+        assert await connection.scalar(
+            text("SELECT status FROM outbox_events WHERE task_id = :task_id"),
+            {"task_id": submitted.task_id},
+        ) == OutboxStatus.CANCELLED
+        assert await connection.scalar(
+            text("SELECT status FROM outbox_events WHERE task_id = :task_id"),
+            {"task_id": deleted.task_id},
+        ) == OutboxStatus.READY_TO_PUBLISH
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_delete_dataset_rejects_new_key_and_new_ingestion(
+    mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
+) -> None:
+    repository, _engine = mysql_repository
+    now = datetime.now(UTC)
+    await _submitted(repository, now)
+    await repository.delete_dataset(DeleteDatasetRequest("delete-1", "dataset-1", now))
+
+    with pytest.raises(DomainError) as deleting:
+        await repository.delete_dataset(DeleteDatasetRequest("delete-2", "dataset-1", now))
+    assert deleting.value.failure.code == "DATASET_DELETION_IN_PROGRESS"
+
+    with pytest.raises(DomainError) as submitted:
+        await repository.submit_ingestion(
+            SubmitIngestion(
+                idempotency_key="submit-after-delete",
+                dataset_id="dataset-1",
+                source_name="late.txt",
+                staging_key="staging/late",
+                file_sha256="c" * 64,
+                config_digest="d" * 64,
+                now=now,
+            )
+        )
+    assert submitted.value.failure.code == "DATASET_DELETING"

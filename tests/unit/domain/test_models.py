@@ -83,6 +83,21 @@ def test_dataset_cleanup_job_has_dataset_scope_but_no_document() -> None:
     assert job.document_id is None
 
 
+def test_every_job_requires_dataset_scope() -> None:
+    with pytest.raises(ValueError, match="dataset_id"):
+        Job(
+            id="job-1",
+            type=JobType.INGEST_DOCUMENT,
+            document_id="doc-1",
+            config_digest="b" * 64,
+            index_version=1,
+            document_generation=0,
+            status=JobStatus.PENDING,
+            progress=0.0,
+            created_at=datetime.now(UTC),
+        )
+
+
 def test_document_versions_and_generation_are_non_negative() -> None:
     with pytest.raises(ValueError, match="next_index_version"):
         Document(
@@ -103,6 +118,7 @@ def test_job_progress_is_normalized() -> None:
         Job(
             id="job-1",
             type=JobType.INGEST_DOCUMENT,
+            dataset_id="dataset-1",
             document_id="doc-1",
             config_digest="b" * 64,
             index_version=1,
