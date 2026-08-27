@@ -100,9 +100,9 @@ async def test_dataset_cleanup_failure_keeps_deleting_metadata_for_retry() -> No
     storage = OrderedStorage(calls)
     repository, job_id, task_id = await _deleting_dataset(storage, now)
 
-    result = await CleanupService(
-        repository, OrderedSearch(calls, fail=True), storage
-    ).execute(task_id, 1, now)
+    result = await CleanupService(repository, OrderedSearch(calls, fail=True), storage).execute(
+        task_id, 1, now
+    )
 
     dataset = await repository.get_dataset("dataset-1")
     task = await repository.get_task(task_id)

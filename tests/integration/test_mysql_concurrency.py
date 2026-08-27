@@ -308,10 +308,9 @@ async def test_concurrent_dataset_delete_keys_create_one_cleanup_job(
     failures = [result for result in results if isinstance(result, DomainError)]
     assert len(successes) == 1
     assert len(failures) == 7
-    assert {failure.failure.code for failure in failures} == {
-        "DATASET_DELETION_IN_PROGRESS"
-    }
+    assert {failure.failure.code for failure in failures} == {"DATASET_DELETION_IN_PROGRESS"}
     async with engine.connect() as connection:
-        assert await connection.scalar(
-            text("SELECT COUNT(*) FROM jobs WHERE type = 'DELETE_DATASET'")
-        ) == 1
+        assert (
+            await connection.scalar(text("SELECT COUNT(*) FROM jobs WHERE type = 'DELETE_DATASET'"))
+            == 1
+        )

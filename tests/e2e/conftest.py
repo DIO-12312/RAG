@@ -174,13 +174,9 @@ async def wait_for_dataset_purged(
             failure = result.failure if result.HasField("failure") else None
             code = failure.code if failure is not None else "NO_FAILURE_CODE"
             message = failure.message if failure is not None else "deletion reached terminal state"
-            raise AssertionError(
-                f"dataset deletion job {job_id} ended with {code}: {message}"
-            )
+            raise AssertionError(f"dataset deletion job {job_id} ended with {code}: {message}")
         await asyncio.sleep(0.25)
-    raise AssertionError(
-        f"dataset deletion job {job_id} was not purged within {deadline_seconds}s"
-    )
+    raise AssertionError(f"dataset deletion job {job_id} was not purged within {deadline_seconds}s")
 
 
 async def retrieve(stub: Any, dataset_id: str, query: str) -> Any:

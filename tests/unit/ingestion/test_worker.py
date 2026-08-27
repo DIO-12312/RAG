@@ -250,13 +250,9 @@ async def test_late_dataset_cleanup_delivery_after_purge_is_ack_only() -> None:
     repository, storage, queue, ingestion, task_id = await _dataset_cleanup_work(now)
     cleanup = CleanupService(repository, FakeSearchEngine(), storage)
 
-    assert await worker_once(
-        queue, repository, ingestion, "worker-1", now, cleanup=cleanup
-    )
+    assert await worker_once(queue, repository, ingestion, "worker-1", now, cleanup=cleanup)
     assert await repository.get_task(task_id) is None
     await queue.publish(task_id)
-    assert await worker_once(
-        queue, repository, ingestion, "worker-2", now, cleanup=cleanup
-    )
+    assert await worker_once(queue, repository, ingestion, "worker-2", now, cleanup=cleanup)
 
     assert queue.acked_task_ids == [task_id, task_id]

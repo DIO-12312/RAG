@@ -168,18 +168,14 @@ async def test_repository_failure_cleans_staging_object() -> None:
 async def test_delete_dataset_is_idempotent_and_blocks_new_submissions() -> None:
     service, repository, _storage = await _service()
     await service.submit_document(_submit())
-    command = DeleteDatasetCommand(
-        "trace-delete", "delete-dataset", "dataset-1", datetime.now(UTC)
-    )
+    command = DeleteDatasetCommand("trace-delete", "delete-dataset", "dataset-1", datetime.now(UTC))
 
     first = await service.delete_dataset(command)
     repeated = await service.delete_dataset(command)
 
     assert repeated.job_id == first.job_id
     assert repeated.reused is True
-    assert sum(
-        task.type.value == "CLEANUP_DATASET" for task in repository.tasks.values()
-    ) == 1
+    assert sum(task.type.value == "CLEANUP_DATASET" for task in repository.tasks.values()) == 1
     with pytest.raises(DomainError) as error:
         await service.submit_document(_submit(idempotency_key="after-delete"))
     assert error.value.failure.code == "DATASET_DELETING"

@@ -725,8 +725,7 @@ class MySQLMetadataRepository:
             if aggregate.task.type == TaskType.CLEANUP_DATASET:
                 if (
                     aggregate.dataset.status != DatasetStatus.DELETING
-                    or aggregate.dataset.lifecycle_generation
-                    != aggregate.job.document_generation
+                    or aggregate.dataset.lifecycle_generation != aggregate.job.document_generation
                 ):
                     return None
             else:
@@ -1524,8 +1523,7 @@ class MySQLMetadataRepository:
                 or aggregate.job.status != JobStatus.RUNNING
                 or aggregate.document is not None
                 or aggregate.dataset.status != DatasetStatus.DELETING
-                or aggregate.dataset.lifecycle_generation
-                != aggregate.job.document_generation
+                or aggregate.dataset.lifecycle_generation != aggregate.job.document_generation
             ):
                 return False
 
@@ -1546,9 +1544,7 @@ class MySQLMetadataRepository:
             )
             task_ids = tuple(
                 (
-                    await session.scalars(
-                        select(TaskTable.id).where(TaskTable.job_id.in_(job_ids))
-                    )
+                    await session.scalars(select(TaskTable.id).where(TaskTable.job_id.in_(job_ids)))
                 ).all()
             )
             if task_ids:

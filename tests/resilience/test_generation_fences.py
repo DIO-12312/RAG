@@ -208,17 +208,18 @@ async def test_dataset_delete_between_promote_and_ready_compensates_final_object
     now, repository, storage, _, _, _, document_id = await _harness()
 
     async def delete_after_promote() -> None:
-        await repository.delete_dataset(
-            DeleteDatasetRequest("delete-dataset", "dataset-1", now)
-        )
+        await repository.delete_dataset(DeleteDatasetRequest("delete-dataset", "dataset-1", now))
 
-    assert await finalize_once(
-        repository,
-        storage,
-        now,
-        limit=10,
-        after_promote=delete_after_promote,
-    ) == 0
+    assert (
+        await finalize_once(
+            repository,
+            storage,
+            now,
+            limit=10,
+            after_promote=delete_after_promote,
+        )
+        == 0
+    )
     assert not await storage.exists(f"objects/{document_id}/source")
     ingest_events = [
         event

@@ -249,17 +249,24 @@ async def test_delete_dataset_atomically_fences_children_and_enqueues_cleanup(
     assert await repository.visible_document_versions([submitted.document_id]) == {}
 
     async with engine.connect() as connection:
-        assert await connection.scalar(
-            text("SELECT state FROM ingestion_fingerprints LIMIT 1")
-        ) == FingerprintState.RELEASED
-        assert await connection.scalar(
-            text("SELECT status FROM outbox_events WHERE task_id = :task_id"),
-            {"task_id": submitted.task_id},
-        ) == OutboxStatus.CANCELLED
-        assert await connection.scalar(
-            text("SELECT status FROM outbox_events WHERE task_id = :task_id"),
-            {"task_id": deleted.task_id},
-        ) == OutboxStatus.READY_TO_PUBLISH
+        assert (
+            await connection.scalar(text("SELECT state FROM ingestion_fingerprints LIMIT 1"))
+            == FingerprintState.RELEASED
+        )
+        assert (
+            await connection.scalar(
+                text("SELECT status FROM outbox_events WHERE task_id = :task_id"),
+                {"task_id": submitted.task_id},
+            )
+            == OutboxStatus.CANCELLED
+        )
+        assert (
+            await connection.scalar(
+                text("SELECT status FROM outbox_events WHERE task_id = :task_id"),
+                {"task_id": deleted.task_id},
+            )
+            == OutboxStatus.READY_TO_PUBLISH
+        )
 
 
 @pytest.mark.integration

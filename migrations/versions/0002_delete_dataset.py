@@ -37,9 +37,7 @@ def upgrade() -> None:
         "datasets",
         "lifecycle_generation >= 0",
     )
-    op.create_index(
-        "ix_datasets_tenant_status", "datasets", ["tenant_id", "status"], unique=False
-    )
+    op.create_index("ix_datasets_tenant_status", "datasets", ["tenant_id", "status"], unique=False)
 
     op.add_column("jobs", sa.Column("dataset_id", _id(), nullable=True))
     op.execute(
@@ -106,8 +104,6 @@ def downgrade() -> None:
     op.drop_column("jobs", "dataset_id")
 
     op.drop_index("ix_datasets_tenant_status", table_name="datasets")
-    op.drop_constraint(
-        "ck_datasets_lifecycle_generation_non_negative", "datasets", type_="check"
-    )
+    op.drop_constraint("ck_datasets_lifecycle_generation_non_negative", "datasets", type_="check")
     op.drop_column("datasets", "lifecycle_generation")
     op.drop_column("datasets", "status")

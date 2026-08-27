@@ -136,9 +136,7 @@ async def test_dataset_delete_after_publish_before_claim_makes_worker_ack_only()
     now, repository, storage, queue, _job_id = await _pending()
     await finalize_once(repository, storage, now, limit=10)
     await relay_once(repository, queue, now, limit=10)
-    await repository.delete_dataset(
-        DeleteDatasetRequest("delete-dataset", "dataset-1", now)
-    )
+    await repository.delete_dataset(DeleteDatasetRequest("delete-dataset", "dataset-1", now))
     model = FakeModelGateway(8)
     ingestion = IngestionService(
         repository,

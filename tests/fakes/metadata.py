@@ -747,13 +747,9 @@ class FakeMetadataRepository:
                 )
             for key, fingerprint in tuple(self.fingerprints.items()):
                 if fingerprint.dataset_id == dataset.id:
-                    self.fingerprints[key] = replace(
-                        fingerprint, state=FingerprintState.RELEASED
-                    )
+                    self.fingerprints[key] = replace(fingerprint, state=FingerprintState.RELEASED)
 
-            failure = DomainFailure(
-                "DATASET_DELETED", "dataset was deleted before work completed"
-            )
+            failure = DomainFailure("DATASET_DELETED", "dataset was deleted before work completed")
             cancelled_task_ids: set[str] = set()
             for task_id, task in tuple(self.tasks.items()):
                 job = self.jobs[task.job_id]
@@ -761,12 +757,8 @@ class FakeMetadataRepository:
                     TaskStatus.PENDING,
                     TaskStatus.RUNNING,
                 }:
-                    self.tasks[task_id] = replace(
-                        task, status=TaskStatus.CANCELLED, error=failure
-                    )
-                    self.jobs[job.id] = replace(
-                        job, status=JobStatus.CANCELLED, error=failure
-                    )
+                    self.tasks[task_id] = replace(task, status=TaskStatus.CANCELLED, error=failure)
+                    self.jobs[job.id] = replace(job, status=JobStatus.CANCELLED, error=failure)
                     cancelled_task_ids.add(task_id)
             for event_id, event in tuple(self.outbox.items()):
                 if event.task_id in cancelled_task_ids and event.status in {
@@ -776,9 +768,7 @@ class FakeMetadataRepository:
                     self.outbox[event_id] = replace(event, status=OutboxStatus.CANCELLED)
             for build_key, build in tuple(self.index_builds.items()):
                 if build.document_id in document_ids and build.status is IndexBuildStatus.BUILDING:
-                    self.index_builds[build_key] = replace(
-                        build, status=IndexBuildStatus.ABANDONED
-                    )
+                    self.index_builds[build_key] = replace(build, status=IndexBuildStatus.ABANDONED)
 
             job_id = new_id()
             task_id = new_id()
@@ -871,9 +861,7 @@ class FakeMetadataRepository:
             if candidate.dataset_id == job.dataset_id
         }
         dataset_task_ids = {
-            candidate.id
-            for candidate in self.tasks.values()
-            if candidate.job_id in dataset_job_ids
+            candidate.id for candidate in self.tasks.values() if candidate.job_id in dataset_job_ids
         }
         keys.update(
             event.staging_key
