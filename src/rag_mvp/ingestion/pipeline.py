@@ -33,7 +33,10 @@ class IngestionPipeline:
         self._failpoint = failpoint
 
     async def execute(self, claim: TaskClaim) -> tuple[Chunk, ...]:
-        object_key = claim.document.object_key
+        document = claim.document
+        if document is None:
+            raise RuntimeError("ingestion claim is missing its document")
+        object_key = document.object_key
         if object_key is None:
             raise DomainError(
                 DomainFailure(
@@ -44,7 +47,7 @@ class IngestionPipeline:
             )
 
         source = await self._storage.read(object_key)
-        segments = await self._parser.parse(claim.document.source_name, source)
+        segments = await self._parser.parse(document.source_name, source)
         await self._checkpoint(Checkpoint.AFTER_PARSE)
         drafts = await self._chunker.split(segments)
         if not drafts:
@@ -68,13 +71,13 @@ class IngestionPipeline:
 
         chunks = tuple(
             Chunk(
-                id=chunk_id(draft.content_with_weight, claim.document.id),
-                document_id=claim.document.id,
+                id=chunk_id(draft.content_with_weight, document.id),
+                document_id=document.id,
                 index_version=claim.job.index_version,
                 ordinal=draft.ordinal,
                 content_with_weight=draft.content_with_weight,
                 content_sha256=content_sha256(draft.content_with_weight),
-                source_name=claim.document.source_name,
+                source_name=document.source_name,
                 locator=draft.locator,
                 metadata=draft.metadata,
             )
@@ -83,7 +86,7 @@ class IngestionPipeline:
         indexed = tuple(
             IndexedChunk(
                 record_id=es_record_id(chunk.document_id, chunk.index_version, chunk.id),
-                dataset_id=claim.document.dataset_id,
+                dataset_id=document.dataset_id,
                 chunk=chunk,
                 vector=vector,
             )

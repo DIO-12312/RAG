@@ -108,9 +108,9 @@ await session.execute(
 - Consumes `TaskType.CLEANUP_DATASET`, `SearchEngine.delete_dataset(dataset_id) -> None`, snapshot object keys and `finalize_dataset_cleanup(task_id, now) -> bool`.
 - Produces idempotent ES delete-by-query, object deletion and child-to-parent MySQL purge.
 
-- [ ] Write failing tests that cleanup calls ES dataset delete before every snapshot object delete, retries a storage/ES failure without purging rows, and on success removes Outbox/Task/Job/fingerprint/document/Dataset rows. Assert a late delivery with no task is ACKed.
-- [ ] Run `uv run pytest tests/unit/ingestion/test_worker.py tests/unit/application/test_cleanup_service.py tests/contract/test_search_engine_contract.py -q`; expect unsupported task/port failures.
-- [ ] Implement `delete_dataset` in Elasticsearch using a dataset-id filtered `delete_by_query` with conflict-tolerant completion. Extend CleanupService dispatch so only `CLEANUP_DATASET` uses the snapshot/finalizer path; preserve existing document cleanup behavior.
+- [x] Write failing tests that cleanup calls ES dataset delete before every snapshot object delete, retries a storage/ES failure without purging rows, and on success removes Outbox/Task/Job/fingerprint/document/Dataset rows. Assert a late delivery with no task is ACKed.
+- [x] Run `uv run pytest tests/unit/ingestion/test_worker.py tests/unit/application/test_cleanup_service.py tests/contract/test_search_engine_contract.py -q`; expect unsupported task/port failures.
+- [x] Implement `delete_dataset` in Elasticsearch using a dataset-id filtered `delete_by_query` with conflict-tolerant completion. Extend CleanupService dispatch so only `CLEANUP_DATASET` uses the snapshot/finalizer path; preserve existing document cleanup behavior.
 
 ```python
 if claim.task.type is TaskType.CLEANUP_DATASET:
@@ -119,9 +119,9 @@ if claim.task.type is TaskType.CLEANUP_DATASET:
         await self._storage.delete(object_key)
     completed = await self._metadata.finalize_dataset_cleanup(task_id, now)
 ```
-- [ ] Implement final MySQL purge in one transaction: lock cleanup aggregate and dataset generation, clear job retry self-references, delete children in foreign-key order, then delete Dataset. Do not write a SUCCEEDED row that would survive purge.
-- [ ] Run `uv run pytest tests/unit/ingestion/test_worker.py tests/unit/application/test_cleanup_service.py tests/contract/test_search_engine_contract.py -q` and `uv run pytest -m integration tests/integration/test_mysql_lifecycle.py tests/integration/test_elasticsearch_adapter.py -q`; expect PASS.
-- [ ] Update `tests/TEST.md`, inspect status, commit: `feat(ingestion): 清理并物理删除知识库数据`.
+- [x] Implement final MySQL purge in one transaction: lock cleanup aggregate and dataset generation, clear job retry self-references, delete children in foreign-key order, then delete Dataset. Do not write a SUCCEEDED row that would survive purge.
+- [x] Run `uv run pytest tests/unit/ingestion/test_worker.py tests/unit/application/test_cleanup_service.py tests/contract/test_search_engine_contract.py -q` and `uv run pytest -m integration tests/integration/test_mysql_lifecycle.py tests/integration/test_elasticsearch_adapter.py -q`; expect PASS.（本次：9 个 unit/contract、10 个真实 MySQL/ES integration PASS。）
+- [x] Update `tests/TEST.md`, inspect status, commit: `feat(ingestion): 清理并物理删除知识库数据`.
 
 ### Task 4: gRPC、CLI 与 lifecycle 端到端语义
 

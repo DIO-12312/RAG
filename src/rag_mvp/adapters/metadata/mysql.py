@@ -72,7 +72,8 @@ MYSQL_DUPLICATE_KEY = 1062
 
 @dataclass(frozen=True, slots=True)
 class _LockedTaskAggregate:
-    document: DocumentTable
+    dataset: DatasetTable
+    document: DocumentTable | None
     job: JobTable
     task: TaskTable
 
@@ -721,13 +722,23 @@ class MySQLMetadataRepository:
                 return None
             if aggregate.job.cancel_requested_at is not None:
                 return None
-            if aggregate.document.lifecycle_generation != aggregate.job.document_generation:
-                return None
-            if (
-                aggregate.task.type == TaskType.INGEST_DOCUMENT
-                and aggregate.document.status == DocumentStatus.DELETED
-            ):
-                return None
+            if aggregate.task.type == TaskType.CLEANUP_DATASET:
+                if (
+                    aggregate.dataset.status != DatasetStatus.DELETING
+                    or aggregate.dataset.lifecycle_generation
+                    != aggregate.job.document_generation
+                ):
+                    return None
+            else:
+                if aggregate.document is None:
+                    return None
+                if aggregate.document.lifecycle_generation != aggregate.job.document_generation:
+                    return None
+                if (
+                    aggregate.task.type == TaskType.INGEST_DOCUMENT
+                    and aggregate.document.status == DocumentStatus.DELETED
+                ):
+                    return None
 
             aggregate.task.status = TaskStatus.RUNNING
             aggregate.task.attempt += 1
@@ -745,7 +756,12 @@ class MySQLMetadataRepository:
             return TaskClaim(
                 task=task_from_table(aggregate.task),
                 job=job_from_table(aggregate.job),
-                document=document_from_table(aggregate.document),
+                dataset=dataset_from_table(aggregate.dataset),
+                document=(
+                    document_from_table(aggregate.document)
+                    if aggregate.document is not None
+                    else None
+                ),
             )
 
     async def complete_ingestion(
@@ -759,6 +775,8 @@ class MySQLMetadataRepository:
             if aggregate is None or aggregate.task.status != TaskStatus.RUNNING:
                 return False
             if aggregate.task.type != TaskType.INGEST_DOCUMENT:
+                return False
+            if aggregate.document is None:
                 return False
             if aggregate.job.status != JobStatus.RUNNING:
                 return False
@@ -850,6 +868,8 @@ class MySQLMetadataRepository:
                 return False
             if aggregate.job.status not in {JobStatus.PENDING, JobStatus.RUNNING}:
                 return False
+            if aggregate.task.type == TaskType.CLEANUP_DATASET or aggregate.document is None:
+                return False
 
             encoded_failure = failure_to_json(failure)
             aggregate.task.status = TaskStatus.FAILED
@@ -906,6 +926,11 @@ class MySQLMetadataRepository:
             original = await self._lock_job_aggregate(session, request.job_id)
             if original is None:
                 raise DomainError(DomainFailure("JOB_NOT_FOUND", "job does not exist"))
+            document = original.document
+            if document is None:
+                raise DomainError(
+                    DomainFailure("JOB_NOT_RETRYABLE", "dataset jobs cannot be retried")
+                )
             if original.job.status != JobStatus.FAILED:
                 raise DomainError(
                     DomainFailure("JOB_NOT_FAILED", "only failed jobs can be retried")
@@ -914,7 +939,7 @@ class MySQLMetadataRepository:
                 raise DomainError(
                     DomainFailure("JOB_NOT_RETRYABLE", "job failure is not retryable")
                 )
-            if original.document.object_key is None:
+            if document.object_key is None:
                 raise DomainError(
                     DomainFailure(
                         "RETRY_OBJECT_MISSING",
@@ -971,7 +996,7 @@ class MySQLMetadataRepository:
                 id=new_id(),
                 type=original.job.type,
                 dataset_id=original.job.dataset_id,
-                document_id=original.document.id,
+                document_id=document.id,
                 config_digest=original.job.config_digest,
                 index_version=original.job.index_version,
                 document_generation=original.job.document_generation,
@@ -998,7 +1023,7 @@ class MySQLMetadataRepository:
             original.job.updated_at = request.now
             await session.execute(
                 update(IngestionFingerprintTable)
-                .where(IngestionFingerprintTable.document_id == original.document.id)
+                .where(IngestionFingerprintTable.document_id == document.id)
                 .values(
                     job_id=child.id,
                     state=FingerprintState.PENDING,
@@ -1010,7 +1035,7 @@ class MySQLMetadataRepository:
                 await session.execute(
                     update(IndexBuildTable)
                     .where(
-                        IndexBuildTable.document_id == original.document.id,
+                        IndexBuildTable.document_id == document.id,
                         IndexBuildTable.index_version == original.job.index_version,
                     )
                     .values(
@@ -1057,6 +1082,9 @@ class MySQLMetadataRepository:
                         "only ingestion jobs can be cancelled",
                     )
                 )
+            document = aggregate.document
+            if document is None:
+                raise RuntimeError("ingestion job is missing its document")
             if aggregate.job.status not in {JobStatus.PENDING, JobStatus.RUNNING}:
                 raise DomainError(
                     DomainFailure("JOB_ALREADY_TERMINAL", "terminal jobs cannot be cancelled")
@@ -1086,7 +1114,7 @@ class MySQLMetadataRepository:
                 await session.execute(
                     update(IndexBuildTable)
                     .where(
-                        IndexBuildTable.document_id == aggregate.document.id,
+                        IndexBuildTable.document_id == document.id,
                         IndexBuildTable.index_version == aggregate.job.index_version,
                         IndexBuildTable.status == IndexBuildStatus.BUILDING,
                     )
@@ -1416,6 +1444,8 @@ class MySQLMetadataRepository:
                 return False
             if aggregate.job.status != JobStatus.RUNNING:
                 return False
+            if aggregate.document is None:
+                return False
             if aggregate.document.lifecycle_generation != aggregate.job.document_generation:
                 return False
             if (
@@ -1440,6 +1470,129 @@ class MySQLMetadataRepository:
             aggregate.job.status = JobStatus.SUCCEEDED
             aggregate.job.progress = Decimal("1")
             aggregate.job.updated_at = now
+            return True
+
+    async def dataset_cleanup_object_keys(self, task_id: str) -> Sequence[str]:
+        async with self._session_factory() as session:
+            dataset_id = await session.scalar(
+                select(JobTable.dataset_id)
+                .join(TaskTable, TaskTable.job_id == JobTable.id)
+                .join(DatasetTable, DatasetTable.id == JobTable.dataset_id)
+                .where(
+                    TaskTable.id == task_id,
+                    TaskTable.type == TaskType.CLEANUP_DATASET,
+                    DatasetTable.tenant_id == self._default_tenant_id,
+                    DatasetTable.status == DatasetStatus.DELETING,
+                )
+            )
+            if dataset_id is None:
+                return ()
+            object_keys = set(
+                (
+                    await session.scalars(
+                        select(DocumentTable.object_key).where(
+                            DocumentTable.dataset_id == dataset_id,
+                            DocumentTable.object_key.is_not(None),
+                        )
+                    )
+                ).all()
+            )
+            staging_keys = (
+                await session.scalars(
+                    select(OutboxEventTable.staging_key)
+                    .join(TaskTable, TaskTable.id == OutboxEventTable.task_id)
+                    .join(JobTable, JobTable.id == TaskTable.job_id)
+                    .where(
+                        JobTable.dataset_id == dataset_id,
+                        OutboxEventTable.staging_key.is_not(None),
+                    )
+                )
+            ).all()
+            object_keys.update(staging_keys)
+            return tuple(sorted(key for key in object_keys if key is not None))
+
+    async def finalize_dataset_cleanup(self, task_id: str, now: datetime) -> bool:
+        del now
+        async with self._session_factory() as session, session.begin():
+            aggregate = await self._lock_task_aggregate(session, task_id)
+            if aggregate is None:
+                return False
+            if (
+                aggregate.task.type != TaskType.CLEANUP_DATASET
+                or aggregate.task.status != TaskStatus.RUNNING
+                or aggregate.job.type != JobType.DELETE_DATASET
+                or aggregate.job.status != JobStatus.RUNNING
+                or aggregate.document is not None
+                or aggregate.dataset.status != DatasetStatus.DELETING
+                or aggregate.dataset.lifecycle_generation
+                != aggregate.job.document_generation
+            ):
+                return False
+
+            dataset_id = aggregate.dataset.id
+            document_ids = tuple(
+                (
+                    await session.scalars(
+                        select(DocumentTable.id).where(DocumentTable.dataset_id == dataset_id)
+                    )
+                ).all()
+            )
+            job_ids = tuple(
+                (
+                    await session.scalars(
+                        select(JobTable.id).where(JobTable.dataset_id == dataset_id)
+                    )
+                ).all()
+            )
+            task_ids = tuple(
+                (
+                    await session.scalars(
+                        select(TaskTable.id).where(TaskTable.job_id.in_(job_ids))
+                    )
+                ).all()
+            )
+            if task_ids:
+                await session.execute(
+                    delete(OutboxEventTable).where(OutboxEventTable.task_id.in_(task_ids))
+                )
+            if document_ids:
+                await session.execute(
+                    delete(ChunkManifestTable).where(
+                        ChunkManifestTable.document_id.in_(document_ids)
+                    )
+                )
+                await session.execute(
+                    delete(IndexBuildTable).where(IndexBuildTable.document_id.in_(document_ids))
+                )
+            await session.execute(
+                delete(IngestionFingerprintTable).where(
+                    IngestionFingerprintTable.dataset_id == dataset_id
+                )
+            )
+            if task_ids:
+                await session.execute(delete(TaskTable).where(TaskTable.id.in_(task_ids)))
+            if job_ids:
+                await session.execute(
+                    update(JobTable)
+                    .where(JobTable.id.in_(job_ids))
+                    .values(retry_of_job_id=None, active_retry_parent_id=None)
+                )
+                await session.execute(delete(JobTable).where(JobTable.id.in_(job_ids)))
+            await session.execute(
+                delete(IdempotencyRecordTable).where(
+                    IdempotencyRecordTable.dataset_id == dataset_id
+                )
+            )
+            if document_ids:
+                await session.execute(
+                    delete(DocumentTable).where(DocumentTable.id.in_(document_ids))
+                )
+            await session.execute(
+                delete(DatasetTable).where(
+                    DatasetTable.id == dataset_id,
+                    DatasetTable.tenant_id == self._default_tenant_id,
+                )
+            )
             return True
 
     async def visible_document_versions(self, document_ids: Sequence[str]) -> Mapping[str, int]:
@@ -1503,6 +1656,9 @@ class MySQLMetadataRepository:
         aggregate: _LockedTaskAggregate,
         now: datetime,
     ) -> None:
+        document = aggregate.document
+        if document is None:
+            raise RuntimeError("ingestion task is missing its document")
         failure = DomainFailure("JOB_CANCELLED", "ingestion was cancelled")
         encoded_failure = failure_to_json(failure)
         aggregate.task.status = TaskStatus.CANCELLED
@@ -1520,7 +1676,7 @@ class MySQLMetadataRepository:
         await session.execute(
             update(IndexBuildTable)
             .where(
-                IndexBuildTable.document_id == aggregate.document.id,
+                IndexBuildTable.document_id == document.id,
                 IndexBuildTable.index_version == aggregate.job.index_version,
                 IndexBuildTable.status == IndexBuildStatus.BUILDING,
             )
@@ -1534,9 +1690,12 @@ class MySQLMetadataRepository:
         aggregate: _LockedTaskAggregate,
         now: datetime,
     ) -> None:
+        document = aggregate.document
+        if document is None:
+            raise RuntimeError("document cleanup is missing its document")
         existing = await session.scalar(
             select(JobTable.id).where(
-                JobTable.document_id == aggregate.document.id,
+                JobTable.document_id == document.id,
                 JobTable.index_version == aggregate.job.index_version,
                 JobTable.type == JobType.CLEANUP_INDEX_VERSION,
                 JobTable.status.in_((JobStatus.PENDING, JobStatus.RUNNING)),
@@ -1547,11 +1706,11 @@ class MySQLMetadataRepository:
         cleanup_job = JobTable(
             id=new_id(),
             type=JobType.CLEANUP_INDEX_VERSION,
-            dataset_id=aggregate.document.dataset_id,
-            document_id=aggregate.document.id,
+            dataset_id=document.dataset_id,
+            document_id=document.id,
             config_digest=aggregate.job.config_digest,
             index_version=aggregate.job.index_version,
-            document_generation=aggregate.document.lifecycle_generation,
+            document_generation=document.lifecycle_generation,
             status=JobStatus.PENDING,
             progress=Decimal("0"),
             error=None,
@@ -1598,8 +1757,7 @@ class MySQLMetadataRepository:
         task_id = await session.scalar(
             select(TaskTable.id)
             .join(JobTable, JobTable.id == TaskTable.job_id)
-            .join(DocumentTable, DocumentTable.id == JobTable.document_id)
-            .join(DatasetTable, DatasetTable.id == DocumentTable.dataset_id)
+            .join(DatasetTable, DatasetTable.id == JobTable.dataset_id)
             .where(
                 JobTable.id == job_id,
                 DatasetTable.tenant_id == self._default_tenant_id,
@@ -1640,10 +1798,9 @@ class MySQLMetadataRepository:
     ) -> _LockedTaskAggregate | None:
         identifiers = (
             await session.execute(
-                select(TaskTable.job_id, JobTable.document_id)
+                select(TaskTable.job_id, JobTable.dataset_id, JobTable.document_id)
                 .join(JobTable, JobTable.id == TaskTable.job_id)
-                .join(DocumentTable, DocumentTable.id == JobTable.document_id)
-                .join(DatasetTable, DatasetTable.id == DocumentTable.dataset_id)
+                .join(DatasetTable, DatasetTable.id == JobTable.dataset_id)
                 .where(
                     TaskTable.id == task_id,
                     DatasetTable.tenant_id == self._default_tenant_id,
@@ -1652,13 +1809,21 @@ class MySQLMetadataRepository:
         ).one_or_none()
         if identifiers is None:
             return None
-        job_id, document_id = identifiers
-        document = cast(
-            DocumentTable | None,
+        job_id, dataset_id, document_id = identifiers
+        dataset = cast(
+            DatasetTable | None,
             await session.scalar(
-                select(DocumentTable).where(DocumentTable.id == document_id).with_for_update()
+                select(DatasetTable).where(DatasetTable.id == dataset_id).with_for_update()
             ),
         )
+        document = None
+        if document_id is not None:
+            document = cast(
+                DocumentTable | None,
+                await session.scalar(
+                    select(DocumentTable).where(DocumentTable.id == document_id).with_for_update()
+                ),
+            )
         job = cast(
             JobTable | None,
             await session.scalar(select(JobTable).where(JobTable.id == job_id).with_for_update()),
@@ -1669,9 +1834,11 @@ class MySQLMetadataRepository:
                 select(TaskTable).where(TaskTable.id == task_id).with_for_update()
             ),
         )
-        if document is None or job is None or task is None:
+        if dataset is None or job is None or task is None:
             return None
-        return _LockedTaskAggregate(document=document, job=job, task=task)
+        if document_id is not None and document is None:
+            return None
+        return _LockedTaskAggregate(dataset=dataset, document=document, job=job, task=task)
 
     async def _lock_event_aggregate(
         self,
@@ -1682,8 +1849,7 @@ class MySQLMetadataRepository:
             select(OutboxEventTable.task_id)
             .join(TaskTable, TaskTable.id == OutboxEventTable.task_id)
             .join(JobTable, JobTable.id == TaskTable.job_id)
-            .join(DocumentTable, DocumentTable.id == JobTable.document_id)
-            .join(DatasetTable, DatasetTable.id == DocumentTable.dataset_id)
+            .join(DatasetTable, DatasetTable.id == JobTable.dataset_id)
             .where(
                 OutboxEventTable.id == event_id,
                 DatasetTable.tenant_id == self._default_tenant_id,
@@ -1693,6 +1859,8 @@ class MySQLMetadataRepository:
             return None
         task_aggregate = await self._lock_task_aggregate(session, task_id)
         if task_aggregate is None:
+            return None
+        if task_aggregate.document is None:
             return None
         event = cast(
             OutboxEventTable | None,

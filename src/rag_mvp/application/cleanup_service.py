@@ -30,11 +30,19 @@ class CleanupService:
         if claim is None:
             return IngestionExecution(claimed=False, completed=False)
         try:
-            if claim.task.type is TaskType.CLEANUP_INDEX_VERSION:
+            if claim.task.type is TaskType.CLEANUP_DATASET:
+                await self._search.delete_dataset(claim.dataset.id)
+                for object_key in await self._metadata.dataset_cleanup_object_keys(task_id):
+                    await self._storage.delete(object_key)
+            elif claim.task.type is TaskType.CLEANUP_INDEX_VERSION:
+                if claim.document is None:
+                    raise RuntimeError("document cleanup claim is missing its document")
                 await self._search.delete_document_version(
                     claim.document.id, claim.job.index_version
                 )
             else:
+                if claim.document is None:
+                    raise RuntimeError("document cleanup claim is missing its document")
                 await self._search.delete_document(claim.document.id)
                 if claim.document.object_key is not None:
                     await self._storage.delete(claim.document.object_key)
@@ -50,7 +58,12 @@ class CleanupService:
                     retryable=True,
                 ),
             )
-        if await self._metadata.complete_cleanup(task_id, now):
+        completed = (
+            await self._metadata.finalize_dataset_cleanup(task_id, now)
+            if claim.task.type is TaskType.CLEANUP_DATASET
+            else await self._metadata.complete_cleanup(task_id, now)
+        )
+        if completed:
             return IngestionExecution(claimed=True, completed=True)
         return IngestionExecution(
             claimed=True,

@@ -47,6 +47,7 @@ async def worker_once(
     if task is not None and task.type in {
         TaskType.CLEANUP_DOCUMENT,
         TaskType.CLEANUP_INDEX_VERSION,
+        TaskType.CLEANUP_DATASET,
     }:
         if cleanup is None:
             result = IngestionExecution(
@@ -87,6 +88,15 @@ async def worker_once(
         retryable=True,
     )
     delivery_number = delivery.redelivery_count + 1
+    if task is not None and task.type is TaskType.CLEANUP_DATASET and failure.retryable:
+        await queue.nak(delivery, delay_seconds=0.0, error=failure)
+        emit_event(
+            "dataset_cleanup_retry_scheduled",
+            stage="worker_nak",
+            duration_ms=0.0,
+            error_code=failure.code,
+        )
+        return True
     if failure.retryable and delivery_number < max_deliveries:
         await queue.nak(delivery, delay_seconds=0.0, error=failure)
         emit_event(

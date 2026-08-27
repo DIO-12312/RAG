@@ -6,8 +6,13 @@ import pytest
 
 from rag_mvp.adapters.chunkers.recursive import RecursiveChunker
 from rag_mvp.adapters.parsers.text import TextParser
+from rag_mvp.application.cleanup_service import CleanupService
 from rag_mvp.application.document_service import DocumentService
-from rag_mvp.application.dto import CreateDatasetCommand, SubmitDocumentCommand
+from rag_mvp.application.dto import (
+    CreateDatasetCommand,
+    DeleteDatasetCommand,
+    SubmitDocumentCommand,
+)
 from rag_mvp.application.ingestion_service import IngestionService
 from rag_mvp.domain.enums import JobStatus, TaskStatus
 from rag_mvp.domain.errors import DomainFailure
@@ -26,6 +31,63 @@ class FailingModelGateway(FakeModelGateway):
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
         del texts
         raise ConnectionError("model unavailable")
+
+
+class FailingDatasetCleanupSearch(FakeSearchEngine):
+    async def delete_dataset(self, dataset_id: str) -> None:
+        del dataset_id
+        raise ConnectionError("search unavailable")
+
+
+async def _dataset_cleanup_work(
+    now: datetime,
+) -> tuple[
+    FakeMetadataRepository,
+    FakeObjectStorage,
+    FakeTaskQueue,
+    IngestionService,
+    str,
+]:
+    repository = FakeMetadataRepository()
+    storage = FakeObjectStorage()
+    queue = FakeTaskQueue()
+    documents = DocumentService(repository, storage, max_upload_bytes=1024)
+    await documents.create_dataset(
+        CreateDatasetCommand("trace", "create", "Docs", "fake", 8, now, "dataset-1")
+    )
+    await documents.submit_document(
+        SubmitDocumentCommand(
+            "trace",
+            "submit",
+            "dataset-1",
+            "guide.txt",
+            b"disposable",
+            None,
+            None,
+            "text-v1",
+            800,
+            120,
+            "fake",
+            now,
+        )
+    )
+    await finalize_once(repository, storage, now, limit=10)
+    deleted = await documents.delete_dataset(
+        DeleteDatasetCommand("delete", "delete", "dataset-1", now)
+    )
+    await relay_once(repository, queue, now, limit=10)
+    ingestion = IngestionService(
+        repository,
+        IngestionPipeline(
+            storage,
+            TextParser(),
+            RecursiveChunker(800, 120),
+            FakeModelGateway(8),
+            FakeSearchEngine(),
+        ),
+    )
+    task = next(task for task in repository.tasks.values() if task.job_id == deleted.job_id)
+    return repository, storage, queue, ingestion, task.id
 
 
 @pytest.mark.asyncio
@@ -157,3 +219,44 @@ async def test_worker_naks_retryable_failure_then_fails_at_delivery_limit() -> N
     assert job.retryable is True
     assert task.status is TaskStatus.FAILED
     assert queue.acked_task_ids == [task.id]
+
+
+@pytest.mark.asyncio
+async def test_dataset_cleanup_failure_naks_even_at_delivery_limit_without_terminalizing() -> None:
+    now = datetime.now(UTC)
+    repository, storage, queue, ingestion, task_id = await _dataset_cleanup_work(now)
+    cleanup = CleanupService(repository, FailingDatasetCleanupSearch(), storage)
+
+    assert await worker_once(
+        queue,
+        repository,
+        ingestion,
+        "worker-1",
+        now,
+        max_deliveries=1,
+        cleanup=cleanup,
+    )
+
+    task = await repository.get_task(task_id)
+    assert task is not None and task.status is TaskStatus.RUNNING
+    assert queue.acked_task_ids == []
+    assert queue.nak_failures[-1].code == "CLEANUP_RETRYABLE"
+    assert await repository.get_dataset("dataset-1") is not None
+
+
+@pytest.mark.asyncio
+async def test_late_dataset_cleanup_delivery_after_purge_is_ack_only() -> None:
+    now = datetime.now(UTC)
+    repository, storage, queue, ingestion, task_id = await _dataset_cleanup_work(now)
+    cleanup = CleanupService(repository, FakeSearchEngine(), storage)
+
+    assert await worker_once(
+        queue, repository, ingestion, "worker-1", now, cleanup=cleanup
+    )
+    assert await repository.get_task(task_id) is None
+    await queue.publish(task_id)
+    assert await worker_once(
+        queue, repository, ingestion, "worker-2", now, cleanup=cleanup
+    )
+
+    assert queue.acked_task_ids == [task_id, task_id]

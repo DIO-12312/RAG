@@ -289,3 +289,44 @@ async def test_delete_dataset_rejects_new_key_and_new_ingestion(
             )
         )
     assert submitted.value.failure.code == "DATASET_DELETING"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_dataset_cleanup_snapshot_and_final_purge_remove_complete_aggregate(
+    mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
+) -> None:
+    repository, engine = mysql_repository
+    now = datetime.now(UTC)
+    submitted = await _submitted(repository, now)
+    waiting = (await repository.list_waiting_outbox(1))[0]
+    assert await repository.mark_object_ready(waiting.id, "objects/dataset-1/source", now)
+    deleted = await repository.delete_dataset(
+        DeleteDatasetRequest("delete-dataset", "dataset-1", now)
+    )
+
+    assert await repository.claim_task(deleted.task_id, 1, now)
+    assert await repository.dataset_cleanup_object_keys(deleted.task_id) == (
+        "objects/dataset-1/source",
+        "staging/submit",
+    )
+    assert await repository.finalize_dataset_cleanup(deleted.task_id, now)
+    assert not await repository.finalize_dataset_cleanup(deleted.task_id, now)
+    assert await repository.get_dataset("dataset-1") is None
+    assert await repository.get_document(submitted.document_id) is None
+    assert await repository.get_job(deleted.job_id) is None
+    assert await repository.get_task(deleted.task_id) is None
+
+    async with engine.connect() as connection:
+        for table_name in (
+            "datasets",
+            "documents",
+            "ingestion_fingerprints",
+            "jobs",
+            "tasks",
+            "outbox_events",
+            "index_builds",
+            "chunk_manifests",
+            "idempotency_records",
+        ):
+            assert await connection.scalar(text(f"SELECT COUNT(*) FROM {table_name}")) == 0

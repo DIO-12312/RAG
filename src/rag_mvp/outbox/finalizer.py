@@ -30,7 +30,7 @@ async def finalize_once(
         if task is None:
             continue
         job = await metadata.get_job(task.job_id)
-        if job is None:
+        if job is None or job.document_id is None:
             continue
         document = await metadata.get_document(job.document_id)
         if document is None:

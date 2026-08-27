@@ -333,10 +333,21 @@ class FakeMetadataRepository:
             ):
                 return None
             job = self.jobs[task.job_id]
-            document = self._document_for_job(job)
+            dataset = self.datasets[job.dataset_id]
+            document = self.documents.get(job.document_id) if job.document_id is not None else None
             if job.cancel_requested_at is not None or (
-                document.status is DocumentStatus.DELETED and task.type is TaskType.INGEST_DOCUMENT
+                document is not None
+                and document.status is DocumentStatus.DELETED
+                and task.type is TaskType.INGEST_DOCUMENT
             ):
+                return None
+            if task.type is TaskType.CLEANUP_DATASET:
+                if (
+                    dataset.status is not DatasetStatus.DELETING
+                    or dataset.lifecycle_generation != job.document_generation
+                ):
+                    return None
+            elif document is None or document.lifecycle_generation != job.document_generation:
                 return None
             claimed_task = replace(
                 task,
@@ -351,7 +362,12 @@ class FakeMetadataRepository:
                 if fingerprint.job_id == job.id:
                     self.fingerprints[key] = replace(fingerprint, state=FingerprintState.RUNNING)
                     break
-            return TaskClaim(task=claimed_task, job=claimed_job, document=document)
+            return TaskClaim(
+                task=claimed_task,
+                job=claimed_job,
+                dataset=dataset,
+                document=document,
+            )
 
     async def complete_ingestion(
         self, task_id: str, chunks: Sequence[Chunk], now: datetime
@@ -835,6 +851,132 @@ class FakeMetadataRepository:
                 task, status=TaskStatus.SUCCEEDED, checkpoint="cleanup_complete"
             )
             self.jobs[job.id] = replace(job, status=JobStatus.SUCCEEDED, progress=1.0)
+            return True
+
+    async def dataset_cleanup_object_keys(self, task_id: str) -> Sequence[str]:
+        task = self.tasks.get(task_id)
+        if task is None or task.type is not TaskType.CLEANUP_DATASET:
+            return ()
+        job = self.jobs.get(task.job_id)
+        if job is None:
+            return ()
+        keys = {
+            document.object_key
+            for document in self.documents.values()
+            if document.dataset_id == job.dataset_id and document.object_key is not None
+        }
+        dataset_job_ids = {
+            candidate.id
+            for candidate in self.jobs.values()
+            if candidate.dataset_id == job.dataset_id
+        }
+        dataset_task_ids = {
+            candidate.id
+            for candidate in self.tasks.values()
+            if candidate.job_id in dataset_job_ids
+        }
+        keys.update(
+            event.staging_key
+            for event in self.outbox.values()
+            if event.task_id in dataset_task_ids and event.staging_key is not None
+        )
+        return tuple(sorted(keys))
+
+    async def finalize_dataset_cleanup(self, task_id: str, now: datetime) -> bool:
+        del now
+        async with self._lock:
+            task = self.tasks.get(task_id)
+            if (
+                task is None
+                or task.type is not TaskType.CLEANUP_DATASET
+                or task.status is not TaskStatus.RUNNING
+            ):
+                return False
+            job = self.jobs.get(task.job_id)
+            if job is None or job.status is not JobStatus.RUNNING:
+                return False
+            dataset = self.datasets.get(job.dataset_id)
+            if (
+                dataset is None
+                or dataset.status is not DatasetStatus.DELETING
+                or dataset.lifecycle_generation != job.document_generation
+            ):
+                return False
+
+            document_ids = {
+                document.id
+                for document in self.documents.values()
+                if document.dataset_id == dataset.id
+            }
+            job_ids = {
+                candidate.id
+                for candidate in self.jobs.values()
+                if candidate.dataset_id == dataset.id
+            }
+            task_ids = {
+                candidate.id for candidate in self.tasks.values() if candidate.job_id in job_ids
+            }
+            self.outbox = {
+                event_id: event
+                for event_id, event in self.outbox.items()
+                if event.task_id not in task_ids
+            }
+            self.chunk_manifests = {
+                key: chunks
+                for key, chunks in self.chunk_manifests.items()
+                if key[0] not in document_ids
+            }
+            self.index_builds = {
+                key: build
+                for key, build in self.index_builds.items()
+                if build.document_id not in document_ids
+            }
+            self.fingerprints = {
+                key: fingerprint
+                for key, fingerprint in self.fingerprints.items()
+                if fingerprint.dataset_id != dataset.id
+            }
+            self._idempotency = {
+                key: result
+                for key, result in self._idempotency.items()
+                if result.document_id not in document_ids
+            }
+            self._retry_idempotency = {
+                key: result
+                for key, result in self._retry_idempotency.items()
+                if result.job_id not in job_ids
+            }
+            self._delete_idempotency = {
+                key: result
+                for key, result in self._delete_idempotency.items()
+                if result.document_id not in document_ids
+            }
+            self._cancel_idempotency = {
+                key: result
+                for key, result in self._cancel_idempotency.items()
+                if result.job_id not in job_ids
+            }
+            self._dataset_delete_idempotency = {
+                key: result
+                for key, result in self._dataset_delete_idempotency.items()
+                if result.dataset_id != dataset.id
+            }
+            self.tasks = {
+                candidate_id: candidate
+                for candidate_id, candidate in self.tasks.items()
+                if candidate_id not in task_ids
+            }
+            self.jobs = {
+                candidate_id: candidate
+                for candidate_id, candidate in self.jobs.items()
+                if candidate_id not in job_ids
+            }
+            self.documents = {
+                candidate_id: candidate
+                for candidate_id, candidate in self.documents.items()
+                if candidate_id not in document_ids
+            }
+            self.datasets.pop(dataset.id, None)
             return True
 
     async def visible_document_versions(self, document_ids: Sequence[str]) -> Mapping[str, int]:

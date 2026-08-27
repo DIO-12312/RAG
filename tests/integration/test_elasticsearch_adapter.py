@@ -186,3 +186,40 @@ async def test_real_es_version_and_document_delete_are_idempotent(
     await search.delete_document("document-1")
     after_document = await client.count(index=search.index_name)
     assert after_document["count"] == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_real_es_dataset_delete_is_idempotent_and_isolated(
+    elasticsearch_search: tuple[ElasticsearchSearchEngine, AsyncElasticsearch],
+) -> None:
+    search, client = elasticsearch_search
+    first = _indexed(
+        dataset_id="dataset-1",
+        document_id="document-1",
+        version=1,
+        chunk_id="aaaaaaaaaaaaaaaa",
+        content="delete me",
+        vector=(1.0, 0.0, 0.0),
+        category="guide",
+    )
+    isolated = _indexed(
+        dataset_id="dataset-2",
+        document_id="document-2",
+        version=1,
+        chunk_id="bbbbbbbbbbbbbbbb",
+        content="keep me",
+        vector=(0.0, 1.0, 0.0),
+        category="guide",
+    )
+    await search.upsert_chunks([first, isolated])
+
+    await search.delete_dataset("dataset-1")
+    await search.delete_dataset("dataset-1")
+
+    count = await client.count(index=search.index_name)
+    remaining = await search.sparse_search(
+        SearchRequest(dataset_id="dataset-2", top_k=3, query="keep")
+    )
+    assert count["count"] == 1
+    assert [candidate.chunk.id for candidate in remaining] == [isolated.chunk.id]

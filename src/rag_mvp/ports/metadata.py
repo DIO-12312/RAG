@@ -36,7 +36,8 @@ class SubmitResult:
 class TaskClaim:
     task: Task
     job: Job
-    document: Document
+    dataset: Dataset
+    document: Document | None
 
 
 @dataclass(frozen=True, slots=True)

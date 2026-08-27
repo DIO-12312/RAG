@@ -99,6 +99,7 @@ tests/
    │  ├─ test_nats_delivery_mapping.py
    │  └─ test_openai_compatible_model.py
    ├─ application/
+   │  ├─ test_cleanup_service.py
    │  ├─ test_document_service.py
    │  ├─ test_job_service.py
    │  └─ test_retrieval_service.py
@@ -170,6 +171,8 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_transient_statuses_retry_with_a_bound_and_recover` | 429/5xx 按有上限的指数退避重试，并在后续成功时恢复。 |
 | 同上 | `test_timeout_exhaustion_maps_to_retryable_unavailable` | 网络超时耗尽重试后映射为可重试 `EMBEDDING_UNAVAILABLE`。 |
 | `application/test_document_service.py` | `test_create_dataset_rejects_runtime_embedding_mismatch` | Dataset 声明的 Embedding 模型或维度与运行配置不一致时返回稳定错误。 |
+| `application/test_cleanup_service.py` | `test_dataset_cleanup_deletes_search_then_objects_then_purges_metadata` | Dataset cleanup 按 ES、对象、MySQL 顺序执行并最终移除完整聚合。 |
+| 同上 | `test_dataset_cleanup_failure_keeps_deleting_metadata_for_retry` | 外部清理失败保留 DELETING 与 RUNNING 状态供重投，不提前 purge。 |
 | 同上 | `test_delete_dataset_command_carries_idempotency_and_dataset_scope` | 数据集删除 command 必须携带请求幂等键与 Dataset 作用域。 |
 | 同上 | `test_submit_writes_staging_and_atomically_creates_waiting_work` | 上传先写 staging，再原子创建 Document、Job、Task 和 WAITING Outbox。 |
 | 同上 | `test_same_file_different_key_reuses_canonical_job_and_cleans_loser_staging` | 相同内容不同幂等键复用 canonical Job，并删除未被引用的 staging。 |
@@ -215,6 +218,8 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | `ingestion/test_worker.py` | `test_worker_claims_executes_completes_then_acks` | Worker 的认领、执行、完成、ACK 顺序正确。 |
 | 同上 | `test_worker_returns_false_when_queue_is_empty` | 空队列时 Worker 不执行任务并返回空结果。 |
 | 同上 | `test_worker_naks_retryable_failure_then_fails_at_delivery_limit` | 可重试失败 NAK，达到投递上限后写入失败终态。 |
+| 同上 | `test_dataset_cleanup_failure_naks_even_at_delivery_limit_without_terminalizing` | Dataset cleanup 外部失败即使达到普通投递上限仍 NAK，且不写失败终态。 |
+| 同上 | `test_late_dataset_cleanup_delivery_after_purge_is_ack_only` | Dataset 已 purge 后迟到的清理 delivery 只 ACK，不执行任何清理。 |
 | `outbox/test_finalizer.py` | `test_finalizer_promotes_object_before_outbox_becomes_ready` | 仅正式对象提升成功后，Outbox 才能 READY。 |
 | `outbox/test_relay.py` | `test_relay_only_publishes_ready_outbox` | Relay 只发布 READY Outbox。 |
 | 同上 | `test_publish_then_crash_before_mark_is_safely_retried` | 发布成功但标记前崩溃时，重复发布可幂等收敛。 |
@@ -312,6 +317,7 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | --- | --- | --- |
 | `test_elasticsearch_adapter.py` | `test_real_es_upsert_dense_bm25_isolation_and_metadata_filters` | 真实 ES 验证 Bulk 幂等、KNN/BM25 召回、稳定排序、Dataset 隔离和 metadata 过滤。 |
 | 同上 | `test_real_es_version_and_document_delete_are_idempotent` | 真实 ES 按版本和整文档删除均可重复执行并收敛到正确记录数。 |
+| 同上 | `test_real_es_dataset_delete_is_idempotent_and_isolated` | 真实 ES 按 Dataset 幂等删除且不影响其他 Dataset。 |
 | `test_nats_jetstream_adapter.py` | `test_real_jetstream_preserves_duplicate_publish_and_ack_removes_deliveries` | 真实 JetStream 保留重复 task_id 消息，PubAck 后可消费，显式 ACK 后移除。 |
 | 同上 | `test_real_jetstream_redelivers_after_ack_wait_and_honors_delayed_nak` | 真实 durable consumer 在 ACK 超时后重投，并遵守 NAK delay。 |
 | 同上 | `test_real_jetstream_provisioning_is_idempotent_and_rejects_incompatible_consumer` | stream/consumer 同配置装配幂等，不兼容 consumer 参数 fail fast。 |
@@ -326,6 +332,7 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | 同上 | `test_new_delete_key_for_deleted_document_is_rejected` | 已删除 Document 只允许原幂等 key 回放，新 key 返回稳定冲突。 |
 | 同上 | `test_delete_dataset_atomically_fences_children_and_enqueues_cleanup` | Dataset 删除原子隔离子聚合、撤销旧 Outbox，并创建唯一 READY 清理任务。 |
 | 同上 | `test_delete_dataset_rejects_new_key_and_new_ingestion` | DELETING Dataset 拒绝新删除 key 与新摄取。 |
+| 同上 | `test_dataset_cleanup_snapshot_and_final_purge_remove_complete_aggregate` | 对象快照覆盖正式和 staging key，最终事务清空 Dataset 的全部 MySQL 子聚合。 |
 | `test_mysql_migrations.py` | `test_upgrade_head_is_idempotent_and_creates_innodb_schema` | 对真实 MySQL 连续升级两次，验证 revision、默认租户、InnoDB 表和关键唯一约束。 |
 | `test_mysql_outbox_worker.py` | `test_outbox_transitions_delivery_dedup_and_atomic_completion` | 验证 WAITING→READY→PUBLISHED、delivery 去重，以及 manifest/version/Job/Task 原子完成。 |
 | 同上 | `test_finalizer_exhaustion_atomically_fails_and_releases_fingerprint` | Finalizer 耗尽后原子写 Task/Job FAILED、Outbox CANCELLED、Fingerprint RELEASED。 |

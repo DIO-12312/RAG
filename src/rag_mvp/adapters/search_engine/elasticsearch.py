@@ -110,6 +110,11 @@ class ElasticsearchSearchEngine:
             raise ValueError("document_id must not be empty")
         await self._delete_by_filters([{"term": {"document_id": document_id}}])
 
+    async def delete_dataset(self, dataset_id: str) -> None:
+        if not dataset_id.strip():
+            raise ValueError("dataset_id must not be empty")
+        await self._delete_by_filters([{"term": {"dataset_id": dataset_id}}])
+
     async def dense_search(self, request: SearchRequest) -> Sequence[SearchCandidate]:
         if request.query_vector is None:
             raise ValueError("dense search requires query_vector")
