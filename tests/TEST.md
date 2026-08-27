@@ -332,6 +332,7 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | 同上 | `test_dataset_cleanup_snapshot_and_final_purge_remove_complete_aggregate` | 对象快照覆盖正式和 staging key，最终事务清空 Dataset 的全部 MySQL 子聚合。 |
 | `test_mysql_migrations.py` | `test_upgrade_head_is_idempotent_and_creates_innodb_schema` | 对真实 MySQL 连续升级两次，验证 revision、默认租户、InnoDB 表和关键唯一约束。 |
 | `test_mysql_outbox_worker.py` | `test_outbox_transitions_delivery_dedup_and_atomic_completion` | 验证 WAITING→READY→PUBLISHED、delivery 去重，以及 manifest/version/Job/Task 原子完成。 |
+| 同上 | `test_dataset_cleanup_outbox_is_publishable_without_document` | Dataset 作用域清理 Job 没有 Document，READY Outbox 仍必须可被 Relay 读取并标记为已发布。 |
 | 同上 | `test_finalizer_exhaustion_atomically_fails_and_releases_fingerprint` | Finalizer 耗尽后原子写 Task/Job FAILED、Outbox CANCELLED、Fingerprint RELEASED。 |
 | 同上 | `test_deleted_generation_fence_prevents_object_ready_and_task_claim` | Document 删除/generation 失配时禁止对象就绪和 Task 认领。 |
 | 同上 | `test_fail_task_persists_retryability_and_terminal_state_once` | Worker 失败只落一次终态，并按正式对象是否存在设置 Fingerprint 可重试状态。 |

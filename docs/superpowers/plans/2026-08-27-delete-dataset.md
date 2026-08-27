@@ -179,10 +179,10 @@ finally:
 ### Task 6: 完整验证与真实 Docker 验收
 
 **Files:**
-- Modify only if verification exposes a specification mismatch: `docs/SPEC.md`, `docs/superpowers/specs/2026-08-27-delete-dataset-design.md`, `docs/superpowers/plans/2026-08-27-delete-dataset.md`, `tests/TEST.md`
+- Modify after verification exposed the dataset-scoped Outbox defect: `src/rag_mvp/adapters/metadata/mysql.py`, `tests/integration/test_mysql_outbox_worker.py`, `tests/TEST.md`, `docs/superpowers/plans/2026-08-27-delete-dataset.md`
 
-- [ ] Run `make ci`; expect all offline/unit/functional/contract gates PASS.
-- [ ] Run `make docker-test SUITE=integration`; expect MySQL migration, lifecycle, ES and NATS paths PASS.
-- [ ] Run `make docker-test SUITE=resilience`; expect deletion race/redelivery scenarios PASS.
-- [ ] Run `make docker-test SUITE=eval`; run it a second time and confirm each run logs normally with no persistent eval Dataset records/chunks/objects from the prior run.
-- [ ] Run `git diff --check`, `git status --short` and targeted `docker compose` read-only queries to confirm no eval IDs remain. Record only actual command outputs in plan checkboxes; do not commit unrelated user changes.
+- [x] Run `make ci` (2026-08-28): Earthly `+ci` SUCCESS; 195 fast tests PASS; 17 mock resilience PASS (8 deselected); 221 coverage tests PASS (10 deselected), total coverage 88.41%; Ruff, format check, mypy and protobuf generated-code check PASS.
+- [x] Run `make docker-test SUITE=integration` (2026-08-28): Earthly SUCCESS; 33 PASS, 1 skipped.
+- [x] Run `make docker-test SUITE=resilience` (2026-08-28): Earthly SUCCESS; 8 PASS.
+- [x] Run `make docker-test SUITE=eval` twice (2026-08-28): both Earthly runs SUCCESS; each run 1 PASS, 1 skipped, 8 deselected. The optional local PDF case was skipped because its input is not present.
+- [x] Run `git -c core.whitespace=cr-at-eol diff --check`, `git status --short` and targeted `docker compose` read-only queries (2026-08-28): no whitespace errors; the repository stores the affected Python/Markdown files as CRLF, so `cr-at-eol` excludes that line ending from the whitespace check. Only this task's four files were modified. A final real eval created and deleted dataset `042c087a-dca6-5fb6-933a-8a50255cbe5c`; MySQL `datasets/jobs/documents` counts were `0/0/0`, Elasticsearch `rag-chunks-v1` count was `0`, and all ten submitted source-object paths were absent. The initial eval failure exposed an Outbox query that excluded `DELETE_DATASET` tasks because they have no `document_id`; a real MySQL regression test now verifies its READY event can be read and marked published.

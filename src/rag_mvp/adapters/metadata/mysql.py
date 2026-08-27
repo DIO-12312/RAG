@@ -80,7 +80,7 @@ class _LockedTaskAggregate:
 
 @dataclass(frozen=True, slots=True)
 class _LockedEventAggregate:
-    document: DocumentTable
+    document: DocumentTable | None
     job: JobTable
     task: TaskTable
     event: OutboxEventTable
@@ -582,8 +582,7 @@ class MySQLMetadataRepository:
                 select(OutboxEventTable)
                 .join(TaskTable, TaskTable.id == OutboxEventTable.task_id)
                 .join(JobTable, JobTable.id == TaskTable.job_id)
-                .join(DocumentTable, DocumentTable.id == JobTable.document_id)
-                .join(DatasetTable, DatasetTable.id == DocumentTable.dataset_id)
+                .join(DatasetTable, DatasetTable.id == JobTable.dataset_id)
                 .where(
                     OutboxEventTable.status == status,
                     DatasetTable.tenant_id == self._default_tenant_id,
@@ -625,6 +624,8 @@ class MySQLMetadataRepository:
                 return False
             if aggregate.job.cancel_requested_at is not None:
                 return False
+            if aggregate.document is None:
+                return False
             if aggregate.document.status == DocumentStatus.DELETED:
                 return False
             if aggregate.document.lifecycle_generation != aggregate.job.document_generation:
@@ -647,6 +648,9 @@ class MySQLMetadataRepository:
             aggregate = await self._lock_event_aggregate(session, event_id)
             if aggregate is None or aggregate.event.status != OutboxStatus.WAITING_OBJECT:
                 return False
+            document = aggregate.document
+            if document is None:
+                return False
             aggregate.event.attempt += 1
             aggregate.event.updated_at = now
             if aggregate.event.attempt < max_attempts:
@@ -667,12 +671,9 @@ class MySQLMetadataRepository:
             aggregate.job.retryable = False
             aggregate.job.active_retry_parent_id = None
             aggregate.job.updated_at = now
-            if (
-                aggregate.document.active_version is None
-                and aggregate.document.status != DocumentStatus.DELETED
-            ):
-                aggregate.document.status = DocumentStatus.FAILED
-                aggregate.document.updated_at = now
+            if document.active_version is None and document.status != DocumentStatus.DELETED:
+                document.status = DocumentStatus.FAILED
+                document.updated_at = now
             await session.execute(
                 update(IngestionFingerprintTable)
                 .where(IngestionFingerprintTable.job_id == aggregate.job.id)
@@ -681,7 +682,7 @@ class MySQLMetadataRepository:
             await session.execute(
                 update(IndexBuildTable)
                 .where(
-                    IndexBuildTable.document_id == aggregate.document.id,
+                    IndexBuildTable.document_id == document.id,
                     IndexBuildTable.index_version == aggregate.job.index_version,
                     IndexBuildTable.status == IndexBuildStatus.BUILDING,
                 )
@@ -1855,8 +1856,6 @@ class MySQLMetadataRepository:
             return None
         task_aggregate = await self._lock_task_aggregate(session, task_id)
         if task_aggregate is None:
-            return None
-        if task_aggregate.document is None:
             return None
         event = cast(
             OutboxEventTable | None,

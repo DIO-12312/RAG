@@ -12,7 +12,7 @@ from rag_mvp.adapters.metadata.mysql import MySQLMetadataRepository
 from rag_mvp.domain.enums import DocumentStatus, JobStatus, OutboxStatus, TaskStatus
 from rag_mvp.domain.errors import DomainFailure
 from rag_mvp.domain.models import Chunk, Dataset, Locator
-from rag_mvp.ports.metadata import SubmitIngestion, SubmitResult
+from rag_mvp.ports.metadata import DeleteDatasetRequest, SubmitIngestion, SubmitResult
 
 
 async def _submitted(
@@ -110,6 +110,26 @@ async def test_outbox_transitions_delivery_dedup_and_atomic_completion(
     async with engine.connect() as connection:
         assert await connection.scalar(text("SELECT COUNT(*) FROM chunk_manifests")) == 1
         assert await connection.scalar(text("SELECT status FROM index_builds LIMIT 1")) == "ACTIVE"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_dataset_cleanup_outbox_is_publishable_without_document(
+    mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
+) -> None:
+    """Dataset-scoped cleanup has no document row but must still reach Relay."""
+
+    repository, _engine = mysql_repository
+    now = datetime.now(UTC)
+    await _submitted(repository, now)
+    deleted = await repository.delete_dataset(
+        DeleteDatasetRequest("delete-dataset-key", "dataset-1", now)
+    )
+
+    ready = await repository.list_ready_outbox(limit=10)
+
+    assert [event.task_id for event in ready] == [deleted.task_id]
+    assert await repository.mark_outbox_published(ready[0].id, now)
 
 
 @pytest.mark.integration
