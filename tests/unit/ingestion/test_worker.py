@@ -240,7 +240,7 @@ async def test_dataset_cleanup_failure_naks_even_at_delivery_limit_without_termi
     task = await repository.get_task(task_id)
     assert task is not None and task.status is TaskStatus.RUNNING
     assert queue.acked_task_ids == []
-    assert queue.nak_failures[-1].code == "CLEANUP_RETRYABLE"
+    assert queue.nak_failures[-1].code == "DATASET_CLEANUP_RETRYABLE"
     assert await repository.get_dataset("dataset-1") is not None
 
 

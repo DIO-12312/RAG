@@ -53,7 +53,11 @@ class CleanupService:
                 claimed=True,
                 completed=False,
                 failure=DomainFailure(
-                    "CLEANUP_RETRYABLE",
+                    (
+                        "DATASET_CLEANUP_RETRYABLE"
+                        if claim.task.type is TaskType.CLEANUP_DATASET
+                        else "CLEANUP_RETRYABLE"
+                    ),
                     str(error) or type(error).__name__,
                     retryable=True,
                 ),

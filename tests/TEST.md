@@ -26,7 +26,7 @@ tests/
 │  ├─ test_search_engine_contract.py
 │  └─ test_task_queue_contract.py
 ├─ e2e/                                     # 真实 Compose 与模型的 gRPC 业务闭环
-│  ├─ conftest.py                            # generated gRPC client、真实运行配置和轮询 helpers
+│  ├─ conftest.py                            # generated gRPC client、真实运行配置、Job 与 Dataset purge 轮询 helpers
 │  ├─ test_local_computer_architecture_pdf.py # 可选本地真实 PDF 的长文档用户场景
 │  └─ test_real_upload_ingest_retrieve.py
 ├─ eval/                                    # 固定问题集的检索质量评测
@@ -218,7 +218,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | `ingestion/test_worker.py` | `test_worker_claims_executes_completes_then_acks` | Worker 的认领、执行、完成、ACK 顺序正确。 |
 | 同上 | `test_worker_returns_false_when_queue_is_empty` | 空队列时 Worker 不执行任务并返回空结果。 |
 | 同上 | `test_worker_naks_retryable_failure_then_fails_at_delivery_limit` | 可重试失败 NAK，达到投递上限后写入失败终态。 |
-| 同上 | `test_dataset_cleanup_failure_naks_even_at_delivery_limit_without_terminalizing` | Dataset cleanup 外部失败即使达到普通投递上限仍 NAK，且不写失败终态。 |
+| 同上 | `test_dataset_cleanup_failure_naks_even_at_delivery_limit_without_terminalizing` | Dataset cleanup 以专用可重试错误码 NAK，且不写失败终态。 |
 | 同上 | `test_late_dataset_cleanup_delivery_after_purge_is_ack_only` | Dataset 已 purge 后迟到的清理 delivery 只 ACK，不执行任何清理。 |
 | `outbox/test_finalizer.py` | `test_finalizer_promotes_object_before_outbox_becomes_ready` | 仅正式对象提升成功后，Outbox 才能 READY。 |
 | `outbox/test_relay.py` | `test_relay_only_publishes_ready_outbox` | Relay 只发布 READY Outbox。 |
@@ -376,6 +376,7 @@ Resilience 测试负责覆盖 failpoint、重投、并发和状态栅栏。`reli
 | `test_cancel_races.py` | `test_pending_cancel_cancels_task_and_unpublished_outbox` | PENDING 取消会终止 Task 并撤销未发布 Outbox。 |
 | 同上 | `test_cancel_after_publish_before_claim_makes_worker_only_ack` | 发布后、认领前取消时 Worker 只 ACK。 |
 | 同上 | `test_running_cancel_after_index_write_never_activates_version` | 运行中取消即使已索引也不得激活新版本。 |
+| 同上 | `test_dataset_delete_after_publish_before_claim_makes_worker_ack_only` | Dataset 删除发生在消息发布后、认领前时，旧摄取 delivery 只 ACK。 |
 | `test_concurrent_uniqueness.py` | `test_concurrent_same_file_upload_has_one_canonical_job_and_no_loser_staging` | 并发同文件上传只保留一个 canonical Job 和被引用 staging。 |
 | 同上 | `test_concurrent_retry_calls_create_one_active_child` | 并发 Retry 只创建一个活跃子 Job。 |
 | 同上 | `test_concurrent_rebuilds_allocate_distinct_index_versions` | 并发重建获得不同 index version。 |
@@ -384,6 +385,8 @@ Resilience 测试负责覆盖 failpoint、重投、并发和状态栅栏。`reli
 | `test_generation_fences.py` | `test_cancel_after_index_write_creates_version_cleanup_task` | 索引写后取消会创建版本清理任务。 |
 | 同上 | `test_delete_after_index_write_never_reactivates_and_cleanup_removes_everything` | 删除与索引写并发不能复活文档，清理全部残留。 |
 | 同上 | `test_delete_between_promote_and_ready_compensates_final_object` | 提升正式对象与 READY 之间删除时补偿该对象。 |
+| 同上 | `test_dataset_delete_after_index_write_purges_without_reactivating_document` | Dataset 删除发生在 ES 写入后时，旧摄取不得激活 Document，随后完整 purge。 |
+| 同上 | `test_dataset_delete_between_promote_and_ready_compensates_final_object` | Dataset 删除发生在对象提升后、READY 前时补偿正式对象并撤销摄取 Outbox。 |
 | `test_redelivery_idempotency.py` | `test_crash_after_index_write_redelivers_and_upserts_idempotently` | 索引写后崩溃重投不会产生重复可见索引。 |
 | 同上 | `test_crash_after_success_before_ack_redelivery_only_acks` | 成功但 ACK 前崩溃后，重投仅 ACK 不重跑 pipeline。 |
 | `test_spec_invariant_matrix.py` | `test_every_spec_invariant_has_mock_evidence_and_explicit_real_validation_status` | 每项 SPEC 不变量都有 Mock 证据；所有要求真实复验的条目都指向仓库内真实测试文件。 |
@@ -410,12 +413,15 @@ Eval 测试负责防止检索排序和 evidence 定位质量回退。不得以 L
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
 | `test_retrieval_quality.py` | `test_fixed_thirty_question_quality_baseline` | 在固定 30 问集上验证 Recall@6、MRR@6 和 locator accuracy 门槛。 |
-| `test_real_computer_architecture_pdf_quality.py` | `test_real_computer_architecture_pdf_quality` | 一次完整摄取本地 44 页计组 PDF，执行 50 次 query embedding 与混合检索；默认使用语义改写集，也可通过 `EVAL_FIXTURE=original` 选择原始问题集，记录每条 query 的前 20 个 embedding 维度和服务实际 Top-K evidence 到 `eval/log/`，并按 PdfParser 页码和细粒度关键短语聚合 Recall@6、MRR@6、Top-1 页命中率及答案包含度。 |
+| `test_real_computer_architecture_pdf_quality.py` | `test_real_computer_architecture_pdf_quality` | 一次完整摄取本地 44 页计组 PDF，执行 50 次 query embedding 与混合检索；默认使用语义改写集，也可通过 `EVAL_FIXTURE=original` 选择原始问题集，记录每条 query 的前 20 个 embedding 维度和服务实际 Top-K evidence 到 `eval/log/`，按 PdfParser 页码和细粒度关键短语聚合指标，并在 finally 中物理清理 Dataset。 |
+| 同上 | `test_wait_for_dataset_purged_accepts_job_not_found` | 删除 Job 在最终 purge 后返回 JOB_NOT_FOUND 时判定 Dataset 物理清空成功。 |
+| 同上 | `test_wait_for_dataset_purged_rejects_terminal_failure` | 删除 Job 若先进入 FAILED/CANCELLED，teardown 必须失败。 |
+| 同上 | `test_wait_for_dataset_purged_timeout_names_deletion_job` | Dataset purge 超时错误包含删除 Job ID，便于定位残留。 |
 | 同上 | `test_case_log_record_preserves_embedding_and_top_k_details` | 离线验证单条日志记录保留前 20 个 embedding 维度、Top-K 排名、分数和 evidence 原文。 |
 | 同上 | `test_case_log_record_truncates_embedding_to_first_20_dimensions` | 离线验证超过 20 维的 embedding 只写入前 20 个维度。 |
 | 同上 | `test_write_run_log_persists_json_with_completion_time` | 离线验证评测日志可写入 JSON 文件并包含完成时间。 |
 | 同上 | `test_original_and_rephrased_fixtures_only_change_query` | 离线验证原始集与语义改写集的 50 条记录除 `query` 外完全一致。 |
-| `test_real_retrieval_quality.py` | `test_real_thirty_question_quality_baseline` | 十份固定语料经真实 gRPC 摄取后执行 30 问，使用真实 chunk_id 验证 Recall@6、MRR@6 和来源行定位。 |
+| `test_real_retrieval_quality.py` | `test_real_thirty_question_quality_baseline` | 十份固定语料经真实 gRPC 摄取后执行 30 问，使用真实 chunk_id 验证 Recall@6、MRR@6 和来源行定位，并在 finally 中物理清理 Dataset。 |
 
 ## Fake 与 Fixture 的职责
 

@@ -58,7 +58,7 @@ async def rag_stub() -> AsyncIterator[Any]:
     channel = grpc.aio.insecure_channel(target)
     try:
         await asyncio.wait_for(channel.channel_ready(), timeout=10)
-        yield rag_service_pb2_grpc.RagServiceStub(channel)
+        yield rag_service_pb2_grpc.RagServiceStub(channel)  # type: ignore[no-untyped-call]
     finally:
         await channel.close()
 
@@ -129,6 +129,58 @@ async def wait_for_job(stub: Any, job_id: str, deadline_seconds: float = 240) ->
             raise AssertionError(f"ingestion job ended with {code}: {message}")
         await asyncio.sleep(0.25)
     raise AssertionError(f"ingestion job {job_id} did not finish within {deadline_seconds}s")
+
+
+async def delete_dataset(stub: Any, dataset_id: str) -> str:
+    response = await stub.DeleteDataset(
+        rag_service_pb2.DeleteDatasetRequest(
+            context=rag_service_pb2.RequestContext(
+                request_id=unique_id("delete-dataset-request"),
+                idempotency_key=unique_id("delete-dataset-key"),
+            ),
+            dataset_id=dataset_id,
+        ),
+        timeout=30,
+    )
+    return str(_result(response).job_id)
+
+
+async def wait_for_dataset_purged(
+    stub: Any,
+    job_id: str,
+    deadline_seconds: float = 240,
+) -> None:
+    deadline = monotonic() + deadline_seconds
+    while monotonic() < deadline:
+        response = await stub.GetJob(
+            rag_service_pb2.GetJobRequest(
+                request_id=unique_id("dataset-purge-request"),
+                job_id=job_id,
+            ),
+            timeout=15,
+        )
+        if response.WhichOneof("outcome") == "error":
+            if response.error.code == "JOB_NOT_FOUND":
+                return
+            raise AssertionError(
+                f"dataset deletion job {job_id} returned "
+                f"{response.error.code}: {response.error.message}"
+            )
+        result = response.result
+        if result.status in {
+            rag_service_pb2.JOB_STATUS_FAILED,
+            rag_service_pb2.JOB_STATUS_CANCELLED,
+        }:
+            failure = result.failure if result.HasField("failure") else None
+            code = failure.code if failure is not None else "NO_FAILURE_CODE"
+            message = failure.message if failure is not None else "deletion reached terminal state"
+            raise AssertionError(
+                f"dataset deletion job {job_id} ended with {code}: {message}"
+            )
+        await asyncio.sleep(0.25)
+    raise AssertionError(
+        f"dataset deletion job {job_id} was not purged within {deadline_seconds}s"
+    )
 
 
 async def retrieve(stub: Any, dataset_id: str, query: str) -> Any:

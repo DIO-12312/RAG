@@ -16,7 +16,7 @@ from rag_mvp.ingestion.pipeline import IngestionPipeline
 from rag_mvp.ingestion.worker import worker_once
 from rag_mvp.outbox.finalizer import finalize_once
 from rag_mvp.outbox.relay import relay_once
-from rag_mvp.ports.metadata import CancelJobRequest
+from rag_mvp.ports.metadata import CancelJobRequest, DeleteDatasetRequest
 from tests.fakes.metadata import FakeMetadataRepository
 from tests.fakes.model import FakeModelGateway
 from tests.fakes.search_engine import FakeSearchEngine
@@ -128,3 +128,25 @@ async def test_running_cancel_after_index_write_never_activates_version() -> Non
     assert document.active_version is None
     assert await repository.visible_document_versions([document.id]) == {}
     assert search.record_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.resilience
+async def test_dataset_delete_after_publish_before_claim_makes_worker_ack_only() -> None:
+    now, repository, storage, queue, _job_id = await _pending()
+    await finalize_once(repository, storage, now, limit=10)
+    await relay_once(repository, queue, now, limit=10)
+    await repository.delete_dataset(
+        DeleteDatasetRequest("delete-dataset", "dataset-1", now)
+    )
+    model = FakeModelGateway(8)
+    ingestion = IngestionService(
+        repository,
+        IngestionPipeline(
+            storage, TextParser(), RecursiveChunker(800, 120), model, FakeSearchEngine()
+        ),
+    )
+
+    assert await worker_once(queue, repository, ingestion, "worker", now)
+    assert model.embed_calls == 0
+    assert len(queue.acked_task_ids) == 1

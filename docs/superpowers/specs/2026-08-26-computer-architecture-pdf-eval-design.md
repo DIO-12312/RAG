@@ -108,7 +108,7 @@
 - `tests/TEST.md`、`docs/testing-guide.md`：同步测试目录、职责和公开运行边界。
 - `.gitignore`：精确忽略本地真实 PDF。
 
-不改动：`evaluation.py`、`conftest.py`、Makefile、其他现有测试。PDF 文件 `tests/object/计组复习.pdf` 保持 untracked（个人资料，不进 CI）。
+不改动：`evaluation.py`、Makefile。`tests/e2e/conftest.py` 仅新增 generated-gRPC-only 的 Dataset 删除与 purge 轮询 helper；PDF 文件 `tests/object/计组复习.pdf` 保持 untracked（个人资料，不进 CI）。
 
 ## 风险
 

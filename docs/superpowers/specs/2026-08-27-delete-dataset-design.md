@@ -93,11 +93,11 @@ Worker 认领和完成都要校验 Dataset 为 `DELETING` 且 generation 等于 
 ## CleanupDataset 行为
 
 1. 通过 `SearchEngine.delete_dataset(dataset_id)` 使用 ES `delete_by_query` 删除该 dataset 的全部物理 chunk；0 命中视为成功。
-2. 从 MetadataRepository 在数据集清理快照中读取全部正式 `object_key`，逐个调用 `ObjectStorage.delete`；不存在对象视为成功。
+2. 从 MetadataRepository 在数据集清理快照中读取全部 Document 正式 `object_key` 和 Outbox `staging_key`，逐个调用 `ObjectStorage.delete`；不存在对象视为成功。
 3. 上述外部 I/O 都成功后，执行 `finalize_dataset_cleanup(task_id, now)`。它在一个 MySQL 事务内重新锁定 dataset cleanup Task/Job/Dataset，并检查 `DELETING` 与 generation fence。
 4. 按外键由子到父删除该 Dataset 的 OutboxEvent、ChunkManifest、IndexBuild、Task、Job（先清空 retry self-reference）、IngestionFingerprint、Document、带 `dataset_id` 的操作幂等记录和 Dataset。最后一次事务提交就是“清理完成”信号。
 
-任何外部异常映射为可重试 `DATASET_CLEANUP_RETRYABLE`，沿用 Worker 的 NAK/max-deliver 语义；未完成前 Dataset 继续为 `DELETING` 并保持不可见。清理 Job 不可 `CancelJob`、不可 `RetryJob`；若到 max-deliver 后失败，由运营/未来控制面以相同 Job 的受控恢复机制处理，绝不允许把 Dataset 改回 `ACTIVE`。
+任何外部异常映射为可重试 `DATASET_CLEANUP_RETRYABLE`；Worker 对该任务保持 NAK 且不写 FAILED/ACK，未完成前 Dataset 继续为 `DELETING` 并保持不可见。JetStream 若因 consumer max-deliver 暂停继续投递，由运营/未来控制面恢复同一 Task；清理 Job 不可 `CancelJob`、不可 `RetryJob`，绝不允许把 Dataset 改回 `ACTIVE`。
 
 潜在的旧 NATS delivery 在最终 MySQL 删除后找不到 Task，Worker 只 ACK。这保证清理后不留下可重新执行的任务。
 

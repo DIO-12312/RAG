@@ -14,11 +14,14 @@ import httpx
 import pytest
 
 from rag_mvp.adapters.model.openai_compatible import OpenAICompatibleModelGateway
+from rag_mvp.rpc.generated import rag_service_pb2
 from tests.e2e.conftest import (
     EmbeddingRuntime,
     create_dataset,
+    delete_dataset,
     retrieve,
     submit_document,
+    wait_for_dataset_purged,
     wait_for_job,
 )
 
@@ -61,6 +64,54 @@ RECALL_AT_6_THRESHOLD = 0.80
 MRR_AT_6_THRESHOLD = 0.65
 TOP1_PAGE_HIT_THRESHOLD = 0.60
 ANSWER_COVERAGE_THRESHOLD = 0.70
+
+
+class _GetJobStub:
+    def __init__(self, responses: list[Any]) -> None:
+        self.responses = responses
+
+    async def GetJob(self, request: Any, **kwargs: Any) -> Any:
+        del request, kwargs
+        return self.responses.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_dataset_purged_accepts_job_not_found() -> None:
+    stub = _GetJobStub(
+        [
+            rag_service_pb2.GetJobResponse(
+                error=rag_service_pb2.BusinessError(
+                    code="JOB_NOT_FOUND", message="gone", request_id="request"
+                )
+            )
+        ]
+    )
+
+    await wait_for_dataset_purged(stub, "delete-job", deadline_seconds=1)
+
+
+@pytest.mark.parametrize(
+    "status",
+    (rag_service_pb2.JOB_STATUS_FAILED, rag_service_pb2.JOB_STATUS_CANCELLED),
+)
+@pytest.mark.asyncio
+async def test_wait_for_dataset_purged_rejects_terminal_failure(status: Any) -> None:
+    stub = _GetJobStub(
+        [
+            rag_service_pb2.GetJobResponse(
+                result=rag_service_pb2.JobResult(job_id="delete-job", status=status)
+            )
+        ]
+    )
+
+    with pytest.raises(AssertionError, match="delete-job"):
+        await wait_for_dataset_purged(stub, "delete-job", deadline_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_dataset_purged_timeout_names_deletion_job() -> None:
+    with pytest.raises(AssertionError, match="delete-job"):
+        await wait_for_dataset_purged(_GetJobStub([]), "delete-job", deadline_seconds=0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -376,76 +427,80 @@ async def test_real_computer_architecture_pdf_quality(
         embedding_runtime,
         "real-computer-architecture-pdf-50",
     )
-    document_id, job_id = await submit_document(
-        rag_stub,
-        dataset_id,
-        computer_architecture_pdf,
-    )
-    await wait_for_job(rag_stub, job_id, deadline_seconds=600)
+    try:
+        document_id, job_id = await submit_document(
+            rag_stub,
+            dataset_id,
+            computer_architecture_pdf,
+        )
+        await wait_for_job(rag_stub, job_id, deadline_seconds=600)
 
-    outcomes: list[CaseOutcome] = []
-    results: dict[str, Any] = {}
-    embeddings: dict[str, tuple[float, ...]] = {}
-    endpoint = os.getenv("EMBEDDING_MODEL_URL", "").strip()
-    api_key = os.getenv("EMBEDDING_MODEL_API_KEY", "").strip()
-    if not endpoint or not api_key:
-        pytest.fail("real eval requires embedding endpoint and API key for query capture")
-    async with httpx.AsyncClient(
-        headers={"Authorization": f"Bearer {api_key}"},
-        timeout=float(os.getenv("RAG_EMBEDDING_TIMEOUT_SECONDS", "30")),
-    ) as client:
-        gateway = OpenAICompatibleModelGateway(
-            client,
-            endpoint,
-            embedding_runtime.model,
-            embedding_runtime.dimension,
-            int(os.getenv("RAG_EMBEDDING_BATCH_SIZE", "32")),
-            int(os.getenv("RAG_EMBEDDING_MAX_RETRIES", "3")),
-        )
-        for case in cases:
-            embeddings[case.id] = (await gateway.embed([case.query]))[0]
-            result = await retrieve(rag_stub, dataset_id, case.query)
-            results[case.id] = result
-            outcomes.append(_evaluate_case(case, result, document_id))
+        outcomes: list[CaseOutcome] = []
+        results: dict[str, Any] = {}
+        embeddings: dict[str, tuple[float, ...]] = {}
+        endpoint = os.getenv("EMBEDDING_MODEL_URL", "").strip()
+        api_key = os.getenv("EMBEDDING_MODEL_API_KEY", "").strip()
+        if not endpoint or not api_key:
+            pytest.fail("real eval requires embedding endpoint and API key for query capture")
+        async with httpx.AsyncClient(
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=float(os.getenv("RAG_EMBEDDING_TIMEOUT_SECONDS", "30")),
+        ) as client:
+            gateway = OpenAICompatibleModelGateway(
+                client,
+                endpoint,
+                embedding_runtime.model,
+                embedding_runtime.dimension,
+                int(os.getenv("RAG_EMBEDDING_BATCH_SIZE", "32")),
+                int(os.getenv("RAG_EMBEDDING_MAX_RETRIES", "3")),
+            )
+            for case in cases:
+                embeddings[case.id] = (await gateway.embed([case.query]))[0]
+                result = await retrieve(rag_stub, dataset_id, case.query)
+                results[case.id] = result
+                outcomes.append(_evaluate_case(case, result, document_id))
 
-    frozen_outcomes = tuple(outcomes)
-    metrics = _aggregate(frozen_outcomes)
-    diagnostics = [
-        (
-            f"{outcome.case_id}: pages={outcome.retrieved_pages!r} "
-            f"hit={outcome.hit} rr={outcome.reciprocal_rank:.3f} "
-            f"top1={outcome.top1_page_hit} missing={outcome.missing_phrases!r}"
+        frozen_outcomes = tuple(outcomes)
+        metrics = _aggregate(frozen_outcomes)
+        diagnostics = [
+            (
+                f"{outcome.case_id}: pages={outcome.retrieved_pages!r} "
+                f"hit={outcome.hit} rr={outcome.reciprocal_rank:.3f} "
+                f"top1={outcome.top1_page_hit} missing={outcome.missing_phrases!r}"
+            )
+            for outcome in frozen_outcomes
+            if not (
+                outcome.hit
+                and outcome.top1_page_hit
+                and outcome.answer_covered
+                and outcome.reciprocal_rank == 1.0
+            )
+        ]
+        summary = (
+            f"recall@6={metrics.recall_at_6:.3f} mrr@6={metrics.mrr_at_6:.3f} "
+            f"top1_page_hit={metrics.top1_page_hit:.3f} "
+            f"answer_coverage={metrics.answer_coverage:.3f}"
         )
-        for outcome in frozen_outcomes
-        if not (
-            outcome.hit
-            and outcome.top1_page_hit
-            and outcome.answer_covered
-            and outcome.reciprocal_rank == 1.0
+        log_path = _write_run_log(
+            cases,
+            embeddings,
+            results,
+            frozen_outcomes,
+            metrics,
+            pdf_path=computer_architecture_pdf,
         )
-    ]
-    summary = (
-        f"recall@6={metrics.recall_at_6:.3f} mrr@6={metrics.mrr_at_6:.3f} "
-        f"top1_page_hit={metrics.top1_page_hit:.3f} "
-        f"answer_coverage={metrics.answer_coverage:.3f}"
-    )
-    log_path = _write_run_log(
-        cases,
-        embeddings,
-        results,
-        frozen_outcomes,
-        metrics,
-        pdf_path=computer_architecture_pdf,
-    )
-    print(f"log={log_path}")
-    print(summary)
-    failures = []
-    if metrics.recall_at_6 < RECALL_AT_6_THRESHOLD:
-        failures.append(f"recall@6 < {RECALL_AT_6_THRESHOLD:.2f}")
-    if metrics.mrr_at_6 < MRR_AT_6_THRESHOLD:
-        failures.append(f"mrr@6 < {MRR_AT_6_THRESHOLD:.2f}")
-    if metrics.top1_page_hit < TOP1_PAGE_HIT_THRESHOLD:
-        failures.append(f"top1_page_hit < {TOP1_PAGE_HIT_THRESHOLD:.2f}")
-    if metrics.answer_coverage < ANSWER_COVERAGE_THRESHOLD:
-        failures.append(f"answer_coverage < {ANSWER_COVERAGE_THRESHOLD:.2f}")
-    assert not failures, "\n".join([summary, *failures, *diagnostics])
+        print(f"log={log_path}")
+        print(summary)
+        failures = []
+        if metrics.recall_at_6 < RECALL_AT_6_THRESHOLD:
+            failures.append(f"recall@6 < {RECALL_AT_6_THRESHOLD:.2f}")
+        if metrics.mrr_at_6 < MRR_AT_6_THRESHOLD:
+            failures.append(f"mrr@6 < {MRR_AT_6_THRESHOLD:.2f}")
+        if metrics.top1_page_hit < TOP1_PAGE_HIT_THRESHOLD:
+            failures.append(f"top1_page_hit < {TOP1_PAGE_HIT_THRESHOLD:.2f}")
+        if metrics.answer_coverage < ANSWER_COVERAGE_THRESHOLD:
+            failures.append(f"answer_coverage < {ANSWER_COVERAGE_THRESHOLD:.2f}")
+        assert not failures, "\n".join([summary, *failures, *diagnostics])
+    finally:
+        deletion_job_id = await delete_dataset(rag_stub, dataset_id)
+        await wait_for_dataset_purged(rag_stub, deletion_job_id)

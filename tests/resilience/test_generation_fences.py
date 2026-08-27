@@ -16,7 +16,11 @@ from rag_mvp.ingestion.pipeline import IngestionPipeline
 from rag_mvp.ingestion.worker import worker_once
 from rag_mvp.outbox.finalizer import finalize_once
 from rag_mvp.outbox.relay import relay_once
-from rag_mvp.ports.metadata import CancelJobRequest, DeleteDocumentRequest
+from rag_mvp.ports.metadata import (
+    CancelJobRequest,
+    DeleteDatasetRequest,
+    DeleteDocumentRequest,
+)
 from tests.fakes.metadata import FakeMetadataRepository
 from tests.fakes.model import FakeModelGateway
 from tests.fakes.search_engine import FakeSearchEngine
@@ -158,5 +162,67 @@ async def test_delete_between_promote_and_ready_compensates_final_object() -> No
         for event in repository.outbox.values()
         if repository.tasks[event.task_id].job_id
         != next(job.id for job in repository.jobs.values() if job.type.value == "DELETE_DOCUMENT")
+    ]
+    assert all(event.status is OutboxStatus.CANCELLED for event in ingest_events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.resilience
+async def test_dataset_delete_after_index_write_purges_without_reactivating_document() -> None:
+    now, repository, storage, queue, search, _, document_id = await _harness()
+    await finalize_once(repository, storage, now, limit=10)
+    await relay_once(repository, queue, now, limit=10)
+
+    async def delete_dataset_after_index(checkpoint: Checkpoint) -> None:
+        if checkpoint is Checkpoint.AFTER_INDEX_WRITE:
+            await repository.delete_dataset(
+                DeleteDatasetRequest("delete-dataset", "dataset-1", now)
+            )
+
+    ingestion = IngestionService(
+        repository,
+        IngestionPipeline(
+            storage,
+            TextParser(),
+            RecursiveChunker(800, 120),
+            FakeModelGateway(8),
+            search,
+            failpoint=delete_dataset_after_index,
+        ),
+    )
+    cleanup = CleanupService(repository, search, storage)
+
+    assert await worker_once(queue, repository, ingestion, "ingest", now, cleanup=cleanup)
+    assert repository.documents[document_id].active_version is None
+    assert search.record_count == 1
+    assert await relay_once(repository, queue, now, limit=10) == 1
+    assert await worker_once(queue, repository, ingestion, "cleanup", now, cleanup=cleanup)
+    assert await repository.get_dataset("dataset-1") is None
+    assert search.record_count == 0
+    assert storage.objects == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.resilience
+async def test_dataset_delete_between_promote_and_ready_compensates_final_object() -> None:
+    now, repository, storage, _, _, _, document_id = await _harness()
+
+    async def delete_after_promote() -> None:
+        await repository.delete_dataset(
+            DeleteDatasetRequest("delete-dataset", "dataset-1", now)
+        )
+
+    assert await finalize_once(
+        repository,
+        storage,
+        now,
+        limit=10,
+        after_promote=delete_after_promote,
+    ) == 0
+    assert not await storage.exists(f"objects/{document_id}/source")
+    ingest_events = [
+        event
+        for event in repository.outbox.values()
+        if repository.tasks[event.task_id].type.value == "INGEST_DOCUMENT"
     ]
     assert all(event.status is OutboxStatus.CANCELLED for event in ingest_events)

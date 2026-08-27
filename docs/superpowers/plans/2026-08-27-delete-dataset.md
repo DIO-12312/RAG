@@ -158,10 +158,10 @@ return rag_service_pb2.DeleteDatasetResponse(
 **Interfaces:**
 - Produces `delete_dataset(stub, dataset_id) -> str` and `wait_for_dataset_purged(stub, job_id, deadline_seconds=240) -> None`.
 
-- [ ] Write failing resilience tests that delete races with an in-flight ingest and Finalizer; assert no generation-mismatched worker can activate a document, and published stale delivery is ACK-only.
-- [ ] Write failing eval-helper tests: terminal `FAILED/CANCELLED` raises; observed `JOB_NOT_FOUND` after deletion job is accepted as purge success; timeout includes the job id.
-- [ ] Run `uv run pytest -m resilience tests/resilience/test_generation_fences.py tests/resilience/test_cancel_races.py -q` and `uv run pytest tests/eval/test_real_computer_architecture_pdf_quality.py -q`; expect failures.
-- [ ] Implement gRPC-only helpers. Refactor both real evals to wrap create/upload/evaluate in `try/finally`; write logs before metric assertion, then invoke delete/wait in finally. Preserve the original test exception if cleanup succeeds; chain cleanup error if it fails.
+- [x] Write failing resilience tests that delete races with an in-flight ingest and Finalizer; assert no generation-mismatched worker can activate a document, and published stale delivery is ACK-only.
+- [x] Write failing eval-helper tests: terminal `FAILED/CANCELLED` raises; observed `JOB_NOT_FOUND` after deletion job is accepted as purge success; timeout includes the job id.
+- [x] Run `uv run pytest -m resilience tests/resilience/test_generation_fences.py tests/resilience/test_cancel_races.py -q` and `uv run pytest tests/eval/test_real_computer_architecture_pdf_quality.py -q`; expect failures.
+- [x] Implement gRPC-only helpers. Refactor both real evals to wrap create/upload/evaluate in `try/finally`; write logs before metric assertion, then invoke delete/wait in finally. Preserve the original test exception if cleanup succeeds; chain cleanup error if it fails.
 
 ```python
 dataset_id = await create_dataset(...)
@@ -173,8 +173,8 @@ finally:
     deletion_job_id = await delete_dataset(stub, dataset_id)
     await wait_for_dataset_purged(stub, deletion_job_id)
 ```
-- [ ] Run `uv run pytest -m resilience tests/resilience/test_generation_fences.py tests/resilience/test_cancel_races.py -q` and `uv run pytest -m "eval and not e2e" tests/eval -q`; expect PASS.
-- [ ] Update specs/tests registry, inspect status, commit: `test(eval): 清理真实评测知识库数据`.
+- [x] Run `uv run pytest -m resilience tests/resilience/test_generation_fences.py tests/resilience/test_cancel_races.py -q` and `uv run pytest -m "eval and not e2e" tests/eval -q`; expect PASS.（本次：9 个 resilience PASS；purge helper 文件 8 PASS/1 real-eval skip；离线 eval 1 PASS/10 deselected。）
+- [x] Update specs/tests registry, inspect status, commit: `test(eval): 清理真实评测知识库数据`.
 
 ### Task 6: 完整验证与真实 Docker 验收
 

@@ -13,8 +13,10 @@ from rag_mvp.rpc.generated import rag_service_pb2
 from tests.e2e.conftest import (
     EmbeddingRuntime,
     create_dataset,
+    delete_dataset,
     retrieve,
     unique_id,
+    wait_for_dataset_purged,
     wait_for_job,
 )
 
@@ -142,7 +144,7 @@ QUESTIONS = (
 def _result(response: object) -> object:
     outcome = response.WhichOneof("outcome")  # type: ignore[attr-defined]
     if outcome == "result":
-        return response.result  # type: ignore[attr-defined,no-any-return]
+        return response.result  # type: ignore[attr-defined]
     error = response.error  # type: ignore[attr-defined]
     raise AssertionError(f"gRPC business error {error.code}: {error.message}")
 
@@ -179,60 +181,63 @@ async def test_real_thirty_question_quality_baseline(
 ) -> None:
     assert len(QUESTIONS) == 30
     dataset_id = await create_dataset(rag_stub, embedding_runtime, "real-quality-30")
+    try:
+        submitted = [await _submit_text(rag_stub, dataset_id, document) for document in CORPUS]
+        for _, job_id in submitted:
+            await wait_for_job(rag_stub, job_id)
 
-    submitted = [await _submit_text(rag_stub, dataset_id, document) for document in CORPUS]
-    for _, job_id in submitted:
-        await wait_for_job(rag_stub, job_id)
-
-    expected_chunks = tuple(
-        chunk_id(document.content, document_id)
-        for document, (document_id, _) in zip(CORPUS, submitted, strict=True)
-    )
-    cases: list[EvaluationCase] = []
-    diagnostics: list[str] = []
-    for question in QUESTIONS:
-        result = await retrieve(rag_stub, dataset_id, question.query)
-        target_chunk = expected_chunks[question.document_index]
-        retrieved_ids = tuple(item.chunk_id for item in result.evidence)
-        target = next((item for item in result.evidence if item.chunk_id == target_chunk), None)
-        document = CORPUS[question.document_index]
-        locator_matches = bool(
-            target is not None
-            and target.source_name == document.source_name
-            and target.locator.start_line <= question.source_line <= target.locator.end_line
+        expected_chunks = tuple(
+            chunk_id(document.content, document_id)
+            for document, (document_id, _) in zip(CORPUS, submitted, strict=True)
         )
-        cases.append(
-            EvaluationCase(
-                relevant_chunk_ids=(target_chunk,),
-                retrieved_chunk_ids=retrieved_ids,
-                locator_matches=locator_matches,
+        cases: list[EvaluationCase] = []
+        diagnostics: list[str] = []
+        for question in QUESTIONS:
+            result = await retrieve(rag_stub, dataset_id, question.query)
+            target_chunk = expected_chunks[question.document_index]
+            retrieved_ids = tuple(item.chunk_id for item in result.evidence)
+            target = next((item for item in result.evidence if item.chunk_id == target_chunk), None)
+            document = CORPUS[question.document_index]
+            locator_matches = bool(
+                target is not None
+                and target.source_name == document.source_name
+                and target.locator.start_line <= question.source_line <= target.locator.end_line
             )
-        )
-        rank = next(
-            (
-                position
-                for position, value in enumerate(retrieved_ids, start=1)
-                if value == target_chunk
-            ),
-            None,
-        )
-        if rank != 1 or not locator_matches:
-            stage_scores = [
-                (
-                    item.source_name,
-                    item.scores.dense_score,
-                    item.scores.sparse_score,
-                    item.scores.fusion_score,
+            cases.append(
+                EvaluationCase(
+                    relevant_chunk_ids=(target_chunk,),
+                    retrieved_chunk_ids=retrieved_ids,
+                    locator_matches=locator_matches,
                 )
-                for item in result.evidence
-            ]
-            diagnostics.append(
-                f"query={question.query!r} target={document.source_name} "
-                f"rank={rank} locator={locator_matches} scores={stage_scores!r}"
             )
+            rank = next(
+                (
+                    position
+                    for position, value in enumerate(retrieved_ids, start=1)
+                    if value == target_chunk
+                ),
+                None,
+            )
+            if rank != 1 or not locator_matches:
+                stage_scores = [
+                    (
+                        item.source_name,
+                        item.scores.dense_score,
+                        item.scores.sparse_score,
+                        item.scores.fusion_score,
+                    )
+                    for item in result.evidence
+                ]
+                diagnostics.append(
+                    f"query={question.query!r} target={document.source_name} "
+                    f"rank={rank} locator={locator_matches} scores={stage_scores!r}"
+                )
 
-    metrics = evaluate_rankings(tuple(cases), k=6)
+        metrics = evaluate_rankings(tuple(cases), k=6)
 
-    assert metrics.recall_at_k >= 0.85, diagnostics
-    assert metrics.mrr_at_k >= 0.70, diagnostics
-    assert metrics.locator_accuracy == 1.0, diagnostics
+        assert metrics.recall_at_k >= 0.85, diagnostics
+        assert metrics.mrr_at_k >= 0.70, diagnostics
+        assert metrics.locator_accuracy == 1.0, diagnostics
+    finally:
+        deletion_job_id = await delete_dataset(rag_stub, dataset_id)
+        await wait_for_dataset_purged(rag_stub, deletion_job_id)
