@@ -77,3 +77,19 @@ async def test_search_upsert_is_idempotent_and_dense_sparse_are_separate() -> No
     assert search.record_count == 1
     await search.delete_document("document-2")
     assert search.record_count == 0
+
+
+@pytest.mark.asyncio
+async def test_search_can_delete_an_entire_dataset_idempotently() -> None:
+    search = FakeSearchEngine()
+    await search.upsert_chunks(
+        [
+            _indexed("one", "chunk-1", (1.0,), dataset_id="dataset-1"),
+            _indexed("two", "chunk-2", (1.0,), dataset_id="dataset-2", document_id="document-2"),
+        ]
+    )
+
+    await search.delete_dataset("dataset-1")
+    await search.delete_dataset("dataset-1")
+
+    assert search.record_count == 1

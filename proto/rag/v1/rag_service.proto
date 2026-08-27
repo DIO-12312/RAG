@@ -4,6 +4,7 @@ package rag.v1;
 
 service RagService {
   rpc CreateDataset(CreateDatasetRequest) returns (CreateDatasetResponse);
+  rpc DeleteDataset(DeleteDatasetRequest) returns (DeleteDatasetResponse);
   rpc SubmitDocument(stream UploadDocumentRequest) returns (SubmitDocumentResponse);
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
   rpc RetryJob(RetryJobRequest) returns (RetryJobResponse);
@@ -47,6 +48,7 @@ enum JobType {
   JOB_TYPE_INGEST_DOCUMENT = 1;
   JOB_TYPE_DELETE_DOCUMENT = 2;
   JOB_TYPE_CLEANUP_INDEX_VERSION = 3;
+  JOB_TYPE_DELETE_DATASET = 4;
 }
 
 enum DocumentStatus {
@@ -84,6 +86,23 @@ message CreateDatasetResult {
 message CreateDatasetResponse {
   oneof outcome {
     CreateDatasetResult result = 1;
+    BusinessError error = 2;
+  }
+}
+
+message DeleteDatasetRequest {
+  RequestContext context = 1;
+  string dataset_id = 2;
+}
+
+message DeleteDatasetResult {
+  string dataset_id = 1;
+  string job_id = 2;
+}
+
+message DeleteDatasetResponse {
+  oneof outcome {
+    DeleteDatasetResult result = 1;
     BusinessError error = 2;
   }
 }
@@ -138,6 +157,7 @@ message JobResult {
   uint32 retry_count = 8;
   bool cancel_requested = 9;
   TaskStatus task_status = 10;
+  string dataset_id = 11;
 }
 
 message GetJobResponse {
@@ -250,4 +270,3 @@ message DeleteDocumentResponse {
     BusinessError error = 2;
   }
 }
-

@@ -3,6 +3,11 @@
 from enum import StrEnum
 
 
+class DatasetStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    DELETING = "DELETING"
+
+
 class DocumentStatus(StrEnum):
     PENDING = "PENDING"
     READY = "READY"
@@ -30,12 +35,14 @@ class JobType(StrEnum):
     INGEST_DOCUMENT = "INGEST_DOCUMENT"
     DELETE_DOCUMENT = "DELETE_DOCUMENT"
     CLEANUP_INDEX_VERSION = "CLEANUP_INDEX_VERSION"
+    DELETE_DATASET = "DELETE_DATASET"
 
 
 class TaskType(StrEnum):
     INGEST_DOCUMENT = "INGEST_DOCUMENT"
     CLEANUP_DOCUMENT = "CLEANUP_DOCUMENT"
     CLEANUP_INDEX_VERSION = "CLEANUP_INDEX_VERSION"
+    CLEANUP_DATASET = "CLEANUP_DATASET"
 
 
 class OutboxStatus(StrEnum):

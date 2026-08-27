@@ -70,6 +70,21 @@ class DeleteDocumentResult:
 
 
 @dataclass(frozen=True, slots=True)
+class DeleteDatasetRequest:
+    idempotency_key: str
+    dataset_id: str
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteDatasetResult:
+    dataset_id: str
+    job_id: str
+    task_id: str
+    reused: bool
+
+
+@dataclass(frozen=True, slots=True)
 class CancelJobRequest:
     idempotency_key: str
     job_id: str
@@ -126,6 +141,12 @@ class MetadataRepository(Protocol):
     async def retry_job(self, request: RetryJobRequest) -> RetryJobResult: ...
 
     async def delete_document(self, request: DeleteDocumentRequest) -> DeleteDocumentResult: ...
+
+    async def delete_dataset(self, request: DeleteDatasetRequest) -> DeleteDatasetResult: ...
+
+    async def dataset_cleanup_object_keys(self, task_id: str) -> Sequence[str]: ...
+
+    async def finalize_dataset_cleanup(self, task_id: str, now: datetime) -> bool: ...
 
     async def complete_cleanup(self, task_id: str, now: datetime) -> bool: ...
 

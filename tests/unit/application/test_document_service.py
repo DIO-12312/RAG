@@ -5,11 +5,24 @@ from datetime import UTC, datetime
 import pytest
 
 from rag_mvp.application.document_service import DocumentService
-from rag_mvp.application.dto import CreateDatasetCommand, SubmitDocumentCommand
+from rag_mvp.application.dto import (
+    CreateDatasetCommand,
+    DeleteDatasetCommand,
+    SubmitDocumentCommand,
+)
 from rag_mvp.domain.errors import DomainError
 from rag_mvp.domain.ids import file_sha256
 from tests.fakes.metadata import FakeMetadataRepository, InjectedRepositoryFailure
 from tests.fakes.storage import FakeObjectStorage
+
+
+def test_delete_dataset_command_carries_idempotency_and_dataset_scope() -> None:
+    now = datetime.now(UTC)
+    command = DeleteDatasetCommand("request", "delete-key", "dataset-1", now)
+
+    assert command.idempotency_key == "delete-key"
+    assert command.dataset_id == "dataset-1"
+    assert command.now is now
 
 
 def _submit(

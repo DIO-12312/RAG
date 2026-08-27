@@ -47,6 +47,11 @@ class FakeSearchEngine:
             if value.chunk.document_id != document_id
         }
 
+    async def delete_dataset(self, dataset_id: str) -> None:
+        self.records = {
+            key: value for key, value in self.records.items() if value.dataset_id != dataset_id
+        }
+
     def _matches(self, indexed: IndexedChunk, request: SearchRequest) -> bool:
         return indexed.dataset_id == request.dataset_id and all(
             indexed.chunk.metadata.get(key) == value for key, value in request.filters.items()

@@ -31,6 +31,7 @@ class JobType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     JOB_TYPE_INGEST_DOCUMENT: _ClassVar[JobType]
     JOB_TYPE_DELETE_DOCUMENT: _ClassVar[JobType]
     JOB_TYPE_CLEANUP_INDEX_VERSION: _ClassVar[JobType]
+    JOB_TYPE_DELETE_DATASET: _ClassVar[JobType]
 
 class DocumentStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -55,6 +56,7 @@ JOB_TYPE_UNSPECIFIED: JobType
 JOB_TYPE_INGEST_DOCUMENT: JobType
 JOB_TYPE_DELETE_DOCUMENT: JobType
 JOB_TYPE_CLEANUP_INDEX_VERSION: JobType
+JOB_TYPE_DELETE_DATASET: JobType
 DOCUMENT_STATUS_UNSPECIFIED: DocumentStatus
 DOCUMENT_STATUS_PENDING: DocumentStatus
 DOCUMENT_STATUS_READY: DocumentStatus
@@ -131,6 +133,30 @@ class CreateDatasetResponse(_message.Message):
     error: BusinessError
     def __init__(self, result: _Optional[_Union[CreateDatasetResult, _Mapping]] = ..., error: _Optional[_Union[BusinessError, _Mapping]] = ...) -> None: ...
 
+class DeleteDatasetRequest(_message.Message):
+    __slots__ = ("context", "dataset_id")
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    DATASET_ID_FIELD_NUMBER: _ClassVar[int]
+    context: RequestContext
+    dataset_id: str
+    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., dataset_id: _Optional[str] = ...) -> None: ...
+
+class DeleteDatasetResult(_message.Message):
+    __slots__ = ("dataset_id", "job_id")
+    DATASET_ID_FIELD_NUMBER: _ClassVar[int]
+    JOB_ID_FIELD_NUMBER: _ClassVar[int]
+    dataset_id: str
+    job_id: str
+    def __init__(self, dataset_id: _Optional[str] = ..., job_id: _Optional[str] = ...) -> None: ...
+
+class DeleteDatasetResponse(_message.Message):
+    __slots__ = ("result", "error")
+    RESULT_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    result: DeleteDatasetResult
+    error: BusinessError
+    def __init__(self, result: _Optional[_Union[DeleteDatasetResult, _Mapping]] = ..., error: _Optional[_Union[BusinessError, _Mapping]] = ...) -> None: ...
+
 class UploadHeader(_message.Message):
     __slots__ = ("context", "dataset_id", "source_name", "expected_sha256", "target_document_id")
     CONTEXT_FIELD_NUMBER: _ClassVar[int]
@@ -190,7 +216,7 @@ class JobFailure(_message.Message):
     def __init__(self, code: _Optional[str] = ..., message: _Optional[str] = ..., retryable: _Optional[bool] = ...) -> None: ...
 
 class JobResult(_message.Message):
-    __slots__ = ("job_id", "document_id", "type", "status", "progress", "failure", "retryable", "retry_count", "cancel_requested", "task_status")
+    __slots__ = ("job_id", "document_id", "type", "status", "progress", "failure", "retryable", "retry_count", "cancel_requested", "task_status", "dataset_id")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     DOCUMENT_ID_FIELD_NUMBER: _ClassVar[int]
     TYPE_FIELD_NUMBER: _ClassVar[int]
@@ -201,6 +227,7 @@ class JobResult(_message.Message):
     RETRY_COUNT_FIELD_NUMBER: _ClassVar[int]
     CANCEL_REQUESTED_FIELD_NUMBER: _ClassVar[int]
     TASK_STATUS_FIELD_NUMBER: _ClassVar[int]
+    DATASET_ID_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     document_id: str
     type: JobType
@@ -211,7 +238,8 @@ class JobResult(_message.Message):
     retry_count: int
     cancel_requested: bool
     task_status: TaskStatus
-    def __init__(self, job_id: _Optional[str] = ..., document_id: _Optional[str] = ..., type: _Optional[_Union[JobType, str]] = ..., status: _Optional[_Union[JobStatus, str]] = ..., progress: _Optional[float] = ..., failure: _Optional[_Union[JobFailure, _Mapping]] = ..., retryable: _Optional[bool] = ..., retry_count: _Optional[int] = ..., cancel_requested: _Optional[bool] = ..., task_status: _Optional[_Union[TaskStatus, str]] = ...) -> None: ...
+    dataset_id: str
+    def __init__(self, job_id: _Optional[str] = ..., document_id: _Optional[str] = ..., type: _Optional[_Union[JobType, str]] = ..., status: _Optional[_Union[JobStatus, str]] = ..., progress: _Optional[float] = ..., failure: _Optional[_Union[JobFailure, _Mapping]] = ..., retryable: _Optional[bool] = ..., retry_count: _Optional[int] = ..., cancel_requested: _Optional[bool] = ..., task_status: _Optional[_Union[TaskStatus, str]] = ..., dataset_id: _Optional[str] = ...) -> None: ...
 
 class GetJobResponse(_message.Message):
     __slots__ = ("result", "error")

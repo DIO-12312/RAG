@@ -8,6 +8,7 @@ from datetime import datetime
 from types import MappingProxyType
 
 from rag_mvp.domain.enums import (
+    DatasetStatus,
     DocumentStatus,
     FingerprintState,
     IndexBuildStatus,
@@ -43,6 +44,8 @@ class Dataset:
     created_at: datetime
     search_schema_version: int = 1
     tenant_id: str = "default_tenant"
+    status: DatasetStatus = DatasetStatus.ACTIVE
+    lifecycle_generation: int = 0
 
     def __post_init__(self) -> None:
         _require_text(self.id, "id")
@@ -53,6 +56,8 @@ class Dataset:
             raise ValueError("embedding_dimension must be at least 1")
         if self.search_schema_version < 1:
             raise ValueError("search_schema_version must be at least 1")
+        if self.lifecycle_generation < 0:
+            raise ValueError("lifecycle_generation must not be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +104,7 @@ class IngestionFingerprint:
 class Job:
     id: str
     type: JobType
-    document_id: str
+    document_id: str | None
     config_digest: str
     index_version: int
     document_generation: int
@@ -112,6 +117,7 @@ class Job:
     cancel_requested_at: datetime | None = None
     retry_of_job_id: str | None = None
     is_system: bool = False
+    dataset_id: str = ""
 
     def __post_init__(self) -> None:
         _require_digest(self.config_digest, "config_digest")
@@ -123,6 +129,11 @@ class Job:
             raise ValueError("progress must be between 0 and 1")
         if self.retry_count < 0:
             raise ValueError("retry_count must not be negative")
+        if self.type is JobType.DELETE_DATASET:
+            if not self.dataset_id:
+                raise ValueError("dataset_id is required for dataset cleanup")
+            if self.document_id is not None:
+                raise ValueError("dataset cleanup must not reference a document")
 
 
 @dataclass(frozen=True, slots=True)

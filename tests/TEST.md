@@ -169,6 +169,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_transient_statuses_retry_with_a_bound_and_recover` | 429/5xx 按有上限的指数退避重试，并在后续成功时恢复。 |
 | 同上 | `test_timeout_exhaustion_maps_to_retryable_unavailable` | 网络超时耗尽重试后映射为可重试 `EMBEDDING_UNAVAILABLE`。 |
 | `application/test_document_service.py` | `test_create_dataset_rejects_runtime_embedding_mismatch` | Dataset 声明的 Embedding 模型或维度与运行配置不一致时返回稳定错误。 |
+| 同上 | `test_delete_dataset_command_carries_idempotency_and_dataset_scope` | 数据集删除 command 必须携带请求幂等键与 Dataset 作用域。 |
 | 同上 | `test_submit_writes_staging_and_atomically_creates_waiting_work` | 上传先写 staging，再原子创建 Document、Job、Task 和 WAITING Outbox。 |
 | 同上 | `test_same_file_different_key_reuses_canonical_job_and_cleans_loser_staging` | 相同内容不同幂等键复用 canonical Job，并删除未被引用的 staging。 |
 | 同上 | `test_same_idempotency_key_with_different_bytes_is_rejected_without_overwrite` | 同一幂等键不同字节被稳定拒绝，已有对象不被覆盖。 |
@@ -184,6 +185,8 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_chunk_id_matches_ragflow_xxhash64_rule` | `chunk_id` 遵循 RAGFlow xxHash64 规则。 |
 | 同上 | `test_physical_es_id_preserves_document_version_and_chunk` | ES 物理 ID 同时包含 document、version、chunk。 |
 | `domain/test_models.py` | `test_dataset_requires_embedding_dimension_and_model` | Dataset 必须具有 embedding 模型及维度。 |
+| 同上 | `test_dataset_starts_active_with_a_non_negative_lifecycle_generation` | Dataset 生命周期初始为 ACTIVE，generation 不得为负。 |
+| 同上 | `test_dataset_cleanup_job_has_dataset_scope_but_no_document` | dataset cleanup Job 关联 Dataset 而不关联 Document。 |
 | 同上 | `test_dataset_preserves_tenant_boundary` | Dataset 显式保留所属 tenant，防止后续持久化丢失租户边界。 |
 | 同上 | `test_document_versions_and_generation_are_non_negative` | Document 版本号和 generation 不允许为负。 |
 | 同上 | `test_job_progress_is_normalized` | Job 进度被规范化到有效范围。 |
@@ -272,6 +275,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_submit_document_rejects_data_before_header` | 上传流首帧必须为 header。 |
 | 同上 | `test_open_methods_work_through_generated_grpc_transport` | 已开放方法可经生成的 gRPC transport 调用。 |
 | `test_metadata_repository_contract.py` | `test_submit_atomically_creates_task_and_waiting_outbox_and_deduplicates` | 提交原子创建 Task/WAITING Outbox，并分别验证同 key 与同 fingerprint 去重。 |
+| 同上 | `test_metadata_port_exposes_dataset_deletion_lifecycle` | Metadata Port 声明 Dataset 删除、对象快照和最终 purge 契约。 |
 | 同上 | `test_submit_failure_does_not_leave_partial_metadata` | 提交失败不留下部分元数据。 |
 | 同上 | `test_finalizer_transition_and_task_claim_are_conditional` | Finalizer/Relay 转换为条件更新；Task 按 delivery sequence 去重并允许更高序号重投。 |
 | 同上 | `test_complete_and_fail_are_conditional_and_visibility_uses_active_version` | 完成/失败为条件更新，检索可见性复核 active version。 |
@@ -282,6 +286,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_local_object_storage_rejects_path_traversal` | LocalObjectStorage 拒绝路径穿越。 |
 | `test_parser_chunker_contract.py` | `test_parser_and_chunker_preserve_text_order_and_locator` | Parser/Chunker 保持文本顺序和 locator。 |
 | `test_proto_contract.py` | `test_rag_service_defines_the_complete_rpc_surface` | proto 定义完整 RagService RPC 面。 |
+| 同上 | `test_delete_dataset_contract_keeps_job_history_scoped_to_dataset` | DeleteDataset 字段号、结果和 dataset 作用域 JobType 保持兼容。 |
 | 同上 | `test_every_response_has_result_and_business_error_outcome` | 每个响应都有 result 或 BusinessError 的 oneof。 |
 | 同上 | `test_upload_request_is_a_header_or_data_frame` | 上传请求只允许 header 或 data 帧。 |
 | 同上 | `test_idempotency_context_is_only_used_by_commands` | 幂等上下文仅用于命令型 RPC。 |
@@ -291,6 +296,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_retry_rejects_failure_without_final_object` | 无正式对象的失败不可 Retry。 |
 | 同上 | `test_retry_enforces_user_retry_limit` | Retry 强制执行用户重试上限。 |
 | `test_search_engine_contract.py` | `test_search_upsert_is_idempotent_and_dense_sparse_are_separate` | Search upsert 幂等，Dense 与 Sparse 候选分离，并共同遵守 Dataset/metadata 过滤。 |
+| 同上 | `test_search_can_delete_an_entire_dataset_idempotently` | Search Port 可按 Dataset 幂等删除全部索引记录。 |
 | `test_task_queue_contract.py` | `test_queue_preserves_at_least_once_delivery_and_explicit_ack_nak` | Queue 保持至少一次投递、重复 publish 和显式 ACK/NAK。 |
 | 同上 | `test_unacked_delivery_can_be_redelivered` | 未 ACK delivery 可重新投递。 |
 

@@ -7,7 +7,7 @@ import pytest
 from rag_mvp.domain.enums import JobStatus, OutboxStatus, TaskStatus
 from rag_mvp.domain.errors import DomainFailure
 from rag_mvp.domain.models import Chunk, Dataset, Locator
-from rag_mvp.ports.metadata import SubmitIngestion
+from rag_mvp.ports.metadata import DeleteDatasetRequest, MetadataRepository, SubmitIngestion
 from tests.fakes.metadata import FakeMetadataRepository, InjectedRepositoryFailure
 
 
@@ -31,6 +31,15 @@ def _submission(*, idempotency_key: str, staging_key: str, now: datetime) -> Sub
         config_digest="b" * 64,
         now=now,
     )
+
+
+def test_metadata_port_exposes_dataset_deletion_lifecycle() -> None:
+    assert hasattr(MetadataRepository, "delete_dataset")
+    assert hasattr(MetadataRepository, "dataset_cleanup_object_keys")
+    assert hasattr(MetadataRepository, "finalize_dataset_cleanup")
+    request = DeleteDatasetRequest("delete-key", "dataset-1", datetime.now(UTC))
+
+    assert request.dataset_id == "dataset-1"
 
 
 @pytest.mark.asyncio

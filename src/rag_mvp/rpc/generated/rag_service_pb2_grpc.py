@@ -39,6 +39,11 @@ class RagServiceStub:
                 request_serializer=rag__service__pb2.CreateDatasetRequest.SerializeToString,
                 response_deserializer=rag__service__pb2.CreateDatasetResponse.FromString,
                 _registered_method=True)
+        self.DeleteDataset = channel.unary_unary(
+                '/rag.v1.RagService/DeleteDataset',
+                request_serializer=rag__service__pb2.DeleteDatasetRequest.SerializeToString,
+                response_deserializer=rag__service__pb2.DeleteDatasetResponse.FromString,
+                _registered_method=True)
         self.SubmitDocument = channel.stream_unary(
                 '/rag.v1.RagService/SubmitDocument',
                 request_serializer=rag__service__pb2.UploadDocumentRequest.SerializeToString,
@@ -75,6 +80,12 @@ class RagServiceServicer:
     """Missing associated documentation comment in .proto file."""
 
     def CreateDataset(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteDataset(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -123,6 +134,11 @@ def add_RagServiceServicer_to_server(servicer, server):
                     servicer.CreateDataset,
                     request_deserializer=rag__service__pb2.CreateDatasetRequest.FromString,
                     response_serializer=rag__service__pb2.CreateDatasetResponse.SerializeToString,
+            ),
+            'DeleteDataset': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteDataset,
+                    request_deserializer=rag__service__pb2.DeleteDatasetRequest.FromString,
+                    response_serializer=rag__service__pb2.DeleteDatasetResponse.SerializeToString,
             ),
             'SubmitDocument': grpc.stream_unary_rpc_method_handler(
                     servicer.SubmitDocument,
@@ -182,6 +198,33 @@ class RagService:
             '/rag.v1.RagService/CreateDataset',
             rag__service__pb2.CreateDatasetRequest.SerializeToString,
             rag__service__pb2.CreateDatasetResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteDataset(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/rag.v1.RagService/DeleteDataset',
+            rag__service__pb2.DeleteDatasetRequest.SerializeToString,
+            rag__service__pb2.DeleteDatasetResponse.FromString,
             options,
             channel_credentials,
             insecure,

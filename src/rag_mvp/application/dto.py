@@ -82,6 +82,21 @@ class DeleteDocumentResult:
 
 
 @dataclass(frozen=True, slots=True)
+class DeleteDatasetCommand:
+    request_id: str
+    idempotency_key: str
+    dataset_id: str
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteDatasetResult:
+    dataset_id: str
+    job_id: str
+    reused: bool
+
+
+@dataclass(frozen=True, slots=True)
 class CancelJobCommand:
     request_id: str
     idempotency_key: str

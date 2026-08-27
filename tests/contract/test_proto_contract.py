@@ -15,6 +15,7 @@ def test_rag_service_defines_the_complete_rpc_surface() -> None:
 
     assert set(methods) == {
         "CreateDataset",
+        "DeleteDataset",
         "SubmitDocument",
         "GetJob",
         "RetryJob",
@@ -33,6 +34,7 @@ def test_rag_service_defines_the_complete_rpc_surface() -> None:
 def test_every_response_has_result_and_business_error_outcome() -> None:
     response_names = (
         "CreateDatasetResponse",
+        "DeleteDatasetResponse",
         "SubmitDocumentResponse",
         "GetJobResponse",
         "RetryJobResponse",
@@ -62,6 +64,7 @@ def test_upload_request_is_a_header_or_data_frame() -> None:
 def test_idempotency_context_is_only_used_by_commands() -> None:
     command_requests = (
         "CreateDatasetRequest",
+        "DeleteDatasetRequest",
         "UploadHeader",
         "RetryJobRequest",
         "CancelJobRequest",
@@ -77,6 +80,23 @@ def test_idempotency_context_is_only_used_by_commands() -> None:
     assert "request_id" in retrieve_fields
     assert "context" not in retrieve_fields
     assert "idempotency_key" not in retrieve_fields
+
+
+def test_delete_dataset_contract_keeps_job_history_scoped_to_dataset() -> None:
+    request = _message("DeleteDatasetRequest")
+    result = _message("DeleteDatasetResult")
+    job = _message("JobResult")
+
+    assert [(field.name, field.number) for field in request.fields] == [
+        ("context", 1),
+        ("dataset_id", 2),
+    ]
+    assert [(field.name, field.number) for field in result.fields] == [
+        ("dataset_id", 1),
+        ("job_id", 2),
+    ]
+    assert job.fields_by_name["dataset_id"].number == 11
+    assert rag_service_pb2.JobType.Value("JOB_TYPE_DELETE_DATASET") == 4
 
 
 def test_evidence_contains_provenance_and_stage_scores_but_no_answer() -> None:
