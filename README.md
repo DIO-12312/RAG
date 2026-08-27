@@ -1,6 +1,12 @@
 # RAG MVP
 
-一个可靠、可恢复的 Python RAG 计算服务：通过版本化 gRPC 接收文档，异步完成解析、切块、向量化与索引，并返回可追溯的 evidence。
+- 前置的中间件知识（过一遍了解概念）：[`docs/middleware-guide.md`](docs/middleware-guide.md)
+- 环境搭建指南：
+  - [Linux 从零搭建](docs/setup-linux.md)
+  - [Windows + WSL2 从零搭建](docs/setup-windows.md)
+
+
+一个可靠、可恢复的 Python RAG 计算服务：通过版本化 gRPC(待定) 接收文档，异步完成解析、切块、向量化与索引，并返回可追溯的 evidence。
 
 当前仓库已完成 **Milestone D 可靠发布基线**：真实 MySQL、Elasticsearch、NATS JetStream 和 OpenAI-compatible Embedding 已在 Docker 中完成集成、端到端、进程强杀恢复与 30 问检索评测。它适合单机生产试运行；Kubernetes、多实例高可用和 Go 产品控制面尚未实现。
 
@@ -44,6 +50,8 @@ flowchart LR
 
 需要 Docker Engine、Docker Compose、GNU Make 和 Earthly v0.8.16。Windows 推荐在 WSL2 中执行以下命令。
 
+从零安装依赖： [Linux](docs/setup-linux.md) | [Windows + WSL2](docs/setup-windows.md)
+
 ```bash
 cp .env.example .env
 # 编辑 .env，填写 EMBEDDING_MODEL_URL、NAME、API_KEY、DIMENSION
@@ -60,7 +68,7 @@ make docker-down
 
 该命令先扫描日志中的模型密钥，再停止容器并保留命名卷。不要随意执行 `docker compose down -v`，它会删除 MySQL、ES、NATS 和对象数据。
 
-## 最小 gRPC 调用
+## 最小 gRPC 调用 (待定，不一定用RPC）
 
 本地调试与未来 Go 后端走同一条 gRPC 路径，不提供 HTTP/FastAPI 旁路。安装开发依赖后，可用 generated client 封装的 `rag-dev` 创建 Dataset：
 
@@ -149,6 +157,10 @@ git config core.hooksPath .githooks
 - [`docs/SPEC.md`](docs/SPEC.md)：权威架构、RPC、状态机、存储与可靠性不变量。
 - [`docs/PLAN.md`](docs/PLAN.md)：Milestone A～E 的交付路线；下一阶段是 Go 产品控制面。
 - [`docs/testing-guide.md`](docs/testing-guide.md)：测试分层、真实 Docker 验收、质量指标与故障定位。
+- [`docs/setup-linux.md`](docs/setup-linux.md)：Linux 主机从零安装 Docker、uv、Earthly 并运行项目。
+- [`docs/setup-windows.md`](docs/setup-windows.md)：Windows 使用 Docker Desktop + Ubuntu WSL2 的完整安装与排障流程。
+- [`docs/middleware-guide.md`](docs/middleware-guide.md)：项目涉及的 Docker、WSL、MySQL、ES、NATS 与 gRPC 中间件速览。
+- [`docs/MQ选择原因.md`](docs/MQ选择原因.md)：NATS JetStream、Kafka 与 RocketMQ 的选型依据。
 - [`tests/TEST.md`](tests/TEST.md)：每个测试文件与测试函数的职责清单。
 - [`AGENTS.md`](AGENTS.md)：代码边界、协作规则和提交约定。
 
