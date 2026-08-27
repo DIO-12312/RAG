@@ -77,6 +77,8 @@
      - `answer_coverage`：拼接 top-6 证据原文，`case.required_phrases` 全部包含。
 6. 聚合 50 条指标并断言阈值。
 
+无论摄取、查询或指标断言是否失败，测试均在 `finally` 中调用 `DeleteDataset` 并等待该 Dataset 被物理 purge。日志在 teardown 前写入；删除失败也必须使测试失败，不能让一次性 eval 数据滞留在 MySQL、Elasticsearch 或对象存储。
+
 每次真实评测在 `tests/eval/log/` 生成带时间戳的 JSON 日志，记录 50 条 query 的完整测试端 embedding、服务实际返回的 Top-K evidence（含 rank、chunk、页码、各阶段分数和原文）以及聚合指标。日志目录只读挂载之外单独以可写 bind mount 提供给 `rag-test`，生成物不进入 Git。
 
 指标在测试内计算，**不改** `src/rag_mvp/retrieval/evaluation.py`。

@@ -126,6 +126,7 @@ package rag.v1;
 
 service RagService {
   rpc CreateDataset(CreateDatasetRequest) returns (CreateDatasetResponse);
+  rpc DeleteDataset(DeleteDatasetRequest) returns (DeleteDatasetResponse);
   rpc SubmitDocument(stream UploadDocumentRequest) returns (SubmitDocumentResponse);
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
   rpc RetryJob(RetryJobRequest) returns (RetryJobResponse);
@@ -138,6 +139,7 @@ service RagService {
 | RPC | 调用类型 | 语义 | 未来 Go 调用方 |
 |---|---|---|---|
 | `CreateDataset` | Unary | 创建知识库并固定初始 `embedding_model`、维度和检索配置；创建后不可原地更换向量模型。 | Go Dataset 服务 / dev CLI |
+| `DeleteDataset` | Unary | 不可恢复地删除整个知识库：事务内将 Dataset 置为 `DELETING`、立即阻断提交和检索，并创建 dataset 作用域的清理 Job/Task；Worker 经 Outbox 异步删除 ES、对象和全部 MySQL 聚合数据。 | Go Dataset 服务 / dev CLI / 测试 teardown |
 | `SubmitDocument` | 客户端流式 | 接收文件、创建 Document、投递异步摄取任务；立即返回 `document_id` 和 `job_id`，不等待解析/向量化完成。 | Document API / TaskService |
 | `GetJob` | Unary | 查询任务状态、进度、失败原因和是否可重试。 | Go 状态查询 API |
 | `RetryJob` | Unary | 仅对 `FAILED` 且 `retryable=true` 的 Job 创建同类型的 retry Job、待执行 Task 和 OutboxEvent；旧 Job 保持终态，不修改已成功的索引版本。 | Go Dataset/Document 服务 |
@@ -153,9 +155,13 @@ Outbox Relay 必须同时支持两种触发方式：一是按固定间隔轮询 
 
 未给 `target_document_id` 是新文档模式：按前述 `IngestionFingerprint` 状态复用 canonical Job 或在 RELEASED 后创建新 Document。给出 `target_document_id` 是重建模式：必须属于该 Dataset，系统在 `SELECT ... FOR UPDATE` 的 Document 行锁内分配唯一的新 `index_version`，并创建对应 Job；新版本完整后才切换 `active_version`。多个重建乱序完成时，`active_version` 只能单调前进；低版本迟到成功不得覆盖已激活的高版本，其 IndexBuild 必须置为 `ABANDONED` 并创建 `CLEANUP_INDEX_VERSION` Task。相同 `idempotency_key` 的完整提交必须返回第一次的 `document_id/job_id`，不得新建 Document、Job 或 Task。`CreateDataset`、`DeleteDocument`、`RetryJob` 与 `CancelJob` 也必须携带 `idempotency_key`；`request_id` 用于日志与 trace，不承担去重语义。Worker 的内部状态迁移记录 `operation_id`，不伪装为客户端请求。
 
-`Job.status` 与 `Task.status` 统一为 `PENDING → RUNNING → SUCCEEDED | FAILED | CANCELLED`。Job 是用户可查询的聚合状态：首个 Task 投递后仍为 `PENDING`，任一必要 Task 运行时为 `RUNNING`，全部必要 Task 成功后才为 `SUCCEEDED`。`FAILED` 必须返回稳定的业务错误码、可读错误信息和 `retryable`；`RetryJob` 是唯一的 Job 重试命令，且总是生成新 Job，重复上传不会产生未定义的 `SKIPPED` 状态。MVP 的 `tenant_id` 固定为服务端注入的 `default_tenant`，不接受客户端任意指定。
+`Job.status` 与 `Task.status` 统一为 `PENDING → RUNNING → SUCCEEDED | FAILED | CANCELLED`。Job 是用户可查询的聚合状态：首个 Task 投递后仍为 `PENDING`，任一必要 Task 运行时为 `RUNNING`，全部必要 Task 成功后才为 `SUCCEEDED`。`FAILED` 必须返回稳定的业务错误码、可读错误信息和 `retryable`；`RetryJob` 是唯一的 Job 重试命令，且总是生成新 Job，重复上传不会产生未定义的 `SKIPPED` 状态。摄取、文档删除和索引版本清理 Job 必须关联 Document；`DELETE_DATASET` Job 必须关联 Dataset 且 `document_id` 为空。MVP 的 `tenant_id` 固定为服务端注入的 `default_tenant`，不接受客户端任意指定。
 
 `CancelJob` 对 `PENDING` 摄取 Job 在同一事务内把 Job/Task 置为 `CANCELLED`、撤销未发布 OutboxEvent；对 `RUNNING` 摄取 Job 只写 `cancel_requested_at`，由 Worker 的下一 checkpoint 原子转为 `CANCELLED`，并不得切换 `active_version`。已终态 Job 返回已有终态。`DELETE_DOCUMENT` Job 不可取消，因为逻辑删除已经对检索可见；调用返回 `JOB_NOT_CANCELLABLE`。每个 Job 保存 `retry_count`，超过 `max_user_retries` 后 `retryable=false`，默认值为 3。
+
+`DeleteDataset` 是不可恢复的级联物理删除命令，必须携带 `RequestContext` 和 `dataset_id`。Dataset 新增生命周期 `ACTIVE → DELETING` 与单调递增的 `lifecycle_generation`；创建后为 `ACTIVE`。在 Dataset 行锁内把它置为 `DELETING` 并递增 generation 后，`GetDataset`（若未来提供）、`SubmitDocument`、`Retrieve`、Document 重建和 `DeleteDocument` 都必须拒绝该 Dataset；`visible_document_versions` 只返回 `ACTIVE` Dataset 下 `READY` Document，因此已经在 ES 中存在的向量也立刻不可见。该事务必须将所有 Document 标为 `DELETED` 并递增其 generation，释放 fingerprint，取消未终态摄取/文档清理 Task 与未发布 Outbox，随后创建 `DELETE_DATASET` Job、`CLEANUP_DATASET` Task 和 `READY_TO_PUBLISH` OutboxEvent。已发布的旧 delivery 只能因 Dataset/Document generation fence 失败后 ACK，不能复活数据。
+
+`CLEANUP_DATASET` 由 Worker 通过既有 Outbox/JetStream 路径执行，而不是由 RPC 直接删除基础设施数据：它先以 dataset_id 幂等删除 Elasticsearch 中该 Dataset 的全部 chunk，再按元数据快照逐个幂等删除正式对象；两者都成功后，MetadataRepository 在同一 MySQL 事务中验证 Dataset 仍为 `DELETING` 且 generation 相符，并删除该 Dataset 的 Outbox、Task、Job、Chunk manifest、IndexBuild、IngestionFingerprint、Document、操作幂等记录以及 Dataset 行本身。删除前后可能到达的 NATS 消息因查不到 Task 而只 ACK。清理失败保持 Dataset 为 `DELETING`、Task/Job 走既有 retry/NAK 语义；不可通过 `RetryJob` 重新激活 Dataset。相同幂等键在 Dataset 仍存在时复用同一清理 Job；不同键在删除进行中返回 `DATASET_DELETION_IN_PROGRESS`；物理删除完成后再次请求返回 `DATASET_NOT_FOUND`。因此该 API 不保留墓碑、审计记录或可轮询的完成 Job，调用方若需确认最终清空，应轮询已返回的 Job，并将其后出现的 `JOB_NOT_FOUND` 视为清理完成。
 
 Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_attempts` 后，在 MySQL 事务中将关联 Task/Job 标记为 `FAILED(OBJECT_FINALIZATION_FAILED)`、把 OutboxEvent 标记为 `CANCELLED`，并将关联 IngestionFingerprint 置为 `RELEASED`，使 `GetJob` 不会无限显示 PENDING。该失败没有正式 `object_key`，不可 `RetryJob`；客户端应使用新的 `idempotency_key` 重新上传。失败记录关联的 staging object 在保留期结束后才可由 sweeper 清理。
 
@@ -167,7 +173,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 
 每个 RPC 均需设定 deadline；检索为秒级，摄取由客户端流上传后异步执行。每个正常响应都使用 `oneof { result, BusinessError error }`（`BusinessError` 至少有 `code`、`message`、`retryable`、`request_id`）；不支持格式、重复删除、不可重试 Job 等可预期领域结果返回该结构。gRPC status code 仅用于 RPC 本身不能完成的情况，如 `INVALID_ARGUMENT`（畸形流或超限）、`DEADLINE_EXCEEDED`、`UNAVAILABLE` 和服务端未处理异常；调用方不得解析 Python 异常字符串。
 
-正式 `.proto` 至少定义以下字段级契约：`RequestContext(request_id, idempotency_key)`；`UploadDocumentRequest` 使用 `oneof { UploadHeader header; bytes data }`，且 header 只能是首帧；`UploadHeader` 包含 `RequestContext`、`dataset_id`、`source_name`、`expected_sha256`、`target_document_id`。`CreateDatasetRequest` 包含 Context、name、embedding_model、embedding_dimension、检索配置；`GetJobRequest` 包含 request_id/job_id；`RetryJobRequest`、`CancelJobRequest`、`DeleteDocumentRequest` 包含 Context 与目标 ID；`RetrieveRequest` 包含 request_id、dataset_id、query、受限 filters 和 top_k。每个 `*Response` 都是 `oneof { <Result> result; BusinessError error }`，`CancelJobResponse.result` 返回实际 Job/Task 状态，避免调用方猜测取消是否已收敛。
+正式 `.proto` 至少定义以下字段级契约：`RequestContext(request_id, idempotency_key)`；`UploadDocumentRequest` 使用 `oneof { UploadHeader header; bytes data }`，且 header 只能是首帧；`UploadHeader` 包含 `RequestContext`、`dataset_id`、`source_name`、`expected_sha256`、`target_document_id`。`CreateDatasetRequest` 包含 Context、name、embedding_model、embedding_dimension、检索配置；`DeleteDatasetRequest`、`RetryJobRequest`、`CancelJobRequest`、`DeleteDocumentRequest` 包含 Context 与目标 ID；`DeleteDatasetResult` 返回 `dataset_id` 和 `job_id`，不承诺 Job 历史永久保留；`GetJobRequest` 包含 request_id/job_id；`RetrieveRequest` 包含 request_id、dataset_id、query、受限 filters 和 top_k。`JobResult` 新增 `dataset_id`，而 `document_id` 对 dataset 作用域 Job 为空字符串。每个 `*Response` 都是 `oneof { <Result> result; BusinessError error }`，`CancelJobResponse.result` 返回实际 Job/Task 状态，避免调用方猜测取消是否已收敛。
 
 `Dataset.embedding_model` 与 `embedding_dimension` 在 Dataset 首次出现 `READY` Document 后冻结。MVP 不支持只重建一个 Document 就更换 embedding 模型或维度；该需求必须新建 Dataset（或在后续版本以整个 Dataset 的 `search_schema_version` 迁移实现），从而避免同一 ES dense field 混入不兼容向量。
 
@@ -197,7 +203,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 
 | 数据类型 | MVP 实现 | 负责内容 | 设计约束 |
 |---|---|---|---|
-| 关系数据 | MySQL 8.0+（InnoDB） | Tenant、Dataset、Document、IngestionFingerprint、Job、Task、Chunk manifest、IndexBuild、OutboxEvent | 事务维护业务状态、去重锁、Outbox、索引版本与引用完整性；不把向量正文存到此处，也不保存 Go 的 Conversation/Message。 |
+| 关系数据 | MySQL 8.0+（InnoDB） | Tenant、带生命周期 generation 的 Dataset、Document、IngestionFingerprint、Job、Task、Chunk manifest、IndexBuild、OutboxEvent | 事务维护业务状态、去重锁、Outbox、索引版本与引用完整性；`DeleteDataset` 成功清理后物理删除该 Dataset 的全部聚合行；不把向量正文存到此处，也不保存 Go 的 Conversation/Message。 |
 | 原文件 | 本地 `data/objects/` | 上传的二进制、可下载源文件 | Key 由 document ID 派生，不用原始文件名作唯一键。 |
 | 检索索引 | Elasticsearch 8.x | `dense_vector` KNN、BM25 全文、chunk payload 与 metadata filter | `chunk_id` 是逻辑引用 ID；ES 物理 `_id` 为 `{document_id}:{index_version}:{chunk_id}`，同一版本 upsert 必须幂等。 |
 | 队列 | NATS JetStream | 持久化 Task 消息、durable consumer、ACK/NAK、延迟重投 | 使用显式 ACK 与 `ack_wait`/`max_deliver`，不以数据库行 claim 作为消费协调机制。 |
@@ -297,6 +303,7 @@ tests/
 | T3 | 已写索引、未 `SUCCEEDED` 时 Worker 被强杀，重启后可收敛。 | 故障注入 `after_index_write_before_complete`。 |
 | T4 | 已 `SUCCEEDED`、但 ACK 丢失时，重投仅 ACK/跳过，不再调用 parser、embedder。 | 按 Task 状态作真实来源。 |
 | T5 | `DeleteDocument` 成功返回后文档立即无法检索；清理 Task 成功后，其 Elasticsearch chunk 文档和对象文件均不可见。 | 删除后立即检索断言为空；等待清理 Task 终态后做全存储查询。 |
+| T5a | `DeleteDataset` 成功返回后 Dataset 立即不可提交、不可检索；清理完成后 MySQL、ES、对象存储均不残留该 Dataset 数据。 | 删除与摄取并发、已发布 delivery 重投、外部清理失败重试、不同幂等键并发删除和物理清空后重复请求。 |
 | T6 | 过滤条件不会跨 Dataset 返回 chunk。 | 两 dataset 同词查询，断言 `dataset_id` filter。 |
 | T7 | Context 超预算时优先保留高分完整 chunk，且每个保留 Evidence 的 locator 与 chunk 血缘正确。 | 固定候选 + token budget + locator golden test；`[n]` 编号由 Go 测试。 |
 | T8 | ES 中新版本写完、切换 `Document.active_version` 前，检索仍只返回旧 active version。 | 在版本切换前后分别检索，并由 MySQL active-version 过滤断言。 |
@@ -627,7 +634,7 @@ sequenceDiagram
 
 失败语义：可重试异常发送 `NAK(delay)` 或不 ACK 等待 JetStream 的 `ack_wait` 到期重投；Worker 以 `last_delivery_sequence` 条件更新 Task attempt，避免同一 delivery 的并发处理重复计数。Worker 从 delivery metadata 读取投递次数；在最后一次允许投递中，必须先将 Task/Job 标记 `FAILED` 并记录错误，再 ACK，不能依赖 `max_deliver` 自动回写 MySQL。此时若 Document 有正式 `object_key` 且 Job 可重试，关联 IngestionFingerprint 置为 `FAILED_RETRYABLE`；没有正式对象的失败由 Finalizer 置为 `RELEASED`。另订阅 JetStream `MAX_DELIVERIES` advisory，由补偿器扫描并修复遗漏终态。取消在每个阶段 checkpoint 检查；收到已取消任务、或完成事务发现 cancellation/document fence 失配时，Worker 不再写成功而是创建系统版本清理 Job 后 ACK。不支持的文件类型直接 `FAILED` 并写清错误码。Worker 只有确认 MySQL 终态持久化、Elasticsearch 写入完成后才 ACK。
 
-`RetryJob` 不把失败 Task 或 Job 从 `FAILED` 改回 `PENDING`：它创建带 `retry_of_job_id`、与原 Job 相同 `type` 的新 Job、对应 Task 与 OutboxEvent；旧 Job 永远保持原终态。重试摄取只能复用已存在的正式 `object_key`，因此其 OutboxEvent 直接为 `READY_TO_PUBLISH`；没有正式对象的初始上传失败不可通过 RetryJob 恢复，调用方必须重新上传。删除清理失败重建 `CLEANUP_DOCUMENT` Task，也直接 READY。若失败的是一次已有 `READY` Document 的重建，旧 `active_version` 在新版本完整写入并切换前持续可见；若没有旧成功版本，Document 状态为 `FAILED`。`DeleteDocument` 先在事务内将 Document 标记为 `DELETED`、创建 `DELETE_DOCUMENT` Job/`CLEANUP_DOCUMENT` Task/`READY_TO_PUBLISH` OutboxEvent，因而即使 Relay 或 Worker 暂停，检索也会立即被 MySQL 复核挡住。
+`RetryJob` 不把失败 Task 或 Job 从 `FAILED` 改回 `PENDING`：它创建带 `retry_of_job_id`、与原 Job 相同 `type` 的新 Job、对应 Task 与 OutboxEvent；旧 Job 永远保持原终态。重试摄取只能复用已存在的正式 `object_key`，因此其 OutboxEvent 直接为 `READY_TO_PUBLISH`；没有正式对象的初始上传失败不可通过 RetryJob 恢复，调用方必须重新上传。删除清理失败重建 `CLEANUP_DOCUMENT` Task，也直接 READY。若失败的是一次已有 `READY` Document 的重建，旧 `active_version` 在新版本完整写入并切换前持续可见；若没有旧成功版本，Document 状态为 `FAILED`。`DeleteDocument` 先在事务内将 Document 标记为 `DELETED`、创建 `DELETE_DOCUMENT` Job/`CLEANUP_DOCUMENT` Task/`READY_TO_PUBLISH` OutboxEvent，因而即使 Relay 或 Worker 暂停，检索也会立即被 MySQL 复核挡住。`DeleteDataset` 使用同一可靠路径，但因成功的最终状态是物理删除整个聚合，不能复用 `RetryJob`，也不能依赖保留的成功 Job 作为完成标记。
 
 ### 5.6 目标态：Go 后端 / Agent Harness 的问答执行流程
 
@@ -707,7 +714,7 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 
 | ID | 任务 | 验收 | 依赖 |
 |---|---|---|---|
-| P3-1 | 实现 `CreateDataset`、`SubmitDocument`、`GetJob`、`RetryJob`、`CancelJob`、`DeleteDocument` gRPC | protobuf contract test、业务错误 oneof 与 Python client 集成测试通过 | P1-5 |
+| P3-1 | 实现 `CreateDataset`、`DeleteDataset`、`SubmitDocument`、`GetJob`、`RetryJob`、`CancelJob`、`DeleteDocument` gRPC | protobuf contract test、业务错误 oneof 与 Python client 集成测试通过 | P1-5 |
 | P3-2 | 实现 `Retrieve` gRPC | 能返回各阶段分数与可追溯 evidence hits | P2-4 |
 | P3-3 | gRPC 本地调试工具 | dev 环境 Reflection、`grpcurl`/`grpcui` 调用说明与 dev CLI 可用；不新增 HTTP adapter | P3-1~P3-2 |
 | P3-4 | 端到端测试与评测基线 | 四类文件 upload→retrieve；指标达到附录门槛 | P3-1~P3-2 |
