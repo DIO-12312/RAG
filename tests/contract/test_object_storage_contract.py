@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 校验对象存储 staging、提升、删除与存在性查询语义。
 import pytest
 
 from rag_mvp.adapters.storage.local import LocalObjectStorage
@@ -8,6 +9,7 @@ from tests.fakes.storage import FakeObjectStorage
 
 @pytest.mark.asyncio
 async def test_object_storage_write_promote_read_and_delete_are_idempotent() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     storage = FakeObjectStorage()
 
     await storage.write("staging/request-1", b"hello")
@@ -27,6 +29,7 @@ async def test_object_storage_write_promote_read_and_delete_are_idempotent() -> 
 
 @pytest.mark.asyncio
 async def test_local_object_storage_has_the_same_semantics(tmp_path: object) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     from pathlib import Path
 
     storage = LocalObjectStorage(Path(str(tmp_path)))
@@ -42,6 +45,7 @@ async def test_local_object_storage_has_the_same_semantics(tmp_path: object) -> 
 
 @pytest.mark.asyncio
 async def test_local_object_storage_rejects_path_traversal(tmp_path: object) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     from pathlib import Path
 
     storage = LocalObjectStorage(Path(str(tmp_path)))

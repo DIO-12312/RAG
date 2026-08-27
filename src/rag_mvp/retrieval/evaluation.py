@@ -1,4 +1,4 @@
-"""Deterministic offline retrieval quality metrics."""
+"""确定性离线检索质量指标：以固定标注样本衡量 Recall、MRR 与定位准确率。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ class EvaluationCase:
     retrieved_chunk_ids: tuple[str, ...]
     locator_matches: bool
 
+    # 在构造完成后校验并固化领域不变式。
     def __post_init__(self) -> None:
         if not self.relevant_chunk_ids:
             raise ValueError("evaluation case requires relevant chunk IDs")
@@ -23,6 +24,7 @@ class RetrievalMetrics:
     locator_accuracy: float
 
 
+# 实现 evaluate_rankings 对应的局部职责。
 def evaluate_rankings(cases: tuple[EvaluationCase, ...], *, k: int) -> RetrievalMetrics:
     if not cases:
         raise ValueError("evaluation requires at least one case")

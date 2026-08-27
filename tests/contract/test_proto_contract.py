@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+# 校验版本化 protobuf 消息和服务方法不发生破坏性漂移。
 from google.protobuf.descriptor import Descriptor, FieldDescriptor
 
 from rag_mvp.rpc.generated import rag_service_pb2
 
 
 def _message(name: str) -> Descriptor:
+    """构造本测试所需的输入、替身或运行环境。"""
     return rag_service_pb2.DESCRIPTOR.message_types_by_name[name]
 
 
 def test_rag_service_defines_the_complete_rpc_surface() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service = rag_service_pb2.DESCRIPTOR.services_by_name["RagService"]
     methods = {method.name: method for method in service.methods}
 
@@ -32,6 +35,7 @@ def test_rag_service_defines_the_complete_rpc_surface() -> None:
 
 
 def test_every_response_has_result_and_business_error_outcome() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     response_names = (
         "CreateDatasetResponse",
         "DeleteDatasetResponse",
@@ -52,6 +56,7 @@ def test_every_response_has_result_and_business_error_outcome() -> None:
 
 
 def test_upload_request_is_a_header_or_data_frame() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     request = _message("UploadDocumentRequest")
 
     assert set(request.oneofs_by_name) == {"payload"}
@@ -62,6 +67,7 @@ def test_upload_request_is_a_header_or_data_frame() -> None:
 
 
 def test_idempotency_context_is_only_used_by_commands() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     command_requests = (
         "CreateDatasetRequest",
         "DeleteDatasetRequest",
@@ -83,6 +89,7 @@ def test_idempotency_context_is_only_used_by_commands() -> None:
 
 
 def test_delete_dataset_contract_keeps_job_history_scoped_to_dataset() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     request = _message("DeleteDatasetRequest")
     result = _message("DeleteDatasetResult")
     job = _message("JobResult")
@@ -100,6 +107,7 @@ def test_delete_dataset_contract_keeps_job_history_scoped_to_dataset() -> None:
 
 
 def test_evidence_contains_provenance_and_stage_scores_but_no_answer() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     evidence = _message("Evidence")
 
     assert {
@@ -124,6 +132,7 @@ def test_evidence_contains_provenance_and_stage_scores_but_no_answer() -> None:
 
 
 def test_business_error_has_stable_machine_readable_fields() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     error = _message("BusinessError")
 
     assert list(error.fields_by_name) == ["code", "message", "retryable", "request_id"]

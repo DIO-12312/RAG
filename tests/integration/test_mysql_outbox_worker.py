@@ -1,4 +1,4 @@
-"""Real MySQL tests for Finalizer, Relay, and Worker state transitions."""
+"""验证真实 MySQL 中 Finalizer、Relay 与 Worker 的状态流转。"""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ async def _submitted(
     repository: MySQLMetadataRepository,
     now: datetime,
 ) -> SubmitResult:
+    """创建等待 Finalizer 的真实 MySQL 摄取聚合。"""
     await repository.create_dataset(
         Dataset(
             id="dataset-1",
@@ -43,6 +44,7 @@ async def _submitted(
 
 
 def _chunk(document_id: str) -> Chunk:
+    """构造最小可索引 Chunk。"""
     return Chunk(
         id="c" * 16,
         document_id=document_id,
@@ -61,6 +63,7 @@ def _chunk(document_id: str) -> Chunk:
 async def test_outbox_transitions_delivery_dedup_and_atomic_completion(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """验证 Outbox 投递去重和任务完成原子性。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)
@@ -117,6 +120,7 @@ async def test_outbox_transitions_delivery_dedup_and_atomic_completion(
 async def test_dataset_cleanup_outbox_is_publishable_without_document(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """Finalizer 耗尽时失败并释放指纹。"""
     """Dataset-scoped cleanup has no document row but must still reach Relay."""
 
     repository, _engine = mysql_repository
@@ -137,6 +141,7 @@ async def test_dataset_cleanup_outbox_is_publishable_without_document(
 async def test_finalizer_exhaustion_atomically_fails_and_releases_fingerprint(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """删除围栏阻止对象就绪和任务认领。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)
@@ -169,6 +174,7 @@ async def test_finalizer_exhaustion_atomically_fails_and_releases_fingerprint(
 async def test_deleted_generation_fence_prevents_object_ready_and_task_claim(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """失败任务只允许一次持久化终态。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)
@@ -197,6 +203,7 @@ async def test_deleted_generation_fence_prevents_object_ready_and_task_claim(
 async def test_fail_task_persists_retryability_and_terminal_state_once(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """验证失败原因、可重试标记和终态写入在 MySQL 中只落库一次。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)

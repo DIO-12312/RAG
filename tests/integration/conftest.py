@@ -1,4 +1,4 @@
-"""Shared configuration for real infrastructure integration tests."""
+"""真实 MySQL、NATS 与 Elasticsearch 集成测试的共用配置。"""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ MUTABLE_METADATA_TABLES = (
 
 @pytest.fixture
 def mysql_dsn() -> str:
-    """Use the host-published MySQL port unless Docker injects an override."""
+    """读取真实 MySQL 连接串；Docker 环境可通过变量覆盖宿主机端口。"""
 
     return os.getenv(
         "RAG_TEST_MYSQL_DSN",
@@ -41,14 +41,14 @@ def mysql_dsn() -> str:
 
 @pytest.fixture
 def migrations_root() -> Path:
-    """Resolve migrations explicitly for host and non-editable test images."""
+    """显式定位迁移目录，兼容宿主机和不可编辑的测试镜像。"""
 
     configured = os.getenv("RAG_MIGRATIONS_ROOT", "").strip()
     return Path(configured) if configured else Path(__file__).resolve().parents[2]
 
 
 async def reset_mysql_metadata(engine: AsyncEngine) -> None:
-    """Clear only test-owned business rows while preserving migration and tenant state."""
+    """仅清空测试业务表，保留迁移记录和租户基础状态。"""
 
     async with engine.connect() as connection:
         await connection.execute(text("SET FOREIGN_KEY_CHECKS=0"))
@@ -64,7 +64,7 @@ async def mysql_repository(
     mysql_dsn: str,
     migrations_root: Path,
 ) -> AsyncIterator[tuple[MySQLMetadataRepository, AsyncEngine]]:
-    """Provide one real repository with a clean schema for each integration test."""
+    """为每个集成测试提供迁移完成且数据清空的真实 repository。"""
 
     await asyncio.to_thread(run_migrations, mysql_dsn, "upgrade", "head", migrations_root)
     engine = create_mysql_engine(mysql_dsn)

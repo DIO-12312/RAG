@@ -1,4 +1,4 @@
-"""Worker SIGKILL recovery at persisted indexing and completion boundaries."""
+"""验证 Worker 在已持久化索引/完成边界被 SIGKILL 后的恢复。"""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ async def test_worker_kill_after_index_write_redelivers_without_duplicate_chunks
     database_probe: DatabaseProbe,
     es_client: AsyncElasticsearch,
 ) -> None:
+    """索引写入后强杀 Worker 时，重投递不得生成重复 Chunk。"""
     barrier_control.prepare(Checkpoint.AFTER_INDEX_WRITE)
     dataset_id = await create_dataset(rag_stub, embedding_runtime, "after-index")
     document_id, job_id, reused = await submit_bytes(
@@ -94,6 +95,7 @@ async def test_worker_kill_after_success_before_ack_redelivery_only_acks(
     database_probe: DatabaseProbe,
     es_client: AsyncElasticsearch,
 ) -> None:
+    """完成持久化但 ACK 前强杀时，重投递只能 ACK 而不能重复执行。"""
     barrier_control.prepare(Checkpoint.AFTER_COMPLETE_BEFORE_ACK)
     dataset_id = await create_dataset(rag_stub, embedding_runtime, "after-complete")
     document_id, job_id, _ = await submit_bytes(

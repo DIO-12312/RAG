@@ -1,4 +1,4 @@
-"""The sole composition root for concrete runtime dependencies."""
+"""唯一运行时组合根：在进程边界创建 concrete adapter 并管理其关闭顺序。"""
 
 from __future__ import annotations
 
@@ -83,13 +83,16 @@ class Container:
     _close_count: int = field(default=0, init=False)
 
     @property
+    # 实现 closed 对应的局部职责。
     def closed(self) -> bool:
         return self._closed
 
     @property
+    # 实现 close_count 对应的局部职责。
     def close_count(self) -> int:
         return self._close_count
 
+    # 实现 register 对应的局部职责。
     def register[T](self, resource: ManagedResource[T]) -> T:
         if self._closed:
             raise RuntimeError("cannot register a resource on a closed container")
@@ -97,6 +100,7 @@ class Container:
             self._closers.append(resource.close)
         return resource.value
 
+    # 按资源所有权顺序关闭底层连接或句柄。
     async def close(self) -> None:
         if self._closed:
             return
@@ -114,6 +118,7 @@ class Container:
             raise first_error
 
 
+# 实现 default_adapter_factories 对应的局部职责。
 def default_adapter_factories() -> AdapterFactories:
     """Return production factories without creating connections at import time."""
 
@@ -126,6 +131,7 @@ def default_adapter_factories() -> AdapterFactories:
     )
 
 
+# 构建该方法负责的领域数据或基础设施状态。
 async def build_server_container(
     settings: Settings,
     factories: AdapterFactories | None = None,
@@ -168,6 +174,7 @@ async def build_server_container(
         raise
 
 
+# 构建该方法负责的领域数据或基础设施状态。
 async def build_worker_container(
     settings: Settings,
     factories: AdapterFactories | None = None,
@@ -206,6 +213,7 @@ async def build_worker_container(
         raise
 
 
+# 构建该方法负责的领域数据或基础设施状态。
 async def build_outbox_container(
     settings: Settings,
     factories: AdapterFactories | None = None,
@@ -226,9 +234,11 @@ async def build_outbox_container(
         raise
 
 
+# 内部辅助：完成 metadata_resource 所需的局部转换或校验。
 async def _metadata_resource(settings: Settings) -> ManagedResource[MetadataRepository]:
     engine = create_mysql_engine(settings.mysql_dsn)
 
+    # 按资源所有权顺序关闭底层连接或句柄。
     async def close() -> None:
         await engine.dispose()
 
@@ -241,10 +251,12 @@ async def _metadata_resource(settings: Settings) -> ManagedResource[MetadataRepo
     )
 
 
+# 内部辅助：完成 storage_resource 所需的局部转换或校验。
 async def _storage_resource(settings: Settings) -> ManagedResource[ObjectStorage]:
     return ManagedResource(LocalObjectStorage(settings.object_root))
 
 
+# 内部辅助：完成 search_resource 所需的局部转换或校验。
 async def _search_resource(settings: Settings) -> ManagedResource[SearchEngine]:
     profile = settings.require_embedding_profile()
     client = AsyncElasticsearch(settings.elasticsearch_url)
@@ -261,6 +273,7 @@ async def _search_resource(settings: Settings) -> ManagedResource[SearchEngine]:
     return ManagedResource(search, search.close)
 
 
+# 内部辅助：完成 model_resource 所需的局部转换或校验。
 async def _model_resource(settings: Settings) -> ManagedResource[ModelGateway]:
     profile = settings.require_embedding_profile()
     client = httpx.AsyncClient(
@@ -278,6 +291,7 @@ async def _model_resource(settings: Settings) -> ManagedResource[ModelGateway]:
     return ManagedResource(model, model.close)
 
 
+# 内部辅助：完成 queue_resource 所需的局部转换或校验。
 async def _queue_resource(settings: Settings) -> ManagedResource[TaskQueue]:
     queue = await NatsJetStreamTaskQueue.connect(
         settings.nats_url,
@@ -290,11 +304,13 @@ async def _queue_resource(settings: Settings) -> ManagedResource[TaskQueue]:
     return ManagedResource(queue, queue.close)
 
 
+# 实现 install_shutdown_handlers 对应的局部职责。
 def install_shutdown_handlers(stop_event: asyncio.Event) -> None:
     """Set *stop_event* for SIGINT/SIGTERM on Unix and Windows event loops."""
 
     loop = asyncio.get_running_loop()
 
+    # 实现 request_stop 对应的局部职责。
     def request_stop(_signum: int | None = None, _frame: FrameType | None = None) -> None:
         loop.call_soon_threadsafe(stop_event.set)
 

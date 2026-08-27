@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证 staging 提升失败、重启恢复和 TTL 清理不会留下错误 READY 事件。
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -15,6 +16,7 @@ from tests.fakes.storage import FakeObjectStorage
 
 class FailingPromotionStorage(FakeObjectStorage):
     async def promote(self, staging_key: str, final_key: str) -> str:
+        """持续模拟对象提升失败，用来驱动 Finalizer 的耗尽分支。"""
         del staging_key, final_key
         raise OSError("object store unavailable")
 
@@ -22,6 +24,7 @@ class FailingPromotionStorage(FakeObjectStorage):
 async def _waiting(
     storage: FakeObjectStorage,
 ) -> tuple[FakeMetadataRepository, str, datetime]:
+    """创建带 WAITING Outbox 的上传聚合，供恢复测试复用。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     documents = DocumentService(repository, storage, max_upload_bytes=1024)
@@ -50,6 +53,7 @@ async def _waiting(
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_finalizer_exhaustion_reaches_stable_failure_terminal() -> None:
+    """Finalizer 重试耗尽后必须收敛为可解释且稳定的失败终态。"""
     storage = FailingPromotionStorage()
     repository, job_id, now = await _waiting(storage)
 
@@ -72,6 +76,7 @@ async def test_finalizer_exhaustion_reaches_stable_failure_terminal() -> None:
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_staging_sweeper_preserves_waiting_reference_and_deletes_orphan() -> None:
+    """TTL 清扫保留被 WAITING Outbox 引用的对象，只删除孤儿 staging。"""
     now = datetime.now(UTC)
     storage = FakeObjectStorage()
     repository, _, _ = await _waiting(storage)

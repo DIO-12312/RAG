@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证 NATS delivery 的认领、ACK/NAK、取消与重复投递控制。
 from datetime import UTC, datetime
 
 import pytest
@@ -29,12 +30,14 @@ from tests.fakes.task_queue import FakeTaskQueue
 
 class FailingModelGateway(FakeModelGateway):
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
+        """模拟文本向量化并返回确定性向量。"""
         del texts
         raise ConnectionError("model unavailable")
 
 
 class FailingDatasetCleanupSearch(FakeSearchEngine):
     async def delete_dataset(self, dataset_id: str) -> None:
+        """模拟知识库索引删除失败，用于验证清理任务的重试路径。"""
         del dataset_id
         raise ConnectionError("search unavailable")
 
@@ -48,6 +51,7 @@ async def _dataset_cleanup_work(
     IngestionService,
     str,
 ]:
+    """构造本测试所需的输入、替身或运行环境。"""
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()
     queue = FakeTaskQueue()
@@ -92,6 +96,7 @@ async def _dataset_cleanup_work(
 
 @pytest.mark.asyncio
 async def test_worker_claims_executes_completes_then_acks() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()
@@ -149,6 +154,7 @@ async def test_worker_claims_executes_completes_then_acks() -> None:
 
 @pytest.mark.asyncio
 async def test_worker_returns_false_when_queue_is_empty() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()
@@ -168,6 +174,7 @@ async def test_worker_returns_false_when_queue_is_empty() -> None:
 
 @pytest.mark.asyncio
 async def test_worker_naks_retryable_failure_then_fails_at_delivery_limit() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()
@@ -223,6 +230,7 @@ async def test_worker_naks_retryable_failure_then_fails_at_delivery_limit() -> N
 
 @pytest.mark.asyncio
 async def test_dataset_cleanup_failure_naks_even_at_delivery_limit_without_terminalizing() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository, storage, queue, ingestion, task_id = await _dataset_cleanup_work(now)
     cleanup = CleanupService(repository, FailingDatasetCleanupSearch(), storage)
@@ -246,6 +254,7 @@ async def test_dataset_cleanup_failure_naks_even_at_delivery_limit_without_termi
 
 @pytest.mark.asyncio
 async def test_late_dataset_cleanup_delivery_after_purge_is_ack_only() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository, storage, queue, ingestion, task_id = await _dataset_cleanup_work(now)
     cleanup = CleanupService(repository, FakeSearchEngine(), storage)

@@ -1,4 +1,4 @@
-"""Protobuf-to-application RPC boundary for the RAG service."""
+"""RAG 服务的 protobuf-to-application RPC 边界；不得直接调用基础设施适配器。"""
 
 from __future__ import annotations
 
@@ -57,6 +57,7 @@ _DOCUMENT_STATUS: Mapping[DocumentStatus, rag_service_pb2.DocumentStatus] = {
 }
 
 
+# 内部辅助：完成 unavailable 所需的局部转换或校验。
 def _unavailable(request_id: str) -> rag_service_pb2.BusinessError:
     return business_error(
         DomainFailure(
@@ -67,6 +68,7 @@ def _unavailable(request_id: str) -> rag_service_pb2.BusinessError:
     )
 
 
+# 内部辅助：完成 unexpected 所需的局部转换或校验。
 def _unexpected(error: Exception, request_id: str) -> rag_service_pb2.BusinessError:
     if isinstance(error, DomainError):
         failure = error.failure
@@ -84,6 +86,7 @@ def _unexpected(error: Exception, request_id: str) -> rag_service_pb2.BusinessEr
     return business_error(failure, request_id)
 
 
+# 内部辅助：完成 job_result 所需的局部转换或校验。
 def _job_result(view: JobView) -> rag_service_pb2.JobResult:
     result = rag_service_pb2.JobResult(
         job_id=view.job_id,
@@ -108,6 +111,7 @@ def _job_result(view: JobView) -> rag_service_pb2.JobResult:
     return result
 
 
+# 内部辅助：完成 locator 所需的局部转换或校验。
 def _locator(locator: Locator) -> rag_service_pb2.Locator:
     result = rag_service_pb2.Locator(metadata=dict(locator.metadata))
     if locator.page_number is not None:
@@ -123,6 +127,7 @@ def _locator(locator: Locator) -> rag_service_pb2.Locator:
     return result
 
 
+# 内部辅助：完成 scores 所需的局部转换或校验。
 def _scores(scores: ScoreBreakdown) -> rag_service_pb2.ScoreBreakdown:
     result = rag_service_pb2.ScoreBreakdown()
     if scores.dense_score is not None:
@@ -136,6 +141,7 @@ def _scores(scores: ScoreBreakdown) -> rag_service_pb2.ScoreBreakdown:
     return result
 
 
+# 内部辅助：完成 evidence 所需的局部转换或校验。
 def _evidence(evidence: Evidence) -> rag_service_pb2.Evidence:
     return rag_service_pb2.Evidence(
         chunk_id=evidence.chunk_id,
@@ -149,6 +155,7 @@ def _evidence(evidence: Evidence) -> rag_service_pb2.Evidence:
     )
 
 
+# 内部辅助：完成 retrieve_result 所需的局部转换或校验。
 def _retrieve_result(plan: ContextPlan) -> rag_service_pb2.RetrieveResult:
     return rag_service_pb2.RetrieveResult(
         evidence=[_evidence(item) for item in plan.evidence],
@@ -157,6 +164,7 @@ def _retrieve_result(plan: ContextPlan) -> rag_service_pb2.RetrieveResult:
     )
 
 
+# 内部辅助：完成 filters 所需的局部转换或校验。
 def _filters(request: rag_service_pb2.RetrieveRequest) -> dict[str, str]:
     result: dict[str, str] = {}
     for item in request.filters:
@@ -174,6 +182,7 @@ def _filters(request: rag_service_pb2.RetrieveRequest) -> dict[str, str]:
 class RagService:
     """Milestone B transport adapter with explicitly injected application services."""
 
+    # 初始化该对象的依赖、配置或受控资源。
     def __init__(
         self,
         *,
@@ -201,6 +210,7 @@ class RagService:
         self._chunk_overlap = chunk_overlap
         self._embedding_model = embedding_model
 
+    # 实现 CreateDataset 对应的局部职责。
     async def CreateDataset(
         self,
         request: rag_service_pb2.CreateDatasetRequest,
@@ -235,6 +245,7 @@ class RagService:
                 error=_unexpected(error, request.context.request_id)
             )
 
+    # 实现 SubmitDocument 对应的局部职责。
     async def SubmitDocument(
         self,
         request_iterator: AsyncIterator[rag_service_pb2.UploadDocumentRequest],
@@ -300,6 +311,7 @@ class RagService:
         except Exception as error:
             return rag_service_pb2.SubmitDocumentResponse(error=_unexpected(error, request_id))
 
+    # 实现 DeleteDataset 对应的局部职责。
     async def DeleteDataset(
         self,
         request: rag_service_pb2.DeleteDatasetRequest,
@@ -330,6 +342,7 @@ class RagService:
                 error=_unexpected(error, request.context.request_id)
             )
 
+    # 实现 GetJob 对应的局部职责。
     async def GetJob(
         self,
         request: rag_service_pb2.GetJobRequest,
@@ -344,6 +357,7 @@ class RagService:
         except Exception as error:
             return rag_service_pb2.GetJobResponse(error=_unexpected(error, request.request_id))
 
+    # 实现 RetryJob 对应的局部职责。
     async def RetryJob(
         self,
         request: rag_service_pb2.RetryJobRequest,
@@ -367,6 +381,7 @@ class RagService:
                 error=_unexpected(error, request.context.request_id)
             )
 
+    # 实现 CancelJob 对应的局部职责。
     async def CancelJob(
         self,
         request: rag_service_pb2.CancelJobRequest,
@@ -397,6 +412,7 @@ class RagService:
                 error=_unexpected(error, request.context.request_id)
             )
 
+    # 实现 Retrieve 对应的局部职责。
     async def Retrieve(
         self,
         request: rag_service_pb2.RetrieveRequest,
@@ -421,6 +437,7 @@ class RagService:
         except Exception as error:
             return rag_service_pb2.RetrieveResponse(error=_unexpected(error, request.request_id))
 
+    # 实现 DeleteDocument 对应的局部职责。
     async def DeleteDocument(
         self,
         request: rag_service_pb2.DeleteDocumentRequest,

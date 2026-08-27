@@ -1,4 +1,4 @@
-"""Mock Functional composition using real use cases and test-only infrastructure ports."""
+"""用真实用例与测试伪端口装配的 Mock Functional 运行容器。"""
 
 from __future__ import annotations
 
@@ -39,6 +39,7 @@ class MockFunctionalHarness:
 
     @classmethod
     def build(cls, object_root: Path, now: datetime) -> MockFunctionalHarness:
+        """构造可用于功能测试的完整模拟容器。"""
         metadata = FakeMetadataRepository()
         storage = LocalObjectStorage(object_root)
         queue = FakeTaskQueue()
@@ -72,6 +73,7 @@ class MockFunctionalHarness:
         return cls(now, metadata, storage, queue, model, search, ingestion, cleanup, rpc)
 
     async def run_ingestion_once(self) -> None:
+        """驱动一次 Outbox、队列和 Worker 的完整摄取循环。"""
         await finalize_once(self.metadata, self.storage, self.now, limit=100)
         await relay_once(self.metadata, self.queue, self.now, limit=100)
         await worker_once(

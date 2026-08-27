@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 以确定性伪端口复现取消请求与消息投递、完成之间的竞争。
 from datetime import UTC, datetime
 
 import pytest
@@ -31,6 +32,7 @@ async def _pending() -> tuple[
     FakeTaskQueue,
     str,
 ]:
+    """建立未消费摄取任务，供取消竞态复用。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()
@@ -61,6 +63,7 @@ async def _pending() -> tuple[
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_pending_cancel_cancels_task_and_unpublished_outbox() -> None:
+    """等待态取消撤销任务和未发布 Outbox。"""
     now, repository, _, _, job_id = await _pending()
 
     result = await repository.cancel_job(CancelJobRequest("cancel-key", job_id, now))
@@ -80,6 +83,7 @@ async def test_pending_cancel_cancels_task_and_unpublished_outbox() -> None:
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_cancel_after_publish_before_claim_makes_worker_only_ack() -> None:
+    """取消后旧 delivery 到达时 Worker 只能 ACK。"""
     now, repository, storage, queue, job_id = await _pending()
     await finalize_once(repository, storage, now, limit=10)
     await relay_once(repository, queue, now, limit=10)
@@ -100,12 +104,14 @@ async def test_cancel_after_publish_before_claim_makes_worker_only_ack() -> None
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_running_cancel_after_index_write_never_activates_version() -> None:
+    """索引写入后取消不得激活版本。"""
     now, repository, storage, queue, job_id = await _pending()
     await finalize_once(repository, storage, now, limit=10)
     await relay_once(repository, queue, now, limit=10)
     search = FakeSearchEngine()
 
     async def cancel_after_index(checkpoint: Checkpoint) -> None:
+        """在索引完成检查点触发取消。"""
         if checkpoint is Checkpoint.AFTER_INDEX_WRITE:
             await repository.cancel_job(CancelJobRequest("cancel-key", job_id, now))
 
@@ -133,6 +139,7 @@ async def test_running_cancel_after_index_write_never_activates_version() -> Non
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_dataset_delete_after_publish_before_claim_makes_worker_ack_only() -> None:
+    """数据集删除后旧 delivery 只能确认不能执行。"""
     now, repository, storage, queue, _job_id = await _pending()
     await finalize_once(repository, storage, now, limit=10)
     await relay_once(repository, queue, now, limit=10)

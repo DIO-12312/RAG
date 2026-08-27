@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证解析、规范化、切块、向量化与写索引的单 Task 流水线。
 from datetime import UTC, datetime
 
 import pytest
@@ -19,6 +20,7 @@ from tests.fakes.storage import FakeObjectStorage
 
 @pytest.mark.asyncio
 async def test_pipeline_builds_stable_versioned_chunks_and_upserts_search() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()

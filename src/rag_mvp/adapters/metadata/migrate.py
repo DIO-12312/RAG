@@ -1,4 +1,4 @@
-"""Repository-owned Alembic command line entry point."""
+"""由仓库拥有的 Alembic 命令行入口，复用生产环境的配置来源。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from alembic.config import Config
 from rag_mvp.config import Settings
 
 
+# 内部辅助：完成 alembic_config 所需的局部转换或校验。
 def _alembic_config(dsn: str, migrations_root: Path | None = None) -> Config:
     root = migrations_root or Path(__file__).resolve().parents[4]
     config = Config(root / "alembic.ini")
@@ -20,6 +21,7 @@ def _alembic_config(dsn: str, migrations_root: Path | None = None) -> Config:
     return config
 
 
+# 运行该方法负责的领域数据或基础设施状态。
 def run_migrations(
     dsn: str,
     action: str,
@@ -39,6 +41,7 @@ def run_migrations(
         raise ValueError(f"unsupported migration action: {action}")
 
 
+# 控制台入口：解析运行环境后启动对应进程。
 def main(argv: Sequence[str] | None = None) -> None:
     """Run migrations with the same Settings source used by production roles."""
 

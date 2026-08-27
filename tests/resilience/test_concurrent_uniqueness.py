@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证并发上传、重试和版本分配只生成唯一的 canonical 执行链。
 import asyncio
 from datetime import UTC, datetime
 
@@ -17,6 +18,7 @@ from tests.fakes.storage import FakeObjectStorage
 def _submit(
     key: str, now: datetime, *, target_document_id: str | None = None, chunk_size: int = 800
 ) -> SubmitDocumentCommand:
+    """构造同内容或重建场景共用的摄取提交命令。"""
     return SubmitDocumentCommand(
         "request",
         key,
@@ -34,6 +36,7 @@ def _submit(
 
 
 async def _service() -> tuple[DocumentService, FakeMetadataRepository, FakeObjectStorage, datetime]:
+    """装配带 Fake ports 的服务，用于纯内存并发语义测试。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()
@@ -47,6 +50,7 @@ async def _service() -> tuple[DocumentService, FakeMetadataRepository, FakeObjec
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_concurrent_same_file_upload_has_one_canonical_job_and_no_loser_staging() -> None:
+    """并发同文件上传只能产生一个 canonical Job，落选 staging 必须清除。"""
     service, repository, storage, now = await _service()
 
     first, second = await asyncio.gather(
@@ -64,6 +68,7 @@ async def test_concurrent_same_file_upload_has_one_canonical_job_and_no_loser_st
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_concurrent_retry_calls_create_one_active_child() -> None:
+    """并发重试在原失败 Job 锁下只能得到同一个活跃子 Job。"""
     service, repository, storage, now = await _service()
     submitted = await service.submit_document(_submit("upload", now))
     await finalize_once(repository, storage, now, limit=10)
@@ -90,6 +95,7 @@ async def test_concurrent_retry_calls_create_one_active_child() -> None:
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_concurrent_rebuilds_allocate_distinct_index_versions() -> None:
+    """并发重建应分配互异且单调的索引版本。"""
     service, repository, _, now = await _service()
     submitted = await service.submit_document(_submit("upload", now))
     document = repository.documents[submitted.document_id]

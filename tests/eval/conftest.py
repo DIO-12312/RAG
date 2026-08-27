@@ -1,4 +1,4 @@
-"""Reuse the real gRPC E2E fixtures for infrastructure-backed evaluation."""
+"""复用真实 gRPC E2E fixture，为基础设施支撑的质量评测提供环境。"""
 
 from tests.e2e.conftest import embedding_runtime, rag_stub
 

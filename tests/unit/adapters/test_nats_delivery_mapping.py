@@ -1,4 +1,4 @@
-"""Unit tests for JetStream message metadata mapping."""
+"""JetStream 消息元数据到领域 delivery 的映射单元测试。"""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ def _message(
     stream_sequence: int = 4,
     num_delivered: int = 3,
 ) -> Msg:
+    """构造本测试所需的输入、替身或运行环境。"""
     metadata = Msg.Metadata(
         sequence=Msg.Metadata.SequencePair(
             consumer=consumer_sequence,
@@ -34,6 +35,7 @@ def _message(
 
 
 def test_delivery_uses_task_id_consumer_sequence_and_redelivery_count() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     message = _message()
 
     delivery = delivery_from_message(message)
@@ -55,6 +57,7 @@ def test_delivery_uses_task_id_consumer_sequence_and_redelivery_count() -> None:
     ],
 )
 def test_delivery_rejects_invalid_payload_and_metadata(message: Msg) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(DomainError) as error:
         delivery_from_message(message)
 

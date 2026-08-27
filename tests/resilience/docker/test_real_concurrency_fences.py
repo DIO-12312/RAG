@@ -1,4 +1,4 @@
-"""Real MySQL/ES/NATS concurrency and lifecycle fence scenarios."""
+"""真实 MySQL/ES/NATS 环境中的并发与生命周期围栏场景。"""
 
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ async def test_concurrent_same_content_upload_reuses_one_canonical_job(
     barrier_control: BarrierControl,
     database_probe: DatabaseProbe,
 ) -> None:
+    """并发同内容上传应锁定同一指纹，并仅创建一个规范 Job。"""
     barrier_control.prepare(None)
     dataset_id = await create_dataset(rag_stub, embedding_runtime, "upload-race")
     results = await asyncio.gather(
@@ -78,6 +79,7 @@ async def test_concurrent_retry_calls_create_one_child_and_one_delivery(
     database_probe: DatabaseProbe,
     metadata_repository: MySQLMetadataRepository,
 ) -> None:
+    """多个 RetryJob 并发请求只能创建一个子 Job 与一次有效投递。"""
     barrier_control.prepare(Checkpoint.AFTER_INDEX_WRITE)
     dataset_id = await create_dataset(rag_stub, embedding_runtime, "retry-race")
     _, original_job_id, _ = await submit_bytes(
@@ -124,6 +126,7 @@ async def test_concurrent_rebuilds_allocate_unique_monotonic_versions(
     docker_control: DockerControl,
     database_probe: DatabaseProbe,
 ) -> None:
+    """并发重建同一文档时，索引版本必须唯一且单调递增。"""
     barrier_control.prepare(None)
     dataset_id = await create_dataset(rag_stub, embedding_runtime, "rebuild-race")
     document_id, initial_job_id, _ = await submit_bytes(
@@ -187,6 +190,7 @@ async def test_delete_during_blocked_rebuild_never_resurrects_document(
     database_probe: DatabaseProbe,
     es_client: AsyncElasticsearch,
 ) -> None:
+    """删除发生在重建检查点时，恢复后的 Worker 不得复活文档。"""
     barrier_control.prepare(None)
     dataset_id = await create_dataset(rag_stub, embedding_runtime, "delete-fence")
     document_id, initial_job_id, _ = await submit_bytes(

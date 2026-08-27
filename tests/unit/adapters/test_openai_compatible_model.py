@@ -1,4 +1,4 @@
-"""Unit tests for the OpenAI-compatible embedding adapter."""
+"""OpenAI-compatible Embedding adapter 的请求与降级单元测试。"""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ SECRET = "unit-test-secret"
 
 
 def _client(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.AsyncClient:
+    """构造本测试所需的输入、替身或运行环境。"""
     return httpx.AsyncClient(
         headers={"Authorization": f"Bearer {SECRET}"},
         transport=httpx.MockTransport(handler),
@@ -30,6 +31,7 @@ def _gateway(
     batch_size: int = 2,
     max_retries: int = 2,
 ) -> OpenAICompatibleModelGateway:
+    """构造本测试所需的输入、替身或运行环境。"""
     return OpenAICompatibleModelGateway(
         client,
         endpoint,
@@ -42,9 +44,11 @@ def _gateway(
 
 @pytest.mark.asyncio
 async def test_embed_normalizes_url_preserves_batch_order_and_bearer_header() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
         requests.append(request)
         assert SECRET.encode("utf-8") not in request.content
         inputs = request.read()
@@ -77,9 +81,11 @@ async def test_embed_normalizes_url_preserves_batch_order_and_bearer_header() ->
 
 @pytest.mark.asyncio
 async def test_embed_bisects_provider_rejected_multi_input_batches() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     request_sizes: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
         payload = json.loads(request.read())
         inputs = payload["input"]
         request_sizes.append(len(inputs))
@@ -129,7 +135,10 @@ async def test_embed_bisects_provider_rejected_multi_input_batches() -> None:
 
 @pytest.mark.asyncio
 async def test_embed_empty_input_does_not_call_provider() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
+
     def handler(_request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
         raise AssertionError("provider must not be called for empty input")
 
     client = _client(handler)
@@ -170,6 +179,7 @@ async def test_embed_rejects_invalid_schema_count_dimension_and_numbers(
     response_json: dict[str, object],
     expected_code: str,
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     client = _client(
         lambda _request: httpx.Response(
             200,
@@ -192,9 +202,11 @@ async def test_embed_rejects_invalid_schema_count_dimension_and_numbers(
 
 @pytest.mark.asyncio
 async def test_auth_failure_is_non_retryable_and_redacts_provider_body() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     attempts = 0
 
     def handler(_request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
         nonlocal attempts
         attempts += 1
         return httpx.Response(401, text=f"provider leaked {SECRET}")
@@ -215,9 +227,11 @@ async def test_auth_failure_is_non_retryable_and_redacts_provider_body() -> None
 
 @pytest.mark.asyncio
 async def test_embed_does_not_duplicate_existing_embeddings_suffix() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     requested_urls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
         requested_urls.append(str(request.url))
         return httpx.Response(
             200,
@@ -238,10 +252,12 @@ async def test_embed_does_not_duplicate_existing_embeddings_suffix() -> None:
 async def test_transient_statuses_retry_with_a_bound_and_recover(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     statuses = iter((429, 503, 200))
     attempts = 0
 
     def handler(_request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
         nonlocal attempts
         attempts += 1
         status = next(statuses)
@@ -255,6 +271,7 @@ async def test_transient_statuses_retry_with_a_bound_and_recover(
     sleeps: list[float] = []
 
     async def fake_sleep(delay: float) -> None:
+        """执行测试所需的辅助操作。"""
         sleeps.append(delay)
 
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
@@ -273,14 +290,17 @@ async def test_transient_statuses_retry_with_a_bound_and_recover(
 async def test_timeout_exhaustion_maps_to_retryable_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     attempts = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
         nonlocal attempts
         attempts += 1
         raise httpx.ReadTimeout("provider timed out", request=request)
 
     async def fake_sleep(_delay: float) -> None:
+        """执行测试所需的辅助操作。"""
         return None
 
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)

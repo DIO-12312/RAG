@@ -20,10 +20,12 @@ from rag_mvp.config import Environment, Settings
 
 class _Adapter:
     def __init__(self, name: str) -> None:
+        """初始化测试替身的内存状态。"""
         self.name = name
 
 
 def _settings(tmp_path: Path) -> Settings:
+    """构造本测试所需的输入、替身或运行环境。"""
     return Settings(
         _env_file=None,
         environment=Environment.TEST,
@@ -40,11 +42,17 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def _factories(events: list[str]) -> AdapterFactories:
+    """构造本测试所需的输入、替身或运行环境。"""
+
     def factory(name: str) -> Callable[[Settings], Awaitable[ManagedResource[Any]]]:
+        """执行测试所需的辅助操作。"""
+
         async def build(_settings: Settings) -> ManagedResource[Any]:
+            """构造可用于功能测试的完整模拟容器。"""
             events.append(f"build:{name}")
 
             async def close() -> None:
+                """执行测试所需的辅助操作。"""
                 events.append(f"close:{name}")
 
             return ManagedResource(_Adapter(name), close)
@@ -64,6 +72,7 @@ def _factories(events: list[str]) -> AdapterFactories:
 async def test_role_factories_build_only_allowed_dependencies_and_services(
     tmp_path: Path,
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     settings = _settings(tmp_path)
 
     server_events: list[str] = []
@@ -107,6 +116,7 @@ async def test_role_factories_build_only_allowed_dependencies_and_services(
 async def test_container_close_is_reverse_order_and_idempotent(
     tmp_path: Path,
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     events: list[str] = []
     container = await build_server_container(_settings(tmp_path), _factories(events))
 
@@ -131,6 +141,7 @@ async def test_container_close_is_reverse_order_and_idempotent(
 async def test_test_only_failpoint_is_wired_only_into_worker_and_outbox_roles(
     tmp_path: Path,
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     values = _settings(tmp_path).model_dump()
     values.update(
         failpoint_root=tmp_path / "barriers",

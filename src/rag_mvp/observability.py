@@ -1,4 +1,4 @@
-"""Consistent structured event fields for RAG execution boundaries."""
+"""RAG 执行边界的统一结构化事件字段，保证请求链路可关联。"""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import structlog
 _LOGGER = structlog.get_logger("rag_mvp")
 
 
+# 实现 emit_event 对应的局部职责。
 def emit_event(
     event: str,
     *,

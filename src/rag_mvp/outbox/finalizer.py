@@ -1,4 +1,4 @@
-"""Promote staging objects before making their Outbox events publishable."""
+"""先提升 staging 对象，再使其 Outbox 事件可发布，保证任务读到正式源对象。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from rag_mvp.ports.metadata import MetadataRepository
 from rag_mvp.ports.storage import ObjectStorage
 
 
+# 关键语义：只有对象提升成功并完成 MySQL 条件更新后，Relay 才能看见 READY 事件；
+# 若条件更新失败，必须删除刚提升的对象，避免删除/取消竞态遗留孤儿文件。
 async def finalize_once(
     metadata: MetadataRepository,
     storage: ObjectStorage,
@@ -50,6 +52,7 @@ async def finalize_once(
     return finalized
 
 
+# 循环仅编排批量定稿；它不消费 NATS 消息，也不执行摄取 Task。
 async def run_finalizer(
     metadata: MetadataRepository,
     storage: ObjectStorage,

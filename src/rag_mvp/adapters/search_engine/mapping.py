@@ -1,4 +1,4 @@
-"""Elasticsearch index definition and domain document codec."""
+"""Elasticsearch 索引定义与领域 Chunk 编解码，确保物理记录保留版本隔离。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from rag_mvp.domain.models import Chunk, Locator
 from rag_mvp.ports.search_engine import IndexedChunk, SearchCandidate
 
 
+# 实现 index_definition 对应的局部职责。
 def index_definition(embedding_dimension: int) -> dict[str, Any]:
     """Return the strict mapping shared by provisioning and schema validation."""
 
@@ -57,6 +58,7 @@ def index_definition(embedding_dimension: int) -> dict[str, Any]:
     }
 
 
+# 实现 source_from_indexed_chunk 对应的局部职责。
 def source_from_indexed_chunk(indexed: IndexedChunk) -> dict[str, Any]:
     """Encode one versioned chunk as an Elasticsearch `_source`."""
 
@@ -84,6 +86,7 @@ def source_from_indexed_chunk(indexed: IndexedChunk) -> dict[str, Any]:
     }
 
 
+# 实现 bulk_action 对应的局部职责。
 def bulk_action(
     index_name: str,
     indexed: IndexedChunk,
@@ -110,6 +113,7 @@ def bulk_action(
     }
 
 
+# 实现 candidate_from_hit 对应的局部职责。
 def candidate_from_hit(hit: Mapping[str, Any]) -> SearchCandidate:
     """Decode an Elasticsearch hit without altering its raw route score."""
 
@@ -152,6 +156,7 @@ def candidate_from_hit(hit: Mapping[str, Any]) -> SearchCandidate:
         ) from exc
 
 
+# 内部辅助：完成 required_mapping 所需的局部转换或校验。
 def _required_mapping(value: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     nested = value[key]
     if not isinstance(nested, Mapping):
@@ -159,6 +164,7 @@ def _required_mapping(value: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     return nested
 
 
+# 内部辅助：完成 required_text 所需的局部转换或校验。
 def _required_text(value: Mapping[str, Any], key: str) -> str:
     text = value[key]
     if not isinstance(text, str) or not text:
@@ -166,6 +172,7 @@ def _required_text(value: Mapping[str, Any], key: str) -> str:
     return text
 
 
+# 内部辅助：完成 optional_text 所需的局部转换或校验。
 def _optional_text(value: Mapping[str, Any], key: str) -> str | None:
     text = value.get(key)
     if text is None:
@@ -175,6 +182,7 @@ def _optional_text(value: Mapping[str, Any], key: str) -> str | None:
     return text
 
 
+# 内部辅助：完成 required_int 所需的局部转换或校验。
 def _required_int(value: Mapping[str, Any], key: str) -> int:
     integer = value[key]
     if not isinstance(integer, int) or isinstance(integer, bool):
@@ -182,6 +190,7 @@ def _required_int(value: Mapping[str, Any], key: str) -> int:
     return integer
 
 
+# 内部辅助：完成 optional_int 所需的局部转换或校验。
 def _optional_int(value: Mapping[str, Any], key: str) -> int | None:
     integer = value.get(key)
     if integer is None:
@@ -191,6 +200,7 @@ def _optional_int(value: Mapping[str, Any], key: str) -> int | None:
     return integer
 
 
+# 内部辅助：完成 string_mapping 所需的局部转换或校验。
 def _string_mapping(value: Any) -> dict[str, str]:
     if not isinstance(value, Mapping):
         raise TypeError("metadata must be an object")

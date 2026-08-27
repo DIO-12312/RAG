@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证 RAGFlow 兼容的 xxHash Chunk ID 与各类稳定摘要规则。
 from uuid import UUID
 
 from rag_mvp.domain.ids import (
@@ -14,6 +15,7 @@ from rag_mvp.domain.ids import (
 
 
 def test_new_id_is_uuid7_compatible() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     identifier = UUID(new_id())
 
     assert identifier.version == 7
@@ -21,6 +23,7 @@ def test_new_id_is_uuid7_compatible() -> None:
 
 
 def test_canonical_json_and_digests_are_stable() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     first = {"b": "中", "a": 1}
     second = {"a": 1, "b": "中"}
 
@@ -36,6 +39,7 @@ def test_canonical_json_and_digests_are_stable() -> None:
 
 
 def test_chunk_id_matches_ragflow_xxhash64_rule() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     assert chunk_id(content_with_weight="hel", document_id="lo") == "26c7827d889f6da3"
     assert chunk_id(content_with_weight="hello", document_id="document-a") == chunk_id(
         content_with_weight="hello", document_id="document-a"
@@ -46,4 +50,5 @@ def test_chunk_id_matches_ragflow_xxhash64_rule() -> None:
 
 
 def test_physical_es_id_preserves_document_version_and_chunk() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     assert es_record_id("doc-1", 3, "chunk-1") == "doc-1:3:chunk-1"

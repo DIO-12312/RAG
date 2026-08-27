@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证递归切块的边界、重叠、代码块完整性和定位信息。
 import json
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from rag_mvp.ports.parser import ParsedSegment
 
 @pytest.mark.asyncio
 async def test_recursive_chunker_is_stable_bounded_and_overlapping() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     chunker = RecursiveChunker(chunk_size=12, overlap=4)
     segments = (
         ParsedSegment(
@@ -34,12 +36,14 @@ async def test_recursive_chunker_is_stable_bounded_and_overlapping() -> None:
 
 
 def test_recursive_chunker_rejects_invalid_overlap() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValueError, match="overlap"):
         RecursiveChunker(chunk_size=10, overlap=10)
 
 
 @pytest.mark.asyncio
 async def test_recursive_chunker_matches_txt_golden_fixture() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     fixture_path = Path(__file__).parents[2] / "fixtures" / "golden_chunks" / "txt.json"
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     chunker = RecursiveChunker(fixture["chunk_size"], fixture["overlap"])

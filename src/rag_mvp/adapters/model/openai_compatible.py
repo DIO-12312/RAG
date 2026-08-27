@@ -1,4 +1,4 @@
-"""OpenAI-compatible embedding adapter with bounded retries and strict validation."""
+"""兼容 OpenAI 的向量模型适配器：有限重试并严格校验响应维度。"""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ INITIAL_RETRY_DELAY_SECONDS = 0.1
 class OpenAICompatibleModelGateway:
     """Call an OpenAI-compatible embedding endpoint without leaking provider details."""
 
+    # 初始化该对象的依赖、配置或受控资源。
     def __init__(
         self,
         client: httpx.AsyncClient,
@@ -47,12 +48,14 @@ class OpenAICompatibleModelGateway:
         self._batch_size = batch_size
         self._max_retries = max_retries
 
+    # 返回不暴露敏感配置的调试表示。
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(model={self._model!r}, dimension={self._dimension}, "
             f"batch_size={self._batch_size}, max_retries={self._max_retries})"
         )
 
+    # 实现 embed 对应的局部职责。
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
         """Embed inputs in bounded batches while preserving original order."""
 
@@ -61,6 +64,7 @@ class OpenAICompatibleModelGateway:
             vectors.extend(await self._embed_batch(texts[offset : offset + self._batch_size]))
         return vectors
 
+    # 实现 rerank 对应的局部职责。
     async def rerank(self, query: str, passages: list[str]) -> list[float]:
         """Report explicit degradation until a separate rerank endpoint is configured."""
 
@@ -73,11 +77,13 @@ class OpenAICompatibleModelGateway:
             )
         )
 
+    # 按资源所有权顺序关闭底层连接或句柄。
     async def close(self) -> None:
         """Close the owned HTTP client."""
 
         await self._client.aclose()
 
+    # 内部辅助：完成 embed_batch 所需的局部转换或校验。
     async def _embed_batch(self, texts: list[str]) -> list[tuple[float, ...]]:
         for attempt in range(self._max_retries + 1):
             try:
@@ -121,9 +127,11 @@ class OpenAICompatibleModelGateway:
 
         raise RuntimeError("embedding retry loop terminated unexpectedly")
 
+    # 内部辅助：完成 backoff 所需的局部转换或校验。
     async def _backoff(self, attempt: int) -> None:
         await asyncio.sleep(INITIAL_RETRY_DELAY_SECONDS * (2**attempt))
 
+    # 内部辅助：完成 parse_response 所需的局部转换或校验。
     def _parse_response(
         self,
         response: httpx.Response,
@@ -161,6 +169,7 @@ class OpenAICompatibleModelGateway:
             raise self._invalid_response()
         return [vector for vector in ordered if vector is not None]
 
+    # 内部辅助：完成 parse_vector 所需的局部转换或校验。
     def _parse_vector(self, raw_vector: Any) -> tuple[float, ...]:
         if not isinstance(raw_vector, list):
             raise self._invalid_response()
@@ -183,6 +192,7 @@ class OpenAICompatibleModelGateway:
         return tuple(vector)
 
     @staticmethod
+    # 内部辅助：完成 invalid_response 所需的局部转换或校验。
     def _invalid_response() -> DomainError:
         return DomainError(
             DomainFailure(
@@ -193,6 +203,7 @@ class OpenAICompatibleModelGateway:
         )
 
     @staticmethod
+    # 内部辅助：完成 unavailable 所需的局部转换或校验。
     def _unavailable() -> DomainError:
         return DomainError(
             DomainFailure(

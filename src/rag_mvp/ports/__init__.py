@@ -1,1 +1,1 @@
-"""Infrastructure-neutral capability ports used by the application layer."""
+"""应用层使用的基础设施无关能力端口，隔离业务编排与 SDK 细节。"""

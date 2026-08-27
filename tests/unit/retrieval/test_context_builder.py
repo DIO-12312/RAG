@@ -5,6 +5,7 @@ from rag_mvp.retrieval.context_builder import build_context_plan, estimate_token
 
 
 def _evidence(chunk_id: str, content: str) -> Evidence:
+    """构造本测试所需的输入、替身或运行环境。"""
     return Evidence(
         chunk_id=chunk_id,
         document_id="document-1",
@@ -17,6 +18,7 @@ def _evidence(chunk_id: str, content: str) -> Evidence:
 
 
 def test_context_builder_keeps_whole_evidence_within_budget() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     evidence = (_evidence("a", "12345678"), _evidence("b", "abcdefgh"))
 
     plan = build_context_plan(evidence, max_context_tokens=2)
@@ -27,6 +29,7 @@ def test_context_builder_keeps_whole_evidence_within_budget() -> None:
 
 
 def test_token_estimate_is_deterministic_and_nonzero() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     assert estimate_tokens("") == 0
     assert estimate_tokens("a") == 1
     assert estimate_tokens("12345") == 2

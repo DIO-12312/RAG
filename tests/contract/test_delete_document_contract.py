@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 校验删除文档 RPC、领域服务与异步清理的契约边界。
 from datetime import UTC, datetime
 
 import pytest
@@ -21,6 +22,7 @@ from tests.fakes.storage import FakeObjectStorage
 
 @pytest.mark.asyncio
 async def test_delete_atomically_hides_document_cancels_ingest_and_creates_cleanup() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     documents = DocumentService(repository, FakeObjectStorage(), max_upload_bytes=1024)
@@ -71,6 +73,7 @@ async def test_delete_atomically_hides_document_cancels_ingest_and_creates_clean
 
 @pytest.mark.asyncio
 async def test_new_delete_request_for_deleted_document_is_rejected() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     documents = DocumentService(repository, FakeObjectStorage(), max_upload_bytes=1024)

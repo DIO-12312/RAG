@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 校验 Makefile 与 Earthfile 公开入口、密钥隔离及卷保护约束。
 import re
 from pathlib import Path
 
@@ -7,14 +8,17 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def _text(path: str) -> str:
+    """构造本测试所需的输入、替身或运行环境。"""
     return (ROOT / path).read_text(encoding="utf-8")
 
 
 def _make_targets(makefile: str) -> set[str]:
+    """构造本测试所需的输入、替身或运行环境。"""
     return set(re.findall(r"^([a-z][a-z0-9-]*):(?:\s|$)", makefile, re.MULTILINE))
 
 
 def test_makefile_offline_targets_are_commented_earthly_only_entrypoints() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     makefile = _text("Makefile")
     expected = {"proto", "lint", "test", "ci", "help"}
 
@@ -44,6 +48,7 @@ def test_makefile_offline_targets_are_commented_earthly_only_entrypoints() -> No
 
 
 def test_earthfile_pins_tools_and_separates_offline_targets() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     earthfile = _text("Earthfile")
 
     assert earthfile.startswith("VERSION --no-implicit-ignore --use-function-keyword 0.8\n")
@@ -84,6 +89,7 @@ def test_earthfile_pins_tools_and_separates_offline_targets() -> None:
 
 
 def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     makefile = _text("Makefile")
     earthfile = _text("Earthfile")
     compose = _text("docker-compose.yml")

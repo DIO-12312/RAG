@@ -1,4 +1,4 @@
-"""Real-model and real-Elasticsearch retrieval quality gate through gRPC."""
+"""通过 gRPC 验证真实模型与 Elasticsearch 的检索质量门禁。"""
 
 from __future__ import annotations
 
@@ -142,6 +142,7 @@ QUESTIONS = (
 
 
 def _result(response: object) -> object:
+    """解包 gRPC 成功结果，业务失败立即中止评测。"""
     outcome = response.WhichOneof("outcome")  # type: ignore[attr-defined]
     if outcome == "result":
         return response.result  # type: ignore[attr-defined]
@@ -154,7 +155,10 @@ async def _submit_text(
     dataset_id: str,
     document: CorpusDocument,
 ) -> tuple[str, str]:
+    """以客户端流方式提交文本夹具。"""
+
     async def frames() -> AsyncIterator[rag_service_pb2.UploadDocumentRequest]:
+        """按 protobuf 客户端流协议发送文本上传头和数据。"""
         yield rag_service_pb2.UploadDocumentRequest(
             header=rag_service_pb2.UploadHeader(
                 context=rag_service_pb2.RequestContext(
@@ -179,6 +183,7 @@ async def test_real_thirty_question_quality_baseline(
     rag_stub: object,
     embedding_runtime: EmbeddingRuntime,
 ) -> None:
+    """执行真实服务上的固定三十题检索质量基线。"""
     assert len(QUESTIONS) == 30
     dataset_id = await create_dataset(rag_stub, embedding_runtime, "real-quality-30")
     try:

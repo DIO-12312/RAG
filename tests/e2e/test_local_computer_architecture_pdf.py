@@ -1,4 +1,4 @@
-"""Local real-user E2E for the computer architecture review PDF."""
+"""使用本地《计组复习》PDF 模拟真实用户全链路摄取与检索。"""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ DEFAULT_LOCAL_PDF = Path(__file__).resolve().parents[1] / "object" / "计组复�
 
 @pytest.fixture
 def local_computer_architecture_pdf() -> Path:
+    """定位用户本机的可选《计组复习》PDF fixture。"""
     """Resolve the untracked local PDF without making it a CI requirement."""
     configured_path = os.getenv(LOCAL_PDF_ENV, "").strip()
     source = Path(configured_path).expanduser() if configured_path else DEFAULT_LOCAL_PDF
@@ -35,6 +36,7 @@ def local_computer_architecture_pdf() -> Path:
 
 
 def _document_evidence(result: Any, document_id: str) -> list[Any]:
+    """仅保留指定文档的 evidence，隔离共享集群中的其他数据。"""
     return [item for item in result.evidence if item.document_id == document_id]
 
 
@@ -45,6 +47,7 @@ async def test_local_user_uploads_review_pdf_and_retrieves_distant_topics(
     rag_stub: object,
     embedding_runtime: EmbeddingRuntime,
 ) -> None:
+    """模拟用户上传真实复习 PDF，并检索跨页的两个主题。"""
     dataset_id = await create_dataset(
         rag_stub,
         embedding_runtime,

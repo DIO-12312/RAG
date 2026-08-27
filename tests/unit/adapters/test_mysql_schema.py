@@ -1,4 +1,4 @@
-"""Static contract for the MySQL metadata schema."""
+"""MySQL 元数据 schema 的静态结构契约测试。"""
 
 from __future__ import annotations
 
@@ -24,10 +24,12 @@ EXPECTED_TABLES = {
 
 
 def _column_names(constraint: UniqueConstraint | ForeignKeyConstraint) -> tuple[str, ...]:
+    """构造本测试所需的输入、替身或运行环境。"""
     return tuple(column.name for column in constraint.columns)
 
 
 def _unique_columns(table_name: str) -> set[tuple[str, ...]]:
+    """构造本测试所需的输入、替身或运行环境。"""
     table = Base.metadata.tables[table_name]
     return {
         _column_names(constraint)
@@ -37,6 +39,7 @@ def _unique_columns(table_name: str) -> set[tuple[str, ...]]:
 
 
 def _foreign_key_targets(table_name: str) -> set[tuple[str, str]]:
+    """构造本测试所需的输入、替身或运行环境。"""
     table = Base.metadata.tables[table_name]
     return {
         (foreign_key.parent.name, foreign_key.target_fullname) for foreign_key in table.foreign_keys
@@ -44,12 +47,14 @@ def _foreign_key_targets(table_name: str) -> set[tuple[str, str]]:
 
 
 def _all_columns() -> Iterable[tuple[str, object]]:
+    """构造本测试所需的输入、替身或运行环境。"""
     for table in Base.metadata.tables.values():
         for column in table.columns:
             yield column.name, column.type
 
 
 def test_core_schema_declares_all_authoritative_tables_and_innodb() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     assert set(Base.metadata.tables) >= EXPECTED_TABLES
     assert all(
         Base.metadata.tables[name].dialect_options["mysql"]["engine"] == "InnoDB"
@@ -58,6 +63,7 @@ def test_core_schema_declares_all_authoritative_tables_and_innodb() -> None:
 
 
 def test_schema_declares_business_uniqueness_constraints() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     assert _unique_columns("ingestion_fingerprints") == {
         ("dataset_id", "file_sha256", "config_digest")
     }
@@ -68,6 +74,7 @@ def test_schema_declares_business_uniqueness_constraints() -> None:
 
 
 def test_schema_declares_aggregate_foreign_keys() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     assert ("tenant_id", "tenants.id") in _foreign_key_targets("datasets")
     assert ("dataset_id", "datasets.id") in _foreign_key_targets("documents")
     assert ("document_id", "documents.id") in _foreign_key_targets("jobs")
@@ -78,6 +85,7 @@ def test_schema_declares_aggregate_foreign_keys() -> None:
 
 
 def test_dataset_deletion_schema_tracks_lifecycle_and_dataset_ownership() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     datasets = Base.metadata.tables["datasets"].c
     jobs = Base.metadata.tables["jobs"].c
     idempotency = Base.metadata.tables["idempotency_records"].c
@@ -89,6 +97,7 @@ def test_dataset_deletion_schema_tracks_lifecycle_and_dataset_ownership() -> Non
 
 
 def test_schema_uses_precise_json_time_and_digest_columns_without_vectors() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     for table_name, column_name in (
         ("jobs", "error"),
         ("tasks", "error"),

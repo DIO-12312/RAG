@@ -1,4 +1,4 @@
-"""Process settings with no import-time I/O or connection side effects."""
+"""进程配置：导入时不产生 I/O 或连接副作用，便于各运行角色显式装配。"""
 
 from __future__ import annotations
 
@@ -105,11 +105,13 @@ class Settings(BaseSettings):
     log_json: bool = True
 
     @property
+    # 实现 grpc_address 对应的局部职责。
     def grpc_address(self) -> str:
         """Return the host:port address accepted by gRPC."""
 
         return f"{self.grpc_host}:{self.grpc_port}"
 
+    # 实现 require_embedding_profile 对应的局部职责。
     def require_embedding_profile(self) -> EmbeddingProfile:
         """Return complete model settings or reject missing/partial role configuration."""
 
@@ -141,6 +143,7 @@ class Settings(BaseSettings):
         )
 
     @property
+    # 实现 failpoint_checkpoint_names 对应的局部职责。
     def failpoint_checkpoint_names(self) -> frozenset[str]:
         """Return the explicitly configured test-only checkpoint names."""
 
@@ -149,6 +152,7 @@ class Settings(BaseSettings):
         )
 
     @model_validator(mode="after")
+    # 校验该方法负责的领域数据或基础设施状态。
     def validate_production_safety(self) -> Self:
         """Reject development-only settings in production."""
 
@@ -179,6 +183,7 @@ class Settings(BaseSettings):
         return self
 
 
+# 加载该方法负责的领域数据或基础设施状态。
 def load_settings() -> Settings:
     """Load settings at an explicit process boundary."""
 

@@ -1,4 +1,4 @@
-"""Real 50-question quality gate for the local computer-architecture PDF."""
+"""针对本地《计组复习》PDF 的真实 50 问检索质量门禁。"""
 
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ FIXTURE_VARIANT_PATHS = {
 
 
 def _fixture_path_for_variant(variant: str) -> Path:
+    """根据原始或改写查询变体返回固定评测题集路径。"""
     try:
         return FIXTURE_VARIANT_PATHS[variant]
     except KeyError as exc:
@@ -68,15 +69,18 @@ ANSWER_COVERAGE_THRESHOLD = 0.70
 
 class _GetJobStub:
     def __init__(self, responses: list[Any]) -> None:
+        """保存按顺序返回的伪 Job 查询响应。"""
         self.responses = responses
 
     async def GetJob(self, request: Any, **kwargs: Any) -> Any:
+        """模拟 gRPC GetJob，逐个弹出预置响应。"""
         del request, kwargs
         return self.responses.pop(0)
 
 
 @pytest.mark.asyncio
 async def test_wait_for_dataset_purged_accepts_job_not_found() -> None:
+    """数据集聚合已物理删除后，Job 不存在应视为清理成功。"""
     stub = _GetJobStub(
         [
             rag_service_pb2.GetJobResponse(
@@ -96,6 +100,7 @@ async def test_wait_for_dataset_purged_accepts_job_not_found() -> None:
 )
 @pytest.mark.asyncio
 async def test_wait_for_dataset_purged_rejects_terminal_failure(status: Any) -> None:
+    """删除 Job 以失败或取消终结时，等待函数必须明确报错。"""
     stub = _GetJobStub(
         [
             rag_service_pb2.GetJobResponse(
@@ -110,6 +115,7 @@ async def test_wait_for_dataset_purged_rejects_terminal_failure(status: Any) -> 
 
 @pytest.mark.asyncio
 async def test_wait_for_dataset_purged_timeout_names_deletion_job() -> None:
+    """清理超时时错误信息必须包含待删除 Job ID。"""
     with pytest.raises(AssertionError, match="delete-job"):
         await wait_for_dataset_purged(_GetJobStub([]), "delete-job", deadline_seconds=0)
 
@@ -144,6 +150,7 @@ class QualityMetrics:
 
 
 def _optional_score(scores: Any, name: str) -> float | None:
+    """安全提取 protobuf optional 分数字段，未设置则返回 None。"""
     return getattr(scores, name) if scores.HasField(name) else None
 
 
@@ -153,6 +160,7 @@ def _case_log_record(
     result: Any,
     outcome: CaseOutcome,
 ) -> dict[str, Any]:
+    """把单题召回、向量和质量结果规范化为可追溯日志记录。"""
     evidence = tuple(result.evidence[:6])
 
     return {
@@ -198,6 +206,7 @@ def _write_run_log(
     *,
     pdf_path: Path,
 ) -> Path:
+    """将一次真实评测的逐题证据与聚合指标写入 JSON 日志。"""
     started_at = datetime.now(UTC)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / (
@@ -232,6 +241,7 @@ def _write_run_log(
 
 
 def test_case_log_record_preserves_embedding_and_top_k_details() -> None:
+    """评测日志必须保留向量、候选排名与各阶段分数。"""
     case = KnowledgeCase(
         "arch-001", "第一章 计算机系统概论", "query", (1,), "answer", ("answer", "term")
     )
@@ -271,6 +281,7 @@ def test_case_log_record_preserves_embedding_and_top_k_details() -> None:
 
 
 def test_case_log_record_truncates_embedding_to_first_20_dimensions() -> None:
+    """日志仅保留前 20 维 Embedding，避免诊断文件过大。"""
     case = KnowledgeCase(
         "arch-001", "第一章 计算机系统概论", "query", (1,), "answer", ("answer", "term")
     )
@@ -287,6 +298,7 @@ def test_case_log_record_truncates_embedding_to_first_20_dimensions() -> None:
 def test_write_run_log_persists_json_with_completion_time(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """评测日志写入后应包含完成时间和指定输出目录。"""
     monkeypatch.setattr(__import__(__name__), "LOG_DIR", tmp_path)
     case = KnowledgeCase("arch-001", "第一章 计算机系统概论", "query", (1,), "answer", ("answer",))
     outcome = CaseOutcome("arch-001", True, 1.0, True, True, (1,), ())
@@ -308,6 +320,7 @@ def test_write_run_log_persists_json_with_completion_time(
 
 
 def test_original_and_rephrased_fixtures_only_change_query() -> None:
+    """原始与改写题集只能改变查询文本，标准答案与标签必须一致。"""
     original = json.loads(_fixture_path_for_variant("original").read_text(encoding="utf-8"))
     rephrased = json.loads(_fixture_path_for_variant("rephrased").read_text(encoding="utf-8"))
 
@@ -319,10 +332,12 @@ def test_original_and_rephrased_fixtures_only_change_query() -> None:
 
 
 def _compact_text(value: str) -> str:
+    """移除空白后再做短语覆盖判断，避免排版差异造成误判。"""
     return "".join(value.split())
 
 
 def _load_cases(path: Path) -> tuple[KnowledgeCase, ...]:
+    """读取并严格校验 50 道计组 PDF 质量评测题。"""
     payloads = json.loads(path.read_text(encoding="utf-8"))
     assert isinstance(payloads, list)
     assert len(payloads) == 50
@@ -365,6 +380,7 @@ def _load_cases(path: Path) -> tuple[KnowledgeCase, ...]:
 
 @pytest.fixture
 def computer_architecture_pdf() -> Path:
+    """定位可选的本地真实 PDF；缺失时跳过而非伪造评测。"""
     configured_path = os.getenv(LOCAL_PDF_ENV, "").strip()
     source = Path(configured_path).expanduser() if configured_path else DEFAULT_LOCAL_PDF
     if not source.is_file():
@@ -376,6 +392,7 @@ def computer_architecture_pdf() -> Path:
 
 
 def _evaluate_case(case: KnowledgeCase, result: Any, document_id: str) -> CaseOutcome:
+    """从指定文档的 Top-6 evidence 计算单题召回、MRR 与覆盖率。"""
     evidence = tuple(item for item in result.evidence[:6] if str(item.document_id) == document_id)
     retrieved_pages = tuple(item.locator.page_number for item in evidence)
     relevant_pages = set(case.pages)
@@ -403,6 +420,7 @@ def _evaluate_case(case: KnowledgeCase, result: Any, document_id: str) -> CaseOu
 
 
 def _aggregate(outcomes: tuple[CaseOutcome, ...]) -> QualityMetrics:
+    """汇总 50 道题的 Recall@6、MRR、首页命中和答案覆盖指标。"""
     count = len(outcomes)
     assert count == 50
     return QualityMetrics(
@@ -421,6 +439,7 @@ async def test_real_computer_architecture_pdf_quality(
     rag_stub: object,
     embedding_runtime: EmbeddingRuntime,
 ) -> None:
+    """在 Docker 真实链路上执行 50 题 PDF 检索质量门禁并记录诊断。"""
     cases = _load_cases(FIXTURE_PATH)
     dataset_id = await create_dataset(
         rag_stub,
@@ -454,6 +473,7 @@ async def test_real_computer_architecture_pdf_quality(
                 int(os.getenv("RAG_EMBEDDING_BATCH_SIZE", "32")),
                 int(os.getenv("RAG_EMBEDDING_MAX_RETRIES", "3")),
             )
+            # 每题同时捕获查询向量和 gRPC 召回结果，便于失败后复盘。
             for case in cases:
                 embeddings[case.id] = (await gateway.embed([case.query]))[0]
                 result = await retrieve(rag_stub, dataset_id, case.query)

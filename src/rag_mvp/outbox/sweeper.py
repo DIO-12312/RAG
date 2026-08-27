@@ -1,4 +1,4 @@
-"""TTL cleanup for unreferenced staging objects."""
+"""未被 MySQL 引用的 staging 对象 TTL 清理器，避免中断上传长期占用空间。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from rag_mvp.ports.metadata import MetadataRepository
 from rag_mvp.ports.storage import ObjectStorage
 
 
+# 清理该方法负责的领域数据或基础设施状态。
 async def sweep_staging_once(
     metadata: MetadataRepository,
     storage: ObjectStorage,
@@ -26,6 +27,7 @@ async def sweep_staging_once(
     return deleted
 
 
+# 运行该方法负责的领域数据或基础设施状态。
 async def run_staging_sweeper(
     metadata: MetadataRepository,
     storage: ObjectStorage,

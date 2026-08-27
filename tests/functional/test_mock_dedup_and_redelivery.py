@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证上传去重与消息重复投递在 Mock 环境下保持幂等。
 from datetime import UTC, datetime
 
 import pytest
@@ -15,6 +16,7 @@ from tests.functional.test_mock_upload_ingest_retrieve import _stub, _upload
 @pytest.mark.asyncio
 @pytest.mark.functional
 async def test_mock_dedup_and_relay_duplicate_delivery_converge(tmp_path) -> None:
+    """重复上传和 Relay 至少一次投递最终必须收敛为一份结果。"""
     now = datetime.now(UTC)
     harness = MockFunctionalHarness.build(tmp_path / "objects", now)
     content = b"one canonical retrieval document"
@@ -49,6 +51,7 @@ async def test_mock_dedup_and_relay_duplicate_delivery_converge(tmp_path) -> Non
         assert await finalize_once(harness.metadata, harness.storage, now, limit=10) == 1
 
         async def crash_after_publish() -> None:
+            """在发布后注入崩溃，覆盖 Relay 重启窗口。"""
             raise RuntimeError("relay crashed after publish")
 
         with pytest.raises(RuntimeError, match="relay crashed"):

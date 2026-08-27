@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证 Relay 崩溃窗口和 JetStream redelivery 下 Task 仅产生一次业务效果。
 from datetime import UTC, datetime
 
 import pytest
@@ -31,6 +32,7 @@ async def _harness() -> tuple[
     str,
     FakeObjectStorage,
 ]:
+    """创建包含可控 failpoint 的摄取 Worker 真实行为模拟环境。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()
@@ -65,10 +67,12 @@ async def _harness() -> tuple[
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_crash_after_index_write_redelivers_and_upserts_idempotently() -> None:
+    """索引写入后崩溃必须由 redelivery 安全重试且不重复写 Chunk。"""
     now, repository, queue, model, search, job_id, storage = await _harness()
     should_crash = True
 
     async def failpoint(checkpoint: Checkpoint) -> None:
+        """在索引写入完成的检查点注入一次进程崩溃。"""
         nonlocal should_crash
         if checkpoint is Checkpoint.AFTER_INDEX_WRITE and should_crash:
             should_crash = False
@@ -101,6 +105,7 @@ async def test_crash_after_index_write_redelivers_and_upserts_idempotently() -> 
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_crash_after_success_before_ack_redelivery_only_acks() -> None:
+    """完成落库但 ACK 前崩溃时，重投只 ACK，绝不能重跑 pipeline。"""
     now, repository, queue, model, search, job_id, storage = await _harness()
     ingestion = IngestionService(
         repository,
@@ -115,6 +120,7 @@ async def test_crash_after_success_before_ack_redelivery_only_acks() -> None:
     crashed = False
 
     async def after_complete() -> None:
+        """模拟任务完成记录写入后、消息确认前的进程中断。"""
         nonlocal crashed
         crashed = True
         raise InjectedWorkerCrash(Checkpoint.AFTER_COMPLETE_BEFORE_ACK)

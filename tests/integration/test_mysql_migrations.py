@@ -1,4 +1,4 @@
-"""Real MySQL migration verification."""
+"""验证真实 MySQL schema migration 的升级结果与幂等性。"""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ class SchemaSnapshot:
 def _inspect_constraints(
     connection: Connection,
 ) -> tuple[set[str], dict[str, set[tuple[str, ...]]]]:
+    """读取数据库约束，供迁移结构断言使用。"""
     inspector = inspect(connection)
     tables = set(inspector.get_table_names())
     unique_constraints = {
@@ -40,6 +41,7 @@ def _inspect_constraints(
 
 
 def _inspect_lifecycle_columns(connection: Connection) -> dict[str, dict[str, bool]]:
+    """读取生命周期相关列的空值与默认值信息。"""
     inspector = inspect(connection)
     return {
         table_name: {
@@ -51,6 +53,7 @@ def _inspect_lifecycle_columns(connection: Connection) -> dict[str, dict[str, bo
 
 
 async def _schema_snapshot(dsn: str) -> SchemaSnapshot:
+    """采集升级后 MySQL schema 的关键快照。"""
     engine = create_mysql_engine(dsn)
     try:
         async with engine.connect() as connection:
@@ -81,6 +84,7 @@ def test_upgrade_head_is_idempotent_and_creates_innodb_schema(
     mysql_dsn: str,
     migrations_root: Path,
 ) -> None:
+    """重复升级 head 必须幂等并保持 InnoDB 结构。"""
     run_migrations(mysql_dsn, "upgrade", "head", migrations_root)
     run_migrations(mysql_dsn, "upgrade", "head", migrations_root)
 

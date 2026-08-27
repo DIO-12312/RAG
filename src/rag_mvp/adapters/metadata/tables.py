@@ -1,4 +1,4 @@
-"""SQLAlchemy mappings for authoritative MySQL metadata."""
+"""权威 MySQL 元数据的 SQLAlchemy 表映射与数据库约束定义。"""
 
 from __future__ import annotations
 

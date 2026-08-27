@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证 Relay 以至少一次语义发布 READY Outbox，并处理崩溃窗口。
 from datetime import UTC, datetime
 
 import pytest
@@ -14,6 +15,7 @@ from tests.fakes.task_queue import FakeTaskQueue
 
 
 async def _ready_work() -> tuple[FakeMetadataRepository, FakeTaskQueue]:
+    """构造本测试所需的输入、替身或运行环境。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()
@@ -44,6 +46,7 @@ async def _ready_work() -> tuple[FakeMetadataRepository, FakeTaskQueue]:
 
 @pytest.mark.asyncio
 async def test_relay_only_publishes_ready_outbox() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     repository = FakeMetadataRepository()
     queue = FakeTaskQueue()
 
@@ -53,10 +56,12 @@ async def test_relay_only_publishes_ready_outbox() -> None:
 
 @pytest.mark.asyncio
 async def test_publish_then_crash_before_mark_is_safely_retried() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     repository, queue = await _ready_work()
     crashed = False
 
     async def crash_after_publish() -> None:
+        """执行测试所需的辅助操作。"""
         nonlocal crashed
         crashed = True
         raise RuntimeError("process crashed after publish")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证多格式解析器将不同文件统一为带定位信息的标准分段。
 from io import BytesIO
 
 import pytest
@@ -14,6 +15,7 @@ from rag_mvp.domain.errors import DomainError
 
 @pytest.mark.asyncio
 async def test_markdown_parser_preserves_heading_sections_and_lines() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     segments = await MarkdownParser().parse("guide.md", b"# Intro\nAlpha\n\n## Details\nBeta")
 
     assert [segment.text for segment in segments] == ["# Intro\nAlpha", "## Details\nBeta"]
@@ -26,6 +28,7 @@ async def test_markdown_parser_preserves_heading_sections_and_lines() -> None:
 
 @pytest.mark.asyncio
 async def test_code_parser_preserves_language_symbols_and_lines() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     source = (
         b"class Greeter:\n    def hello(self):\n        return 'hi'\n\ndef helper():\n    return 1"
     )
@@ -42,6 +45,7 @@ async def test_code_parser_preserves_language_symbols_and_lines() -> None:
 
 
 def _text_pdf() -> bytes:
+    """构造本测试所需的输入、替身或运行环境。"""
     buffer = BytesIO()
     canvas = Canvas(buffer)
     canvas.drawString(72, 720, "First page evidence")
@@ -53,6 +57,7 @@ def _text_pdf() -> bytes:
 
 @pytest.mark.asyncio
 async def test_pdf_parser_returns_one_traceable_segment_per_text_page() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     segments = await PdfParser().parse("guide.pdf", _text_pdf())
 
     assert [segment.locator.page_number for segment in segments] == [1, 2]
@@ -72,6 +77,7 @@ async def test_pdf_parser_returns_one_traceable_segment_per_text_page() -> None:
     ],
 )
 async def test_router_selects_supported_parser(source_name: str, source_type: str) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     content = _text_pdf() if source_name.casefold().endswith(".pdf") else b"plain content"
 
     segments = await SourceParserRouter().parse(source_name, content)
@@ -82,6 +88,7 @@ async def test_router_selects_supported_parser(source_name: str, source_type: st
 
 @pytest.mark.asyncio
 async def test_router_rejects_unsupported_source_type() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(DomainError) as error:
         await SourceParserRouter().parse("archive.docx", b"unsupported")
 
@@ -90,6 +97,7 @@ async def test_router_rejects_unsupported_source_type() -> None:
 
 @pytest.mark.asyncio
 async def test_pdf_parser_rejects_corrupt_bytes() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(DomainError) as error:
         await PdfParser().parse("bad.pdf", b"not a pdf")
 

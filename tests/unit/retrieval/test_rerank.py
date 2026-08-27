@@ -9,6 +9,7 @@ from rag_mvp.retrieval.rerank import apply_rerank_scores
 
 
 def _candidate(record_id: str, fusion_score: float) -> HybridCandidate:
+    """构造本测试所需的输入、替身或运行环境。"""
     content = f"content {record_id}"
     return HybridCandidate(
         record_id=record_id,
@@ -30,6 +31,7 @@ def _candidate(record_id: str, fusion_score: float) -> HybridCandidate:
 
 
 def test_rerank_scores_reorder_stably_and_keep_fusion_data() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     candidates = (_candidate("a", 0.04), _candidate("b", 0.03), _candidate("c", 0.02))
 
     result = apply_rerank_scores(candidates, (0.1, 0.9, 0.9), top_n=2)
@@ -41,10 +43,12 @@ def test_rerank_scores_reorder_stably_and_keep_fusion_data() -> None:
 
 
 def test_rerank_rejects_score_count_mismatch() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValueError, match="count"):
         apply_rerank_scores((_candidate("a", 0.1),), (), top_n=1)
 
 
 def test_rerank_rejects_invalid_top_n() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValueError, match="top_n"):
         apply_rerank_scores((), (), top_n=0)

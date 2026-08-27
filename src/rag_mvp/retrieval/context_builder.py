@@ -1,4 +1,4 @@
-"""Pure evidence budget selection for transport-independent context plans."""
+"""纯 evidence 预算选择：生成与传输协议无关的上下文计划，不截断单个证据。"""
 
 from __future__ import annotations
 
@@ -15,12 +15,14 @@ class ContextPlan:
     omitted_chunk_ids: tuple[str, ...]
 
 
+# 实现 estimate_tokens 对应的局部职责。
 def estimate_tokens(text: str) -> int:
     """Use a stable character heuristic without importing a model tokenizer SDK."""
 
     return (len(text) + 3) // 4
 
 
+# 构建该方法负责的领域数据或基础设施状态。
 def build_context_plan(evidence: Sequence[Evidence], *, max_context_tokens: int) -> ContextPlan:
     if max_context_tokens < 1:
         raise ValueError("max_context_tokens must be at least 1")

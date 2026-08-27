@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证文本、Markdown、代码和 PDF 四类输入共享摄取约定。
 from datetime import UTC, datetime
 from io import BytesIO
 
@@ -15,6 +16,7 @@ from tests.functional.test_mock_upload_ingest_retrieve import _stub, _upload
 
 
 def _pdf_bytes() -> bytes:
+    """构造最小可解析 PDF 字节，避免依赖外部二进制 fixture。"""
     buffer = BytesIO()
     canvas = Canvas(buffer)
     canvas.drawString(72, 720, "pdfanchor evidence")
@@ -25,6 +27,7 @@ def _pdf_bytes() -> bytes:
 @pytest.mark.asyncio
 @pytest.mark.functional
 async def test_four_supported_formats_return_precise_provenance(tmp_path) -> None:
+    """验证文本、Markdown、代码与 PDF 均能产生精确来源信息。"""
     now = datetime.now(UTC)
     harness = MockFunctionalHarness.build(tmp_path / "objects", now)
     sources = (

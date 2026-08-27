@@ -1,4 +1,4 @@
-"""Application use case for one idempotent document cleanup task."""
+"""单个清理 Task 的幂等应用用例：异步移除已逻辑删除资源的物理副本。"""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from rag_mvp.ports.storage import ObjectStorage
 
 
 class CleanupService:
+    # 初始化该对象的依赖、配置或受控资源。
     def __init__(
         self,
         metadata: MetadataRepository,
@@ -23,6 +24,7 @@ class CleanupService:
         self._search = search
         self._storage = storage
 
+    # 清理在逻辑删除之后异步执行；重复执行必须安全，以承受消息至少一次投递。
     async def execute(
         self, task_id: str, delivery_sequence: int, now: datetime
     ) -> IngestionExecution:

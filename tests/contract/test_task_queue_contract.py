@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 校验任务队列只传 task_id，并保留至少一次投递语义。
 import pytest
 
 from rag_mvp.domain.errors import DomainFailure
@@ -8,6 +9,7 @@ from tests.fakes.task_queue import FakeTaskQueue
 
 @pytest.mark.asyncio
 async def test_queue_preserves_at_least_once_delivery_and_explicit_ack_nak() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     queue = FakeTaskQueue()
     await queue.publish("task-1")
 
@@ -40,6 +42,7 @@ async def test_queue_preserves_at_least_once_delivery_and_explicit_ack_nak() -> 
 
 @pytest.mark.asyncio
 async def test_unacked_delivery_can_be_redelivered() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     queue = FakeTaskQueue()
     await queue.publish("task-1")
     first = await queue.consume("worker-a", timeout_seconds=0)

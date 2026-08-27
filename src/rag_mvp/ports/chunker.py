@@ -1,4 +1,4 @@
-"""Document chunker capability boundary."""
+"""文档切块能力边界：输入可追溯片段，输出具有稳定顺序的 Chunk 草稿。"""
 
 from __future__ import annotations
 
@@ -21,4 +21,5 @@ class ChunkDraft:
 class Chunker(Protocol):
     """Split normalized content into stable evidence chunks."""
 
+    # 实现 split 对应的局部职责。
     async def split(self, segments: Sequence[ParsedSegment]) -> Sequence[ChunkDraft]: ...

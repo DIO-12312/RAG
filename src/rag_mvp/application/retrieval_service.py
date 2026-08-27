@@ -1,4 +1,4 @@
-"""Dense retrieval orchestration with authoritative metadata visibility checks."""
+"""检索编排：先从 ES 召回，再按权威元数据复核可见版本与删除状态。"""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from rag_mvp.retrieval.rerank import apply_rerank_scores
 
 
 class RetrievalService:
+    # 初始化该对象的依赖、配置或受控资源。
     def __init__(
         self,
         metadata: MetadataRepository,
@@ -31,6 +32,7 @@ class RetrievalService:
         self._search = search
         self._model = model
 
+    # ES 候选并非最终可见结果；必须以 MySQL 的 active_version/删除状态二次过滤。
     async def retrieve(self, query: RetrieveQuery) -> ContextPlan:
         started_at = perf_counter()
         if not query.query.strip():
@@ -97,6 +99,7 @@ class RetrievalService:
         )
         return result
 
+    # 内部辅助：完成 evidence 所需的局部转换或校验。
     async def _evidence(
         self, query: RetrieveQuery, fused: Sequence[HybridCandidate]
     ) -> tuple[Evidence, ...]:
@@ -129,6 +132,7 @@ class RetrievalService:
         return tuple(reranked_evidence(candidate) for candidate in ranked)
 
     @staticmethod
+    # 内部辅助：完成 visible 所需的局部转换或校验。
     def _visible(
         candidates: Sequence[SearchCandidate],
         dataset_id: str,

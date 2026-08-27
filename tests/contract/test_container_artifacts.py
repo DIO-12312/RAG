@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 校验容器构建产物包含运行所需代码且不泄露开发期文件。
 import json
 import os
 import subprocess
@@ -19,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_package_and_container_use_canonical_root_readme() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     readme = ROOT / "README.md"
     legacy_readme = ROOT / "docs" / "README.md"
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
@@ -37,6 +39,7 @@ def test_package_and_container_use_canonical_root_readme() -> None:
 
 
 def _service_block(compose: str, service: str) -> str:
+    """构造本测试所需的输入、替身或运行环境。"""
     marker = f"  {service}:\n"
     start = compose.index(marker)
     lines = compose[start:].splitlines()
@@ -51,6 +54,7 @@ def _service_block(compose: str, service: str) -> str:
 
 
 def test_runtime_image_and_context_exclude_secrets_and_test_artifacts() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     ignored = {
         line.strip()
@@ -68,6 +72,7 @@ def test_runtime_image_and_context_exclude_secrets_and_test_artifacts() -> None:
 
 
 def test_compose_declares_migration_health_role_secrets_and_shared_storage() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     blocks = {
         service: _service_block(compose, service)
@@ -103,6 +108,7 @@ def test_compose_declares_migration_health_role_secrets_and_shared_storage() -> 
 
 
 def test_secret_scanner_fails_without_echoing_the_secret() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     secret = "contract-secret-sentinel"
     environment = os.environ.copy()
     environment["EMBEDDING_MODEL_API_KEY"] = secret
@@ -123,6 +129,7 @@ def test_secret_scanner_fails_without_echoing_the_secret() -> None:
 
 
 def test_healthcheck_parses_ndjson_and_requires_every_process_to_be_healthy() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     records = {
         service: {"Service": service, "State": "running", "Health": "healthy", "ExitCode": 0}
         for service in RUNNING_SERVICES
@@ -143,9 +150,11 @@ def test_healthcheck_parses_ndjson_and_requires_every_process_to_be_healthy() ->
 
 
 def test_healthcheck_decodes_docker_output_as_utf8(monkeypatch: pytest.MonkeyPatch) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     captured: dict[str, object] = {}
 
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """执行测试所需的辅助操作。"""
         del args
         captured.update(kwargs)
         return subprocess.CompletedProcess([], 0, stdout="", stderr="")

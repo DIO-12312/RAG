@@ -1,1 +1,1 @@
-"""Pure retrieval, ranking, context, and provenance algorithms."""
+"""纯检索算法包：融合、重排、上下文预算与溯源均不依赖 SDK 或 RPC。"""

@@ -1,4 +1,4 @@
-"""Test-only, cross-process file barriers for deterministic crash windows."""
+"""仅测试使用的跨进程文件屏障，用于构造确定性的崩溃时间窗口。"""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 class FileBarrierFailpoint:
     """Block once per shared root until a test creates the release marker."""
 
+    # 初始化该对象的依赖、配置或受控资源。
     def __init__(
         self,
         root: Path,
@@ -30,6 +31,7 @@ class FileBarrierFailpoint:
         self._poll_interval_seconds = poll_interval_seconds
 
     @classmethod
+    # 实现 from_settings 对应的局部职责。
     def from_settings(cls, settings: Settings) -> Self | None:
         """Build only from an explicitly test-scoped Settings capability."""
 
@@ -43,6 +45,7 @@ class FileBarrierFailpoint:
             raise RuntimeError("failpoint root and checkpoints must be configured together")
         return cls(root, {Checkpoint(name) for name in names})
 
+    # 作为可注入回调执行对应检查点行为。
     async def __call__(self, checkpoint: Checkpoint) -> None:
         if checkpoint not in self._enabled:
             return

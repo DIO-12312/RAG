@@ -1,4 +1,4 @@
-"""UTF-8 plain-text parser with deterministic newline normalization."""
+"""UTF-8 纯文本解析器：先确定性规范化换行，再生成可追溯文本片段。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from rag_mvp.ports.parser import ParsedSegment
 class TextParser:
     """Parse a complete UTF-8 text object into one traceable segment."""
 
+    # 实现 parse 对应的局部职责。
     async def parse(self, source_name: str, content: bytes) -> tuple[ParsedSegment, ...]:
         del source_name
         try:

@@ -13,6 +13,7 @@ from rag_mvp.config import Environment, Settings
 
 
 def test_package_import_has_no_runtime_side_effects() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     script = """
 import sys
 
@@ -40,6 +41,7 @@ assert forbidden == [], forbidden
 
 
 def test_settings_can_be_constructed_explicitly_for_tests(tmp_path: Path) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     settings = Settings(
         _env_file=None,
         environment=Environment.TEST,
@@ -58,6 +60,7 @@ def test_settings_can_be_constructed_explicitly_for_tests(tmp_path: Path) -> Non
 
 
 def test_settings_builds_a_normalized_secret_embedding_profile() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     api_key = "integration-secret-value"
     settings = Settings(
         _env_file=None,
@@ -78,6 +81,7 @@ def test_settings_builds_a_normalized_secret_embedding_profile() -> None:
 
 
 def test_embedding_profile_rejects_missing_or_partial_configuration() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValueError, match="embedding model configuration"):
         Settings(_env_file=None).require_embedding_profile()
 
@@ -100,11 +104,13 @@ def test_parser_and_chunk_runtime_settings_reject_inconsistent_values(
     overrides: dict[str, object],
     error: str,
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValidationError, match=error):
         Settings(_env_file=None, **overrides)  # type: ignore[arg-type]
 
 
 def test_production_rejects_grpc_reflection() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValidationError, match="reflection"):
         Settings(
             _env_file=None,
@@ -115,6 +121,7 @@ def test_production_rejects_grpc_reflection() -> None:
 
 
 def test_production_rejects_development_mysql_credentials() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValidationError, match="MySQL"):
         Settings(
             _env_file=None,
@@ -124,6 +131,7 @@ def test_production_rejects_development_mysql_credentials() -> None:
 
 
 def test_test_markers_are_registered(request: pytest.FixtureRequest) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     markers = "\n".join(request.config.getini("markers"))
 
     for marker in (
@@ -142,4 +150,5 @@ def test_test_markers_are_registered(request: pytest.FixtureRequest) -> None:
     ["sqlalchemy", "asyncmy", "cryptography", "alembic", "httpx", "elasticsearch", "nats"],
 )
 def test_runtime_adapter_dependencies_are_importable(module_name: str) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     assert importlib.util.find_spec(module_name) is not None

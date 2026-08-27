@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 校验失败任务重试始终创建新 Job/Task 而非回写终态。
 from datetime import UTC, datetime
 
 import pytest
@@ -15,6 +16,7 @@ from tests.fakes.storage import FakeObjectStorage
 
 
 async def _failed_ingestion(*, object_ready: bool) -> tuple[FakeMetadataRepository, str, datetime]:
+    """构造本测试所需的输入、替身或运行环境。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()
@@ -55,6 +57,7 @@ async def _failed_ingestion(*, object_ready: bool) -> tuple[FakeMetadataReposito
 
 @pytest.mark.asyncio
 async def test_retry_creates_new_job_task_and_ready_outbox_without_reviving_original() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     repository, original_job_id, now = await _failed_ingestion(object_ready=True)
     request = RetryJobRequest("retry-key", original_job_id, now, max_user_retries=3)
 
@@ -87,6 +90,7 @@ async def test_retry_creates_new_job_task_and_ready_outbox_without_reviving_orig
 
 @pytest.mark.asyncio
 async def test_retry_rejects_failure_without_final_object() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     repository, original_job_id, now = await _failed_ingestion(object_ready=False)
 
     with pytest.raises(DomainError) as error:
@@ -100,6 +104,7 @@ async def test_retry_rejects_failure_without_final_object() -> None:
 
 @pytest.mark.asyncio
 async def test_retry_enforces_user_retry_limit() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     repository, original_job_id, now = await _failed_ingestion(object_ready=True)
 
     with pytest.raises(DomainError) as error:

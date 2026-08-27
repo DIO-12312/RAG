@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证删除与摄取并发时 generation fence 不会让已删除文档复活。
 from datetime import UTC, datetime
 
 import pytest
@@ -37,6 +38,7 @@ async def _harness() -> tuple[
     str,
     str,
 ]:
+    """构造带一份待摄取文档的内存依赖，用于 generation fence 场景。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()
@@ -68,11 +70,13 @@ async def _harness() -> tuple[
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_cancel_after_index_write_creates_version_cleanup_task() -> None:
+    """取消发生在索引写入后时，应创建版本清理任务且不激活该版本。"""
     now, repository, storage, queue, search, job_id, document_id = await _harness()
     await finalize_once(repository, storage, now, limit=10)
     await relay_once(repository, queue, now, limit=10)
 
     async def cancel(checkpoint: Checkpoint) -> None:
+        """在索引已写入的确定性检查点请求取消摄取 Job。"""
         if checkpoint is Checkpoint.AFTER_INDEX_WRITE:
             await repository.cancel_job(CancelJobRequest("cancel", job_id, now))
 
@@ -103,11 +107,13 @@ async def test_cancel_after_index_write_creates_version_cleanup_task() -> None:
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_delete_after_index_write_never_reactivates_and_cleanup_removes_everything() -> None:
+    """删除与索引写入交错时，文档不得复活且异步清理必须收敛。"""
     now, repository, storage, queue, search, job_id, document_id = await _harness()
     await finalize_once(repository, storage, now, limit=10)
     await relay_once(repository, queue, now, limit=10)
 
     async def delete(checkpoint: Checkpoint) -> None:
+        """在索引已落盘后逻辑删除目标文档以触发 generation fence。"""
         if checkpoint is Checkpoint.AFTER_INDEX_WRITE:
             await repository.delete_document(DeleteDocumentRequest("delete", document_id, now))
 
@@ -139,9 +145,11 @@ async def test_delete_after_index_write_never_reactivates_and_cleanup_removes_ev
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_delete_between_promote_and_ready_compensates_final_object() -> None:
+    """对象提升与 Outbox 就绪之间删除文档时，正式对象必须被补偿清除。"""
     now, repository, storage, _, _, _, document_id = await _harness()
 
     async def delete_after_promote() -> None:
+        """模拟对象刚提升成功即收到文档删除请求。"""
         await repository.delete_document(DeleteDocumentRequest("delete", document_id, now))
 
     assert (
@@ -169,11 +177,13 @@ async def test_delete_between_promote_and_ready_compensates_final_object() -> No
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_dataset_delete_after_index_write_purges_without_reactivating_document() -> None:
+    """数据集删除穿插索引写入时，应清除全部内容且不重新激活文档。"""
     now, repository, storage, queue, search, _, document_id = await _harness()
     await finalize_once(repository, storage, now, limit=10)
     await relay_once(repository, queue, now, limit=10)
 
     async def delete_dataset_after_index(checkpoint: Checkpoint) -> None:
+        """在索引写入后删除整个数据集，验证数据集级围栏。"""
         if checkpoint is Checkpoint.AFTER_INDEX_WRITE:
             await repository.delete_dataset(
                 DeleteDatasetRequest("delete-dataset", "dataset-1", now)
@@ -205,9 +215,11 @@ async def test_dataset_delete_after_index_write_purges_without_reactivating_docu
 @pytest.mark.asyncio
 @pytest.mark.resilience
 async def test_dataset_delete_between_promote_and_ready_compensates_final_object() -> None:
+    """数据集删除若发生在提升与发布之间，必须补偿新提升的对象。"""
     now, repository, storage, _, _, _, document_id = await _harness()
 
     async def delete_after_promote() -> None:
+        """模拟对象提升完成后立刻删除所属数据集。"""
         await repository.delete_dataset(DeleteDatasetRequest("delete-dataset", "dataset-1", now))
 
     assert (

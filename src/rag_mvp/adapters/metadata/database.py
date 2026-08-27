@@ -1,4 +1,4 @@
-"""Async SQLAlchemy engine and session construction."""
+"""异步 SQLAlchemy 引擎与会话工厂；统一数据库隔离级别与连接生命周期。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 
+# 创建该方法负责的领域数据或基础设施状态。
 def create_mysql_engine(dsn: str) -> AsyncEngine:
     """Create a pooled MySQL engine using the repository isolation contract."""
 
@@ -22,6 +23,7 @@ def create_mysql_engine(dsn: str) -> AsyncEngine:
     )
 
 
+# 创建该方法负责的领域数据或基础设施状态。
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     """Create short-lived sessions that retain loaded values after commit."""
 

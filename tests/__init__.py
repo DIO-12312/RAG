@@ -1,1 +1,1 @@
-"""RAG MVP test package."""
+"""RAG MVP 测试包：按单元、契约、功能与真实基础设施分层组织。"""

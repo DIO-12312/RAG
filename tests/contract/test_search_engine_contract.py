@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 校验搜索引擎端口的稠密、稀疏候选与版本过滤语义。
 import pytest
 
 from rag_mvp.domain.models import Chunk, Locator
@@ -15,6 +16,7 @@ def _indexed(
     dataset_id: str = "dataset-1",
     document_id: str = "document-1",
 ) -> IndexedChunk:
+    """构造本测试所需的输入、替身或运行环境。"""
     chunk = Chunk(
         id=chunk_id,
         document_id=document_id,
@@ -36,6 +38,7 @@ def _indexed(
 
 @pytest.mark.asyncio
 async def test_search_upsert_is_idempotent_and_dense_sparse_are_separate() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     search = FakeSearchEngine()
     relevant = _indexed("python retrieval guide", "chunk-a", (1.0, 0.0))
     other = _indexed("cooking notes", "chunk-b", (0.0, 1.0))
@@ -81,6 +84,7 @@ async def test_search_upsert_is_idempotent_and_dense_sparse_are_separate() -> No
 
 @pytest.mark.asyncio
 async def test_search_can_delete_an_entire_dataset_idempotently() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     search = FakeSearchEngine()
     await search.upsert_chunks(
         [

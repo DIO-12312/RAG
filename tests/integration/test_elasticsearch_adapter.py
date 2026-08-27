@@ -1,4 +1,4 @@
-"""Integration tests against a real Elasticsearch node."""
+"""针对真实 Elasticsearch 节点的 adapter 集成测试。"""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ def _indexed(
     vector: tuple[float, float, float],
     category: str,
 ) -> IndexedChunk:
+    """构造写入 Elasticsearch 的索引记录。"""
     chunk = Chunk(
         id=chunk_id,
         document_id=document_id,
@@ -49,6 +50,7 @@ def _indexed(
 async def elasticsearch_search() -> AsyncIterator[
     tuple[ElasticsearchSearchEngine, AsyncElasticsearch]
 ]:
+    """创建隔离索引并在测试结束后清理。"""
     url = os.environ.get("RAG_TEST_ELASTICSEARCH_URL", "http://127.0.0.1:9200")
     index_name = f"rag-test-{uuid.uuid4().hex}"
     client = AsyncElasticsearch(url, request_timeout=10)
@@ -66,6 +68,7 @@ async def elasticsearch_search() -> AsyncIterator[
 async def test_real_es_upsert_dense_bm25_isolation_and_metadata_filters(
     elasticsearch_search: tuple[ElasticsearchSearchEngine, AsyncElasticsearch],
 ) -> None:
+    """验证真实 ES 的写入、混合召回、隔离与元数据过滤。"""
     search, client = elasticsearch_search
     guide_v1 = _indexed(
         dataset_id="dataset-1",
@@ -156,6 +159,8 @@ async def test_real_es_upsert_dense_bm25_isolation_and_metadata_filters(
 async def test_real_es_version_and_document_delete_are_idempotent(
     elasticsearch_search: tuple[ElasticsearchSearchEngine, AsyncElasticsearch],
 ) -> None:
+    """验证 ES 稠密、BM25、租户隔离与元数据过滤。"""
+    """验证版本和文档级删除可重复执行且最终幂等。"""
     search, client = elasticsearch_search
     version_1 = _indexed(
         dataset_id="dataset-1",
@@ -193,6 +198,7 @@ async def test_real_es_version_and_document_delete_are_idempotent(
 async def test_real_es_dataset_delete_is_idempotent_and_isolated(
     elasticsearch_search: tuple[ElasticsearchSearchEngine, AsyncElasticsearch],
 ) -> None:
+    """验证数据集物理删除可重试且不影响其他数据集。"""
     search, client = elasticsearch_search
     first = _indexed(
         dataset_id="dataset-1",

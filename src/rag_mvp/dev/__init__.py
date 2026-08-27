@@ -1,1 +1,1 @@
-"""Generated gRPC development client package."""
+"""开发调试 gRPC 客户端包；只经由生成的契约访问服务。"""

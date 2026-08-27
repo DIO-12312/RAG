@@ -1,4 +1,4 @@
-"""Elasticsearch implementation of versioned dense and BM25 search."""
+"""Elasticsearch 版本化 Dense KNN 与 BM25 检索实现；不负责应用层融合。"""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ FILTER_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 class ElasticsearchSearchEngine:
     """Persist versioned chunks and expose separate dense and BM25 candidate routes."""
 
+    # 初始化该对象的依赖、配置或受控资源。
     def __init__(
         self,
         client: AsyncElasticsearch,
@@ -38,9 +39,11 @@ class ElasticsearchSearchEngine:
         self._embedding_dimension = embedding_dimension
 
     @property
+    # 实现 index_name 对应的局部职责。
     def index_name(self) -> str:
         return self._index_name
 
+    # 幂等确保该方法负责的领域数据或基础设施状态。
     async def ensure_index(self) -> None:
         """Create the index if absent and reject incompatible existing mappings."""
 
@@ -70,9 +73,11 @@ class ElasticsearchSearchEngine:
                 )
             )
 
+    # 按资源所有权顺序关闭底层连接或句柄。
     async def close(self) -> None:
         await self._client.close()
 
+    # 实现 upsert_chunks 对应的局部职责。
     async def upsert_chunks(self, chunks: Sequence[IndexedChunk]) -> None:
         if not chunks:
             return
@@ -93,6 +98,7 @@ class ElasticsearchSearchEngine:
         if succeeded != len(actions) or failed:
             raise self._unavailable("one or more chunks could not be indexed")
 
+    # 删除该方法负责的领域数据或基础设施状态。
     async def delete_document_version(self, document_id: str, version: int) -> None:
         if not document_id.strip():
             raise ValueError("document_id must not be empty")
@@ -105,16 +111,19 @@ class ElasticsearchSearchEngine:
             ]
         )
 
+    # 删除该方法负责的领域数据或基础设施状态。
     async def delete_document(self, document_id: str) -> None:
         if not document_id.strip():
             raise ValueError("document_id must not be empty")
         await self._delete_by_filters([{"term": {"document_id": document_id}}])
 
+    # 删除该方法负责的领域数据或基础设施状态。
     async def delete_dataset(self, dataset_id: str) -> None:
         if not dataset_id.strip():
             raise ValueError("dataset_id must not be empty")
         await self._delete_by_filters([{"term": {"dataset_id": dataset_id}}])
 
+    # 执行稠密检索该方法负责的领域数据或基础设施状态。
     async def dense_search(self, request: SearchRequest) -> Sequence[SearchCandidate]:
         if request.query_vector is None:
             raise ValueError("dense search requires query_vector")
@@ -139,6 +148,7 @@ class ElasticsearchSearchEngine:
             raise self._unavailable("dense search failed") from exc
         return self._candidates(cast(Mapping[str, Any], response.body))
 
+    # 执行稀疏检索该方法负责的领域数据或基础设施状态。
     async def sparse_search(self, request: SearchRequest) -> Sequence[SearchCandidate]:
         if request.query is None or not request.query.strip():
             raise ValueError("sparse search requires a non-empty query")
@@ -160,6 +170,7 @@ class ElasticsearchSearchEngine:
             raise self._unavailable("BM25 search failed") from exc
         return self._candidates(cast(Mapping[str, Any], response.body))
 
+    # 内部辅助：完成 delete_by_filters 所需的局部转换或校验。
     async def _delete_by_filters(self, filters: list[dict[str, Any]]) -> None:
         try:
             await self._client.delete_by_query(
@@ -172,6 +183,7 @@ class ElasticsearchSearchEngine:
             raise self._unavailable("indexed chunks could not be deleted") from exc
 
     @staticmethod
+    # 内部辅助：完成 candidates 所需的局部转换或校验。
     def _candidates(response: Mapping[str, Any]) -> tuple[SearchCandidate, ...]:
         try:
             hits = response["hits"]["hits"]
@@ -189,6 +201,7 @@ class ElasticsearchSearchEngine:
         return tuple(sorted(candidates, key=lambda item: (-item.score, item.record_id)))
 
     @staticmethod
+    # 内部辅助：完成 request_filters 所需的局部转换或校验。
     def _request_filters(request: SearchRequest) -> list[dict[str, Any]]:
         if not request.dataset_id.strip():
             raise ValueError("dataset_id must not be empty")
@@ -199,6 +212,7 @@ class ElasticsearchSearchEngine:
             filters.append({"term": {f"metadata.{key}": value}})
         return filters
 
+    # 内部辅助：完成 mapping_matches 所需的局部转换或校验。
     def _mapping_matches(self, mapping: Mapping[str, Any]) -> bool:
         properties = mapping.get("properties")
         if mapping.get("dynamic") != "strict" or not isinstance(properties, Mapping):
@@ -213,6 +227,7 @@ class ElasticsearchSearchEngine:
         return True
 
     @classmethod
+    # 内部辅助：完成 field_mapping_matches 所需的局部转换或校验。
     def _field_mapping_matches(
         cls,
         expected: Mapping[str, Any],
@@ -245,5 +260,6 @@ class ElasticsearchSearchEngine:
         return True
 
     @staticmethod
+    # 内部辅助：完成 unavailable 所需的局部转换或校验。
     def _unavailable(message: str) -> DomainError:
         return DomainError(DomainFailure("SEARCH_UNAVAILABLE", message, retryable=True))

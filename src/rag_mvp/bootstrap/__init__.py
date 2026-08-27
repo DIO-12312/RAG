@@ -1,1 +1,1 @@
-"""Application composition root."""
+"""应用组合根包：集中创建并注入具体实现，避免隐式全局单例。"""

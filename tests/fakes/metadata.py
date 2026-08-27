@@ -1,4 +1,4 @@
-"""Transactional in-memory MetadataRepository used only by tests."""
+"""仅测试使用的、带事务语义的内存 MetadataRepository。"""
 
 from __future__ import annotations
 
@@ -50,9 +50,10 @@ class InjectedRepositoryFailure(RuntimeError):
 
 
 class FakeMetadataRepository:
-    """Deterministic fake preserving compound-write and conditional-update semantics."""
+    """保留复合写入和条件更新语义的确定性内存仓储替身。"""
 
     def __init__(self) -> None:
+        """初始化测试替身的内存状态。"""
         self._lock = asyncio.Lock()
         self.datasets: dict[str, Dataset] = {}
         self.documents: dict[str, Document] = {}
@@ -70,11 +71,13 @@ class FakeMetadataRepository:
         self.fail_next_submit = False
 
     def _document_for_job(self, job: Job) -> Document:
+        """返回文档范围 Job 对应的文档；知识库范围 Job 不得误走该路径。"""
         if job.document_id is None:
             raise RuntimeError("document-scoped operation received a dataset job")
         return self.documents[job.document_id]
 
     async def create_dataset(self, dataset: Dataset) -> Dataset:
+        """幂等写入知识库，并保持并发写入的互斥语义。"""
         async with self._lock:
             existing = self.datasets.get(dataset.id)
             if existing is not None:
@@ -83,9 +86,11 @@ class FakeMetadataRepository:
             return dataset
 
     async def get_dataset(self, dataset_id: str) -> Dataset | None:
+        """按标识读取测试知识库。"""
         return self.datasets.get(dataset_id)
 
     async def submit_ingestion(self, command: SubmitIngestion) -> SubmitResult:
+        """模拟摄取提交的原子写入、幂等复用与指纹去重。"""
         async with self._lock:
             dataset = self.datasets.get(command.dataset_id)
             if dataset is None:
@@ -102,6 +107,7 @@ class FakeMetadataRepository:
                 command.config_digest,
             )
             fingerprint = self.fingerprints.get(fingerprint_key)
+            # 同一内容与配置只允许一个 canonical Job；后续上传复用它。
             if (
                 command.target_document_id is None
                 and fingerprint is not None
@@ -198,6 +204,7 @@ class FakeMetadataRepository:
                 staging_key=command.staging_key,
                 created_at=command.now,
             )
+            # 先持久化 WAITING Outbox，只有对象提升成功才允许 Relay 投递任务。
             index_build = IndexBuild(
                 document_id=document_id,
                 index_version=index_version,
@@ -230,18 +237,23 @@ class FakeMetadataRepository:
             return result
 
     async def get_job(self, job_id: str) -> Job | None:
+        """按标识读取任务作业快照。"""
         return self.jobs.get(job_id)
 
     async def get_task(self, task_id: str) -> Task | None:
+        """按标识读取最小调度任务。"""
         return self.tasks.get(task_id)
 
     async def get_task_for_job(self, job_id: str) -> Task | None:
+        """读取指定 Job 的关联 Task。"""
         return next((task for task in self.tasks.values() if task.job_id == job_id), None)
 
     async def get_document(self, document_id: str) -> Document | None:
+        """按标识读取文档快照。"""
         return self.documents.get(document_id)
 
     async def list_waiting_outbox(self, limit: int) -> Sequence[OutboxEvent]:
+        """按创建顺序列出等待对象提升的 Outbox 事件。"""
         return tuple(
             event
             for event in sorted(self.outbox.values(), key=lambda item: (item.created_at, item.id))
@@ -249,6 +261,7 @@ class FakeMetadataRepository:
         )[:limit]
 
     async def mark_object_ready(self, event_id: str, object_key: str, now: datetime) -> bool:
+        """在对象已提升且文档未删除时，将 Outbox 条件推进为就绪。"""
         del now
         async with self._lock:
             event = self.outbox.get(event_id)
@@ -257,6 +270,7 @@ class FakeMetadataRepository:
             task = self.tasks[event.task_id]
             job = self.jobs[task.job_id]
             document = self._document_for_job(job)
+            # 删除赢过终结：已逻辑删除的文档不得把 Outbox 推进到 READY。
             if document.status is DocumentStatus.DELETED:
                 return False
             self.documents[document.id] = replace(document, object_key=object_key)
@@ -266,12 +280,14 @@ class FakeMetadataRepository:
     async def record_finalization_failure(
         self, event_id: str, max_attempts: int, now: datetime
     ) -> bool:
+        """记录对象终结失败，并在超过上限时收敛 Job、Task 与 Outbox。"""
         del now
         async with self._lock:
             event = self.outbox.get(event_id)
             if event is None or event.status is not OutboxStatus.WAITING_OBJECT:
                 return False
             attempt = event.attempt + 1
+            # 未达上限仅增加尝试次数，保留给下一轮 Finalizer 重试。
             if attempt < max_attempts:
                 self.outbox[event_id] = replace(event, attempt=attempt)
                 return False
@@ -298,6 +314,7 @@ class FakeMetadataRepository:
             return True
 
     async def waiting_staging_keys(self) -> Sequence[str]:
+        """返回仍被 WAITING Outbox 引用的暂存对象键。"""
         return tuple(
             event.staging_key
             for event in self.outbox.values()
@@ -305,6 +322,7 @@ class FakeMetadataRepository:
         )
 
     async def list_ready_outbox(self, limit: int) -> Sequence[OutboxEvent]:
+        """按创建顺序列出可安全发布的 Outbox 事件。"""
         return tuple(
             event
             for event in sorted(self.outbox.values(), key=lambda item: (item.created_at, item.id))
@@ -312,6 +330,7 @@ class FakeMetadataRepository:
         )[:limit]
 
     async def mark_outbox_published(self, event_id: str, now: datetime) -> bool:
+        """条件标记已发布事件，保留至少一次投递语义。"""
         async with self._lock:
             event = self.outbox.get(event_id)
             if event is None or event.status is not OutboxStatus.READY_TO_PUBLISH:
@@ -322,6 +341,7 @@ class FakeMetadataRepository:
     async def claim_task(
         self, task_id: str, delivery_sequence: int, now: datetime
     ) -> TaskClaim | None:
+        """依据 delivery 序号、取消状态和 generation fence 条件认领任务。"""
         del now
         async with self._lock:
             task = self.tasks.get(task_id)
@@ -331,6 +351,7 @@ class FakeMetadataRepository:
                 task.last_delivery_sequence is not None
                 and delivery_sequence <= task.last_delivery_sequence
             ):
+                # 同一或更旧 delivery 不能重复认领，保证 attempt 与状态机单调。
                 return None
             job = self.jobs[task.job_id]
             dataset = self.datasets[job.dataset_id]
@@ -342,12 +363,14 @@ class FakeMetadataRepository:
             ):
                 return None
             if task.type is TaskType.CLEANUP_DATASET:
+                # 数据集清理使用数据集 generation，而不是不存在的 document fence。
                 if (
                     dataset.status is not DatasetStatus.DELETING
                     or dataset.lifecycle_generation != job.document_generation
                 ):
                     return None
             elif document is None or document.lifecycle_generation != job.document_generation:
+                # 文档重建或删除后，旧投递只能失效，不能复活旧版本。
                 return None
             claimed_task = replace(
                 task,
@@ -372,6 +395,7 @@ class FakeMetadataRepository:
     async def complete_ingestion(
         self, task_id: str, chunks: Sequence[Chunk], now: datetime
     ) -> bool:
+        """条件完成摄取，激活新索引版本并更新指纹状态。"""
         async with self._lock:
             task = self.tasks.get(task_id)
             if task is None or task.status is not TaskStatus.RUNNING:
@@ -384,6 +408,7 @@ class FakeMetadataRepository:
                 self.jobs[job.id] = replace(job, status=JobStatus.CANCELLED, error=failure)
                 self._create_version_cleanup(document, job, now)
                 return False
+            # 完成前再次校验删除与 generation，防止 Worker 与删除操作竞态复活文档。
             if (
                 document.status is DocumentStatus.DELETED
                 or document.lifecycle_generation != job.document_generation
@@ -406,6 +431,7 @@ class FakeMetadataRepository:
             return True
 
     def _create_version_cleanup(self, document: Document, source_job: Job, now: datetime) -> None:
+        """为废弃或取消的索引版本创建唯一的系统清理任务。"""
         if any(
             job.is_system
             and job.document_id == document.id
@@ -457,6 +483,7 @@ class FakeMetadataRepository:
             )
 
     async def fail_task(self, task_id: str, failure: DomainFailure, now: datetime) -> bool:
+        """将可执行任务收敛为失败，并更新可重试指纹状态。"""
         del now
         async with self._lock:
             task = self.tasks.get(task_id)
@@ -485,6 +512,7 @@ class FakeMetadataRepository:
             return True
 
     async def retry_job(self, request: RetryJobRequest) -> RetryJobResult:
+        """以新 Job、Task 和 Outbox 模拟失败摄取的并发安全重试。"""
         async with self._lock:
             repeated = self._retry_idempotency.get(request.idempotency_key)
             if repeated is not None:
@@ -516,6 +544,7 @@ class FakeMetadataRepository:
                 ),
                 None,
             )
+            # 同一失败 Job 同时重试时复用仍活跃的子 Job，避免重复摄取。
             if active_child is not None:
                 active_task = next(
                     task for task in self.tasks.values() if task.job_id == active_child.id
@@ -586,6 +615,7 @@ class FakeMetadataRepository:
             return result
 
     async def cancel_job(self, request: CancelJobRequest) -> CancelJobResult:
+        """按摄取 Job 的当前状态模拟撤销或取消请求。"""
         async with self._lock:
             repeated = self._cancel_idempotency.get(request.idempotency_key)
             if repeated is not None:
@@ -626,6 +656,7 @@ class FakeMetadataRepository:
             return result
 
     async def delete_document(self, request: DeleteDocumentRequest) -> DeleteDocumentResult:
+        """原子逻辑删除文档、取消摄取并创建异步清理工作。"""
         async with self._lock:
             repeated = self._delete_idempotency.get(request.idempotency_key)
             if repeated is not None:
@@ -643,6 +674,7 @@ class FakeMetadataRepository:
                 status=DocumentStatus.DELETED,
                 lifecycle_generation=document.lifecycle_generation + 1,
             )
+            # 递增 generation fence，使已经投递的旧 Worker 无法完成写入。
             self.documents[document.id] = deleted_document
             for key, fingerprint in self.fingerprints.items():
                 if fingerprint.document_id == document.id:
@@ -673,6 +705,7 @@ class FakeMetadataRepository:
                 }:
                     self.outbox[event_id] = replace(event, status=OutboxStatus.CANCELLED)
 
+            # 清理工作已有正式对象，可直接进入 READY 并由 Relay 发布。
             job_id = new_id()
             task_id = new_id()
             job = Job(
@@ -713,6 +746,7 @@ class FakeMetadataRepository:
             return result
 
     async def delete_dataset(self, request: DeleteDatasetRequest) -> DeleteDatasetResult:
+        """原子标记知识库删除、取消关联工作并创建知识库清理任务。"""
         async with self._lock:
             repeated = self._dataset_delete_idempotency.get(request.idempotency_key)
             if repeated is not None:
@@ -733,6 +767,7 @@ class FakeMetadataRepository:
                 status=DatasetStatus.DELETING,
                 lifecycle_generation=dataset.lifecycle_generation + 1,
             )
+            # 先封禁整个数据集及其文档，随后再异步清理 ES、对象和元数据。
             document_ids = {
                 document.id
                 for document in self.documents.values()
@@ -770,6 +805,7 @@ class FakeMetadataRepository:
                 if build.document_id in document_ids and build.status is IndexBuildStatus.BUILDING:
                     self.index_builds[build_key] = replace(build, status=IndexBuildStatus.ABANDONED)
 
+            # DELETE_DATASET 是 dataset-scoped Job，因此 document_id 必须为空。
             job_id = new_id()
             task_id = new_id()
             cleanup_job = Job(
@@ -810,6 +846,7 @@ class FakeMetadataRepository:
             return result
 
     async def complete_cleanup(self, task_id: str, now: datetime) -> bool:
+        """在 generation fence 有效时完成文档或索引版本清理。"""
         del now
         async with self._lock:
             task = self.tasks.get(task_id)
@@ -844,6 +881,7 @@ class FakeMetadataRepository:
             return True
 
     async def dataset_cleanup_object_keys(self, task_id: str) -> Sequence[str]:
+        """收集知识库清理任务需要删除的正式与暂存对象键。"""
         task = self.tasks.get(task_id)
         if task is None or task.type is not TaskType.CLEANUP_DATASET:
             return ()
@@ -871,6 +909,7 @@ class FakeMetadataRepository:
         return tuple(sorted(keys))
 
     async def finalize_dataset_cleanup(self, task_id: str, now: datetime) -> bool:
+        """在数据集 fence 有效时物理清除其所有元数据。"""
         del now
         async with self._lock:
             task = self.tasks.get(task_id)
@@ -891,6 +930,7 @@ class FakeMetadataRepository:
             ):
                 return False
 
+            # 只有全部关联记录均归属当前知识库时才进行最终物理清除。
             document_ids = {
                 document.id
                 for document in self.documents.values()
@@ -968,6 +1008,7 @@ class FakeMetadataRepository:
             return True
 
     async def visible_document_versions(self, document_ids: Sequence[str]) -> Mapping[str, int]:
+        """返回当前可检索文档的 active 索引版本。"""
         return {
             document_id: document.active_version
             for document_id in document_ids
@@ -978,6 +1019,7 @@ class FakeMetadataRepository:
         }
 
     def counts(self) -> dict[str, int]:
+        """返回内存仓储中各聚合记录的数量，供断言使用。"""
         return {
             "documents": len(self.documents),
             "fingerprints": len(self.fingerprints),

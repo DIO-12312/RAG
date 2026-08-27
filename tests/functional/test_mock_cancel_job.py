@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 在无 Docker 的端口伪实现中验证 Job 取消、检查点和状态收敛。
 from datetime import UTC, datetime
 
 import pytest
@@ -13,6 +14,7 @@ from tests.functional.test_mock_upload_ingest_retrieve import _stub, _upload
 @pytest.mark.asyncio
 @pytest.mark.functional
 async def test_cancel_rpc_stops_pending_ingestion_and_is_idempotent(tmp_path) -> None:
+    """取消等待中的摄取任务应幂等撤回，并禁止其继续执行。"""
     now = datetime.now(UTC)
     harness = MockFunctionalHarness.build(tmp_path / "objects", now)
 

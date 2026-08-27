@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证文档和数据集清理用例协调索引、对象与元数据的职责边界。
 from datetime import UTC, datetime
 
 import pytest
@@ -20,11 +21,13 @@ from tests.fakes.storage import FakeObjectStorage
 
 class OrderedSearch(FakeSearchEngine):
     def __init__(self, calls: list[str], *, fail: bool = False) -> None:
+        """初始化测试替身的内存状态。"""
         super().__init__()
         self._calls = calls
         self._fail = fail
 
     async def delete_dataset(self, dataset_id: str) -> None:
+        """删除某个知识库的全部索引记录。"""
         self._calls.append(f"search:{dataset_id}")
         if self._fail:
             raise ConnectionError("search unavailable")
@@ -33,10 +36,12 @@ class OrderedSearch(FakeSearchEngine):
 
 class OrderedStorage(FakeObjectStorage):
     def __init__(self, calls: list[str]) -> None:
+        """初始化测试替身的内存状态。"""
         super().__init__()
         self._calls = calls
 
     async def delete(self, key: str) -> None:
+        """幂等删除内存对象。"""
         self._calls.append(f"storage:{key}")
         await super().delete(key)
 
@@ -45,6 +50,7 @@ async def _deleting_dataset(
     storage: FakeObjectStorage,
     now: datetime,
 ) -> tuple[FakeMetadataRepository, str, str]:
+    """构造本测试所需的输入、替身或运行环境。"""
     repository = FakeMetadataRepository()
     documents = DocumentService(repository, storage, max_upload_bytes=1024)
     await documents.create_dataset(
@@ -76,6 +82,7 @@ async def _deleting_dataset(
 
 @pytest.mark.asyncio
 async def test_dataset_cleanup_deletes_search_then_objects_then_purges_metadata() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     calls: list[str] = []
     storage = OrderedStorage(calls)
@@ -95,6 +102,7 @@ async def test_dataset_cleanup_deletes_search_then_objects_then_purges_metadata(
 
 @pytest.mark.asyncio
 async def test_dataset_cleanup_failure_keeps_deleting_metadata_for_retry() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     calls: list[str] = []
     storage = OrderedStorage(calls)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证上传、删除和提交任务时 application 层的编排与幂等决策。
 from datetime import UTC, datetime
 
 import pytest
@@ -17,6 +18,7 @@ from tests.fakes.storage import FakeObjectStorage
 
 
 def test_delete_dataset_command_carries_idempotency_and_dataset_scope() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     command = DeleteDatasetCommand("request", "delete-key", "dataset-1", now)
 
@@ -31,6 +33,7 @@ def _submit(
     content: bytes = b"hello",
     expected_sha256: str | None = None,
 ) -> SubmitDocumentCommand:
+    """构造本测试所需的输入、替身或运行环境。"""
     return SubmitDocumentCommand(
         request_id="trace-1",
         idempotency_key=idempotency_key,
@@ -50,6 +53,7 @@ def _submit(
 async def _service(
     max_upload_bytes: int = 1024,
 ) -> tuple[DocumentService, FakeMetadataRepository, FakeObjectStorage]:
+    """构造本测试所需的输入、替身或运行环境。"""
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()
     service = DocumentService(
@@ -76,6 +80,7 @@ async def _service(
 
 @pytest.mark.asyncio
 async def test_create_dataset_rejects_runtime_embedding_mismatch() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service = DocumentService(
         FakeMetadataRepository(),
         FakeObjectStorage(),
@@ -102,6 +107,7 @@ async def test_create_dataset_rejects_runtime_embedding_mismatch() -> None:
 
 @pytest.mark.asyncio
 async def test_submit_writes_staging_and_atomically_creates_waiting_work() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service, repository, storage = await _service()
 
     result = await service.submit_document(_submit())
@@ -114,6 +120,7 @@ async def test_submit_writes_staging_and_atomically_creates_waiting_work() -> No
 
 @pytest.mark.asyncio
 async def test_same_file_different_key_reuses_canonical_job_and_cleans_loser_staging() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service, repository, storage = await _service()
 
     first = await service.submit_document(_submit(idempotency_key="request-1"))
@@ -128,6 +135,7 @@ async def test_same_file_different_key_reuses_canonical_job_and_cleans_loser_sta
 
 @pytest.mark.asyncio
 async def test_same_idempotency_key_with_different_bytes_is_rejected_without_overwrite() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service, _, storage = await _service()
     await service.submit_document(_submit(content=b"first"))
 
@@ -140,6 +148,7 @@ async def test_same_idempotency_key_with_different_bytes_is_rejected_without_ove
 
 @pytest.mark.asyncio
 async def test_sha_and_size_validation_happen_before_metadata_creation() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service, repository, _ = await _service(max_upload_bytes=4)
 
     with pytest.raises(DomainError) as oversized:
@@ -154,6 +163,7 @@ async def test_sha_and_size_validation_happen_before_metadata_creation() -> None
 
 @pytest.mark.asyncio
 async def test_repository_failure_cleans_staging_object() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service, repository, storage = await _service()
     repository.fail_next_submit = True
 
@@ -166,6 +176,7 @@ async def test_repository_failure_cleans_staging_object() -> None:
 
 @pytest.mark.asyncio
 async def test_delete_dataset_is_idempotent_and_blocks_new_submissions() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service, repository, _storage = await _service()
     await service.submit_document(_submit())
     command = DeleteDatasetCommand("trace-delete", "delete-dataset", "dataset-1", datetime.now(UTC))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证失败 Job 的重试创建新执行链且并发请求复用同一子 Job。
 from datetime import UTC, datetime
 
 import pytest
@@ -16,6 +17,7 @@ from tests.functional.test_mock_upload_ingest_retrieve import _stub, _upload
 @pytest.mark.asyncio
 @pytest.mark.functional
 async def test_retry_rpc_creates_new_job_and_worker_completes_it(tmp_path) -> None:
+    """失败任务重试必须创建新 Job，并由后续 Worker 成功完成。"""
     now = datetime.now(UTC)
     harness = MockFunctionalHarness.build(tmp_path / "objects", now)
 

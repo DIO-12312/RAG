@@ -1,1 +1,1 @@
-"""Object storage adapter package."""
+"""对象存储适配器包：区分 staging 与正式源对象的生命周期。"""

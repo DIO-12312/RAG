@@ -1,4 +1,4 @@
-"""Unit tests for the Elasticsearch mapping and document codec."""
+"""Elasticsearch mapping 与文档编解码器的单元测试。"""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from rag_mvp.ports.search_engine import IndexedChunk
 
 
 def _indexed(vector: tuple[float, ...] = (1.0, 0.0, 0.0)) -> IndexedChunk:
+    """构造本测试所需的输入、替身或运行环境。"""
     chunk = Chunk(
         id="0123456789abcdef",
         document_id="document-1",
@@ -42,6 +43,7 @@ def _indexed(vector: tuple[float, ...] = (1.0, 0.0, 0.0)) -> IndexedChunk:
 
 
 def test_index_definition_fixes_dense_cosine_and_searchable_field_types() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     definition = index_definition(1024)
     mappings = definition["mappings"]
     properties = mappings["properties"]
@@ -64,11 +66,13 @@ def test_index_definition_fixes_dense_cosine_and_searchable_field_types() -> Non
 
 
 def test_index_definition_rejects_non_positive_dimension() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValueError, match="dimension"):
         index_definition(0)
 
 
 def test_indexed_chunk_round_trips_through_source_and_hit_without_score_loss() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     indexed = _indexed()
     source = source_from_indexed_chunk(indexed)
     candidate = candidate_from_hit({"_id": indexed.record_id, "_score": 0.875, "_source": source})
@@ -81,6 +85,7 @@ def test_indexed_chunk_round_trips_through_source_and_hit_without_score_loss() -
 
 
 def test_bulk_action_uses_versioned_physical_id_and_rejects_mismatch() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     indexed = _indexed()
     action = bulk_action("rag-chunks-v1", indexed, embedding_dimension=3)
 
@@ -99,5 +104,6 @@ def test_bulk_action_uses_versioned_physical_id_and_rejects_mismatch() -> None:
 
 
 def test_bulk_action_rejects_vector_dimension_mismatch() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValueError, match="dimension"):
         bulk_action("rag-chunks-v1", _indexed((1.0, 0.0)), embedding_dimension=3)

@@ -1,4 +1,4 @@
-"""Job query use cases independent of protobuf and persistence SDKs."""
+"""独立于 protobuf 和持久化 SDK 的 Job 查询与重试用例。"""
 
 from __future__ import annotations
 
@@ -9,12 +9,14 @@ from rag_mvp.ports.metadata import CancelJobRequest, MetadataRepository, RetryJo
 
 
 class JobService:
+    # 初始化该对象的依赖、配置或受控资源。
     def __init__(self, metadata: MetadataRepository, *, max_user_retries: int = 3) -> None:
         if max_user_retries < 1:
             raise ValueError("max_user_retries must be at least 1")
         self._metadata = metadata
         self._max_user_retries = max_user_retries
 
+    # 读取该方法负责的领域数据或基础设施状态。
     async def get_job(self, query: GetJobQuery) -> JobView:
         job = await self._metadata.get_job(query.job_id)
         if job is None:
@@ -30,6 +32,7 @@ class JobService:
             )
         return self._view(job, task)
 
+    # 重试该方法负责的领域数据或基础设施状态。
     async def retry_job(self, command: RetryJobCommand) -> JobView:
         if not command.idempotency_key:
             raise DomainError(
@@ -51,6 +54,7 @@ class JobService:
             )
         return self._view(job, task)
 
+    # 取消该方法负责的领域数据或基础设施状态。
     async def cancel_job(self, command: CancelJobCommand) -> JobView:
         if not command.idempotency_key:
             raise DomainError(
@@ -70,6 +74,7 @@ class JobService:
         return self._view(job, task)
 
     @staticmethod
+    # 内部辅助：完成 view 所需的局部转换或校验。
     def _view(job: Job, task: Task) -> JobView:
         return JobView(
             job_id=job.id,

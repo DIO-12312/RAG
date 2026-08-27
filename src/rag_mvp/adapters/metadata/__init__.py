@@ -1,1 +1,1 @@
-"""Metadata adapter package."""
+"""元数据适配器包：以 MySQL 作为业务状态的权威来源。"""

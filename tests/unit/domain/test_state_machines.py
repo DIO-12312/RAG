@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证 Document、Job、Task 和 OutboxEvent 的合法状态转移。
 import pytest
 
 from rag_mvp.domain.enums import (
@@ -34,6 +35,7 @@ from rag_mvp.domain.policies import (
     ],
 )
 def test_valid_state_transitions(transition: object, initial: object, target: object) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     assert transition(initial, target) is target  # type: ignore[operator]
 
 
@@ -52,5 +54,6 @@ def test_valid_state_transitions(transition: object, initial: object, target: ob
 def test_terminal_states_cannot_be_reopened(
     transition: object, initial: object, target: object
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(InvalidStateTransition):
         transition(initial, target)  # type: ignore[operator]

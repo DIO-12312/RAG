@@ -1,4 +1,4 @@
-"""Named ingestion checkpoints used by resilience tests and worker instrumentation."""
+"""命名摄取检查点：为韧性测试和 Worker 可观测性提供稳定故障窗口。"""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ class Checkpoint(StrEnum):
 class InjectedWorkerCrash(BaseException):
     """Simulate abrupt process death without being converted into a business failure."""
 
+    # 初始化该对象的依赖、配置或受控资源。
     def __init__(self, checkpoint: Checkpoint) -> None:
         super().__init__(f"injected worker crash at {checkpoint.value}")
         self.checkpoint = checkpoint

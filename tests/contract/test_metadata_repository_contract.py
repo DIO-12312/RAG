@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 校验元数据仓储在各种实现下都遵守状态与并发语义。
 from datetime import UTC, datetime
 
 import pytest
@@ -12,6 +13,7 @@ from tests.fakes.metadata import FakeMetadataRepository, InjectedRepositoryFailu
 
 
 def _dataset(now: datetime) -> Dataset:
+    """构造本测试所需的输入、替身或运行环境。"""
     return Dataset(
         id="dataset-1",
         name="Docs",
@@ -22,6 +24,7 @@ def _dataset(now: datetime) -> Dataset:
 
 
 def _submission(*, idempotency_key: str, staging_key: str, now: datetime) -> SubmitIngestion:
+    """构造本测试所需的输入、替身或运行环境。"""
     return SubmitIngestion(
         idempotency_key=idempotency_key,
         dataset_id="dataset-1",
@@ -34,6 +37,7 @@ def _submission(*, idempotency_key: str, staging_key: str, now: datetime) -> Sub
 
 
 def test_metadata_port_exposes_dataset_deletion_lifecycle() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     assert hasattr(MetadataRepository, "delete_dataset")
     assert hasattr(MetadataRepository, "dataset_cleanup_object_keys")
     assert hasattr(MetadataRepository, "finalize_dataset_cleanup")
@@ -47,6 +51,7 @@ def test_metadata_port_exposes_dataset_deletion_lifecycle() -> None:
 async def test_submit_atomically_creates_task_and_waiting_outbox_and_deduplicates(
     second_idempotency_key: str,
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     await repository.create_dataset(_dataset(now))
@@ -79,6 +84,7 @@ async def test_submit_atomically_creates_task_and_waiting_outbox_and_deduplicate
 
 @pytest.mark.asyncio
 async def test_submit_failure_does_not_leave_partial_metadata() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     await repository.create_dataset(_dataset(now))
@@ -101,6 +107,7 @@ async def test_submit_failure_does_not_leave_partial_metadata() -> None:
 
 @pytest.mark.asyncio
 async def test_finalizer_transition_and_task_claim_are_conditional() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     await repository.create_dataset(_dataset(now))
@@ -136,6 +143,7 @@ async def test_finalizer_transition_and_task_claim_are_conditional() -> None:
 
 @pytest.mark.asyncio
 async def test_complete_and_fail_are_conditional_and_visibility_uses_active_version() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     await repository.create_dataset(_dataset(now))

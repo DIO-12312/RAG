@@ -1,4 +1,4 @@
-"""One-segment-per-chunk splitter used only by port contract tests."""
+"""仅用于端口契约测试的“一段一块”确定性切块器。"""
 
 from collections.abc import Sequence
 
@@ -8,6 +8,7 @@ from rag_mvp.ports.parser import ParsedSegment
 
 class FakeChunker:
     async def split(self, segments: Sequence[ParsedSegment]) -> tuple[ChunkDraft, ...]:
+        """模拟切块过程并保留输入片段的顺序。"""
         return tuple(
             ChunkDraft(
                 ordinal=ordinal,

@@ -1,4 +1,4 @@
-"""Transactional Outbox and NATS outage recovery against real containers."""
+"""真实容器下事务 Outbox 与 NATS 故障恢复验证。"""
 
 from __future__ import annotations
 
@@ -33,6 +33,7 @@ async def test_relay_kill_after_publish_before_mark_republishes_safely(
     database_probe: DatabaseProbe,
     es_client: AsyncElasticsearch,
 ) -> None:
+    """Relay 在发布后标记前被强杀时，重复投递不得造成重复索引。"""
     barrier_control.prepare(Checkpoint.AFTER_RELAY_PUBLISH_BEFORE_MARK)
     dataset_id = await create_dataset(rag_stub, embedding_runtime, "relay-kill")
     document_id, job_id, _ = await submit_bytes(
@@ -58,6 +59,7 @@ async def test_relay_kill_after_publish_before_mark_republishes_safely(
     await wait_for_queue_drained()
 
     async def outbox_is_published() -> bool:
+        """轮询指定 Job 的 Outbox 是否已被 Relay 标记为已发布。"""
         status = await database_probe.scalar(
             "SELECT o.status FROM outbox_events o JOIN tasks t ON t.id = o.task_id "
             "WHERE t.job_id = :job_id",
@@ -95,6 +97,7 @@ async def test_ready_outbox_survives_nats_stop_and_publishes_after_restart(
     docker_control: DockerControl,
     database_probe: DatabaseProbe,
 ) -> None:
+    """NATS 暂停期间 READY Outbox 必须保留，并在恢复后完成发布。"""
     barrier_control.prepare(None)
     dataset_id = await create_dataset(rag_stub, embedding_runtime, "nats-outage")
     document_id, ingestion_job_id, _ = await submit_bytes(
@@ -115,6 +118,7 @@ async def test_ready_outbox_survives_nats_stop_and_publishes_after_restart(
     job_id = str(deleted.job_id)
 
     async def outbox_is_ready() -> bool:
+        """轮询删除 Job 的 Outbox 是否已进入可发布状态。"""
         status = await database_probe.scalar(
             "SELECT o.status FROM outbox_events o JOIN tasks t ON t.id = o.task_id "
             "WHERE t.job_id = :job_id",

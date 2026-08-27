@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 校验 gRPC Servicer 只完成 DTO 转换并委托 application 层。
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
@@ -19,6 +20,7 @@ from tests.fakes.storage import FakeObjectStorage
 
 
 def _service() -> tuple[RagService, FakeMetadataRepository]:
+    """构造本测试所需的输入、替身或运行环境。"""
     repository = FakeMetadataRepository()
     storage = FakeObjectStorage()
     documents = DocumentService(repository, storage, max_upload_bytes=1024)
@@ -32,6 +34,7 @@ def _service() -> tuple[RagService, FakeMetadataRepository]:
 
 
 async def _upload_frames(dataset_id: str) -> AsyncIterator[rag_service_pb2.UploadDocumentRequest]:
+    """构造本测试所需的输入、替身或运行环境。"""
     yield rag_service_pb2.UploadDocumentRequest(
         header=rag_service_pb2.UploadHeader(
             context=rag_service_pb2.RequestContext(
@@ -47,6 +50,7 @@ async def _upload_frames(dataset_id: str) -> AsyncIterator[rag_service_pb2.Uploa
 
 @pytest.mark.asyncio
 async def test_open_rpc_methods_convert_application_results() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service, repository = _service()
     created = await service.CreateDataset(
         rag_service_pb2.CreateDatasetRequest(
@@ -94,6 +98,7 @@ async def test_open_rpc_methods_convert_application_results() -> None:
 
 @pytest.mark.asyncio
 async def test_delete_dataset_maps_success_reuse_and_stable_failures() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service, _repository = _service()
     created = await service.CreateDataset(
         rag_service_pb2.CreateDatasetRequest(
@@ -162,6 +167,7 @@ async def test_delete_dataset_maps_success_reuse_and_stable_failures() -> None:
 
 @pytest.mark.asyncio
 async def test_rpc_maps_domain_failures_and_keeps_future_methods_closed() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service, _ = _service()
     missing = await service.GetJob(
         rag_service_pb2.GetJobRequest(request_id="request-job", job_id="missing"), None
@@ -180,9 +186,11 @@ async def test_rpc_maps_domain_failures_and_keeps_future_methods_closed() -> Non
 
 @pytest.mark.asyncio
 async def test_submit_document_rejects_data_before_header() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service, _ = _service()
 
     async def invalid_frames() -> AsyncIterator[rag_service_pb2.UploadDocumentRequest]:
+        """执行测试所需的辅助操作。"""
         yield rag_service_pb2.UploadDocumentRequest(data=b"orphan")
 
     response = await service.SubmitDocument(invalid_frames(), None)
@@ -192,6 +200,7 @@ async def test_submit_document_rejects_data_before_header() -> None:
 
 @pytest.mark.asyncio
 async def test_open_methods_work_through_generated_grpc_transport() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service, _ = _service()
     server = grpc.aio.server()
     rag_service_pb2_grpc.add_RagServiceServicer_to_server(service, server)

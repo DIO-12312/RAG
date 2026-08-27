@@ -1,1 +1,1 @@
-"""Application use-case orchestration."""
+"""应用层用例编排：只依赖端口抽象，不直接接触基础设施 SDK。"""

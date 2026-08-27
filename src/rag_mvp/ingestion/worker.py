@@ -1,4 +1,4 @@
-"""The sole future NATS consumer and ACK/NAK owner."""
+"""唯一 NATS 消费者与 ACK/NAK 所有者，避免应用服务重复消费或确认消息。"""
 
 from __future__ import annotations
 
@@ -24,6 +24,8 @@ from rag_mvp.ports.message_queue import TaskQueue
 from rag_mvp.ports.metadata import MetadataRepository
 
 
+# 关键语义：无法条件认领的投递直接 ACK；已认领但可重试的失败才 NAK，
+# 因而不会让取消、删除或旧 generation 的消息重新启动流水线。
 async def worker_once(
     queue: TaskQueue,
     metadata: MetadataRepository,
@@ -118,6 +120,7 @@ async def worker_once(
     return True
 
 
+# Worker 是唯一 NATS 消费与确认边界，应用服务不得绕开此循环直接 ACK/NAK。
 async def run_worker(
     settings: Settings,
     container: Container,
@@ -154,6 +157,7 @@ async def run_worker(
                 )
 
 
+# 内部辅助：完成 run 所需的局部转换或校验。
 async def _run() -> None:
     settings = load_settings()
     container = await build_worker_container(settings)
@@ -165,6 +169,7 @@ async def _run() -> None:
         await container.close()
 
 
+# 控制台入口：解析运行环境后启动对应进程。
 def main() -> None:
     """Run the Worker process."""
 

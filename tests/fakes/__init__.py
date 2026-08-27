@@ -1,1 +1,1 @@
-"""Test-only port implementations for Docker-free functional tests."""
+"""仅供 Docker-free 功能测试使用的端口伪实现。"""

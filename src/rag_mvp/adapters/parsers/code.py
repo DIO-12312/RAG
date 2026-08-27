@@ -1,4 +1,4 @@
-"""Lightweight multi-language code parser preserving top-level symbols."""
+"""轻量多语言代码解析器：保留顶层符号，方便代码检索定位。"""
 
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ _SYMBOLS = {
 
 
 class CodeParser:
+    # 实现 parse 对应的局部职责。
     async def parse(self, source_name: str, content: bytes) -> tuple[ParsedSegment, ...]:
         language = _LANGUAGES.get(Path(source_name).suffix.casefold())
         if language is None:
@@ -54,6 +55,7 @@ class CodeParser:
         return self._build(lines, language, tuple(ranges))
 
     @staticmethod
+    # 内部辅助：完成 find_symbols 所需的局部转换或校验。
     def _find_symbols(lines: list[str], pattern: re.Pattern[str]) -> list[tuple[int, str]]:
         result: list[tuple[int, str]] = []
         for index, line in enumerate(lines):
@@ -63,6 +65,7 @@ class CodeParser:
         return result
 
     @staticmethod
+    # 内部辅助：完成 build 所需的局部转换或校验。
     def _build(
         lines: list[str],
         language: str,

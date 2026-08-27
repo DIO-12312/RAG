@@ -1,4 +1,4 @@
-"""Async gRPC server lifecycle."""
+"""异步 gRPC Server 生命周期：绑定服务、可选开发反射及优雅关闭。"""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from rag_mvp.config import Settings, load_settings
 from rag_mvp.rpc.generated import rag_service_pb2, rag_service_pb2_grpc
 
 
+# 启动服务并在停止信号到达后执行优雅关闭。
 async def serve(
     settings: Settings,
     container: Container,
@@ -47,6 +48,7 @@ async def serve(
         await server.stop(settings.grpc_shutdown_timeout_seconds)
 
 
+# 内部辅助：完成 run 所需的局部转换或校验。
 async def _run() -> None:
     settings = load_settings()
     container = await build_server_container(settings)
@@ -58,6 +60,7 @@ async def _run() -> None:
         await container.close()
 
 
+# 控制台入口：解析运行环境后启动对应进程。
 def main() -> None:
     """Run the gRPC server process."""
 

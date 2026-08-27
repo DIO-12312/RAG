@@ -1,4 +1,4 @@
-"""Pure rerank score application and deterministic ordering."""
+"""纯重排分数应用与确定性排序：只消费既有分数，不调用模型 SDK。"""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ class RerankedCandidate:
     rerank_score: float
 
 
+# 实现 apply_rerank_scores 对应的局部职责。
 def apply_rerank_scores(
     candidates: Sequence[HybridCandidate],
     scores: Sequence[float],

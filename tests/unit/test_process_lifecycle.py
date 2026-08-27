@@ -21,6 +21,7 @@ from tests.fakes.container import MockFunctionalHarness
 
 
 def _settings(tmp_path: Path) -> Settings:
+    """构造本测试所需的输入、替身或运行环境。"""
     return Settings(
         _env_file=None,
         environment=Environment.TEST,
@@ -43,6 +44,7 @@ async def test_empty_background_process_stops_without_external_connections(
     tmp_path: Path,
     runner: object,
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     settings = _settings(tmp_path)
     harness = MockFunctionalHarness.build(tmp_path, datetime.now(UTC))
     if runner is run_worker:
@@ -90,6 +92,7 @@ async def test_empty_background_process_stops_without_external_connections(
 
 @pytest.mark.asyncio
 async def test_grpc_server_starts_and_stops_cleanly(tmp_path: Path) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
@@ -108,12 +111,14 @@ async def test_grpc_server_starts_and_stops_cleanly(tmp_path: Path) -> None:
 
 
 async def _empty_upload() -> AsyncIterator[rag_service_pb2.UploadDocumentRequest]:
+    """构造本测试所需的输入、替身或运行环境。"""
     if False:
         yield rag_service_pb2.UploadDocumentRequest()
 
 
 @pytest.mark.asyncio
 async def test_all_unopened_rpc_methods_return_feature_not_available() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     service = RagService()
     context = cast("grpc.aio.ServicerContext", None)
     calls: list[Awaitable[object]] = [

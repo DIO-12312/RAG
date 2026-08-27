@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 校验模型网关对 Embedding、Rerank 及异常的统一行为。
 import httpx
 import pytest
 
@@ -10,6 +11,7 @@ from tests.fakes.model import FakeModelGateway
 
 @pytest.mark.asyncio
 async def test_fake_model_is_deterministic_and_dimensionally_stable() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     model = FakeModelGateway(dimension=8)
 
     first = await model.embed(["alpha", "beta", "alpha"])
@@ -24,6 +26,7 @@ async def test_fake_model_is_deterministic_and_dimensionally_stable() -> None:
 
 @pytest.mark.asyncio
 async def test_unconfigured_rerank_is_explicitly_retryable_unavailable() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(500)))
     gateway = OpenAICompatibleModelGateway(
         client,

@@ -1,4 +1,4 @@
-"""Integration tests against a real NATS JetStream server."""
+"""针对真实 NATS JetStream 的 adapter 集成测试。"""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from rag_mvp.domain.errors import DomainError, DomainFailure
 
 @pytest_asyncio.fixture
 async def nats_queue() -> AsyncIterator[tuple[NatsJetStreamTaskQueue, str, str, str, str]]:
+    """创建独占 Stream/Consumer 的 JetStream 队列，避免真实 NATS 测试串扰。"""
     url = os.environ.get("RAG_TEST_NATS_URL", "nats://127.0.0.1:4222")
     suffix = uuid.uuid4().hex
     stream = f"RAGTEST_{suffix}"
@@ -51,6 +52,7 @@ async def nats_queue() -> AsyncIterator[tuple[NatsJetStreamTaskQueue, str, str, 
 async def test_real_jetstream_preserves_duplicate_publish_and_ack_removes_deliveries(
     nats_queue: tuple[NatsJetStreamTaskQueue, str, str, str, str],
 ) -> None:
+    """验证重复发布保留消息，而 ACK 会移除对应 delivery。"""
     queue, _url, _stream, _subject, _consumer = nats_queue
     await queue.publish("task-1")
     await queue.publish("task-1")
@@ -72,6 +74,7 @@ async def test_real_jetstream_preserves_duplicate_publish_and_ack_removes_delive
 async def test_real_jetstream_redelivers_after_ack_wait_and_honors_delayed_nak(
     nats_queue: tuple[NatsJetStreamTaskQueue, str, str, str, str],
 ) -> None:
+    """验证超过 ack_wait 会重投，并且延迟 NAK 按预期生效。"""
     queue, _url, _stream, _subject, _consumer = nats_queue
     await queue.publish("task-ack-wait")
     first = await queue.consume("worker-a", timeout_seconds=1)
@@ -107,6 +110,7 @@ async def test_real_jetstream_redelivers_after_ack_wait_and_honors_delayed_nak(
 async def test_real_jetstream_provisioning_is_idempotent_and_rejects_incompatible_consumer(
     nats_queue: tuple[NatsJetStreamTaskQueue, str, str, str, str],
 ) -> None:
+    """重复 provision 必须幂等，但不兼容 consumer 配置必须被拒绝。"""
     _queue, url, stream, subject, consumer = nats_queue
     equivalent = await NatsJetStreamTaskQueue.connect(
         url,

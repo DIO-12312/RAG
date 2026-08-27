@@ -1,4 +1,4 @@
-"""Deterministic character-bounded chunking with separator preference."""
+"""确定性字符长度切块：优先在换行或空格边界截断以保留可读性。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from rag_mvp.ports.parser import ParsedSegment
 class RecursiveChunker:
     """Split segments with stable overlap while preferring line and word boundaries."""
 
+    # 初始化该对象的依赖、配置或受控资源。
     def __init__(self, chunk_size: int, overlap: int) -> None:
         if chunk_size < 1:
             raise ValueError("chunk_size must be at least 1")
@@ -20,6 +21,7 @@ class RecursiveChunker:
         self._chunk_size = chunk_size
         self._overlap = overlap
 
+    # 实现 split 对应的局部职责。
     async def split(self, segments: Sequence[ParsedSegment]) -> tuple[ChunkDraft, ...]:
         drafts: list[ChunkDraft] = []
         for segment in segments:
@@ -41,6 +43,7 @@ class RecursiveChunker:
                 start = max(start + 1, end - self._overlap)
         return tuple(drafts)
 
+    # 内部辅助：完成 find_end 所需的局部转换或校验。
     def _find_end(self, text: str, start: int) -> int:
         hard_end = min(start + self._chunk_size, len(text))
         if hard_end == len(text):
@@ -53,6 +56,7 @@ class RecursiveChunker:
         return boundary + 1 if boundary >= minimum else hard_end
 
     @staticmethod
+    # 内部辅助：完成 locator 所需的局部转换或校验。
     def _locator(segment: ParsedSegment, start: int, end: int) -> Locator:
         locator = segment.locator
         start_line = locator.start_line

@@ -1,4 +1,4 @@
-"""Domain state and operation enumerations."""
+"""领域状态与操作枚举，是 Job、Task、Document 状态机的有限集合。"""
 
 from enum import StrEnum
 

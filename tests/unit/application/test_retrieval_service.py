@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证检索服务复核 active version 后执行融合、重排与 evidence 返回。
 from datetime import UTC, datetime
 
 import pytest
@@ -18,11 +19,13 @@ from tests.fakes.search_engine import FakeSearchEngine
 
 class FailingRerankModel(FakeModelGateway):
     async def rerank(self, query: str, passages: list[str]) -> list[float]:
+        """模拟重排模型并返回可预测的分数。"""
         del query, passages
         raise ConnectionError("reranker unavailable")
 
 
 def _chunk(document_id: str, version: int, content: str, *, team: str = "search") -> Chunk:
+    """构造本测试所需的输入、替身或运行环境。"""
     return Chunk(
         id=f"chunk-{version}",
         document_id=document_id,
@@ -38,6 +41,7 @@ def _chunk(document_id: str, version: int, content: str, *, team: str = "search"
 
 @pytest.mark.asyncio
 async def test_dense_retrieve_filters_stale_versions_and_preserves_scores() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     model = FakeModelGateway(8)
@@ -95,6 +99,7 @@ async def test_dense_retrieve_filters_stale_versions_and_preserves_scores() -> N
 async def test_retrieve_rejects_invalid_or_unavailable_requests(
     query: str, dataset_id: str, enable_rerank: bool, code: str
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     await repository.create_dataset(Dataset("dataset-1", "Docs", "fake", 8, now))
@@ -118,6 +123,7 @@ async def test_retrieve_rejects_invalid_or_unavailable_requests(
 
 @pytest.mark.asyncio
 async def test_rerank_failure_degrades_to_rrf_evidence() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     model = FailingRerankModel(8)

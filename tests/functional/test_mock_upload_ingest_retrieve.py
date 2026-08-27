@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 在完整 Mock 依赖下覆盖上传、异步摄取和混合检索主路径。
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ from tests.fakes.container import MockFunctionalHarness
 async def _stub(
     harness: MockFunctionalHarness,
 ) -> AsyncIterator[rag_service_pb2_grpc.RagServiceStub]:
+    """在内存 gRPC Server 上暴露 Mock harness，供 RPC 边界测试使用。"""
     server = grpc.aio.server()
     rag_service_pb2_grpc.add_RagServiceServicer_to_server(harness.rpc, server)
     port = server.add_insecure_port("127.0.0.1:0")
@@ -34,6 +36,7 @@ async def _upload(
     content: bytes,
     source_name: str = "guide.txt",
 ) -> AsyncIterator[rag_service_pb2.UploadDocumentRequest]:
+    """将测试字节拆为两帧，覆盖客户端流式上传协议。"""
     yield rag_service_pb2.UploadDocumentRequest(
         header=rag_service_pb2.UploadHeader(
             context=rag_service_pb2.RequestContext(
@@ -51,6 +54,7 @@ async def _upload(
 @pytest.mark.asyncio
 @pytest.mark.functional
 async def test_mock_grpc_upload_async_ingest_and_dense_retrieve(tmp_path) -> None:
+    """覆盖上传、异步摄取、检索、重排及 RPC 参数校验主路径。"""
     harness = MockFunctionalHarness.build(tmp_path / "objects", datetime.now(UTC))
     content = "第一行：RAG 使用向量检索。\n第二行：Evidence 保留来源。".encode()
 
@@ -75,6 +79,7 @@ async def test_mock_grpc_upload_async_ingest_and_dense_retrieve(tmp_path) -> Non
         )
 
         assert pending.result.status == rag_service_pb2.JOB_STATUS_PENDING
+        # 模拟 Worker 消费已投递任务，使 Job 从等待态收敛到成功态。
         await harness.run_ingestion_once()
 
         succeeded = await stub.GetJob(
@@ -126,6 +131,7 @@ async def test_mock_grpc_upload_async_ingest_and_dense_retrieve(tmp_path) -> Non
 @pytest.mark.asyncio
 @pytest.mark.functional
 async def test_deleted_dataset_is_rejected_before_cleanup_worker_runs(tmp_path) -> None:
+    """数据集逻辑删除后，物理清理尚未执行也必须立即拒绝检索。"""
     harness = MockFunctionalHarness.build(tmp_path / "objects", datetime.now(UTC))
 
     async with _stub(harness) as stub:

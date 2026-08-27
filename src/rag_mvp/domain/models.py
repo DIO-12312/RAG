@@ -1,4 +1,4 @@
-"""Infrastructure-neutral RAG domain models."""
+"""基础设施无关的 RAG 领域模型，承载数据与不变式而非 SDK 行为。"""
 
 from __future__ import annotations
 
@@ -21,16 +21,19 @@ from rag_mvp.domain.enums import (
 from rag_mvp.domain.errors import DomainFailure
 
 
+# 内部辅助：完成 require_text 所需的局部转换或校验。
 def _require_text(value: str, field_name: str) -> None:
     if not value.strip():
         raise ValueError(f"{field_name} must not be empty")
 
 
+# 内部辅助：完成 require_digest 所需的局部转换或校验。
 def _require_digest(value: str, field_name: str) -> None:
     if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
         raise ValueError(f"{field_name} must be a lowercase SHA-256 hex digest")
 
 
+# 内部辅助：完成 frozen_mapping 所需的局部转换或校验。
 def _frozen_mapping(value: Mapping[str, str]) -> Mapping[str, str]:
     return MappingProxyType(dict(value))
 
@@ -47,6 +50,7 @@ class Dataset:
     status: DatasetStatus = DatasetStatus.ACTIVE
     lifecycle_generation: int = 0
 
+    # 在构造完成后校验并固化领域不变式。
     def __post_init__(self) -> None:
         _require_text(self.id, "id")
         _require_text(self.name, "name")
@@ -73,6 +77,7 @@ class Document:
     created_at: datetime
     object_key: str | None = None
 
+    # 在构造完成后校验并固化领域不变式。
     def __post_init__(self) -> None:
         _require_text(self.id, "id")
         _require_text(self.dataset_id, "dataset_id")
@@ -95,6 +100,7 @@ class IngestionFingerprint:
     job_id: str
     state: FingerprintState
 
+    # 在构造完成后校验并固化领域不变式。
     def __post_init__(self) -> None:
         _require_digest(self.file_sha256, "file_sha256")
         _require_digest(self.config_digest, "config_digest")
@@ -119,6 +125,7 @@ class Job:
     is_system: bool = False
     dataset_id: str = ""
 
+    # 在构造完成后校验并固化领域不变式。
     def __post_init__(self) -> None:
         _require_text(self.dataset_id, "dataset_id")
         _require_digest(self.config_digest, "config_digest")
@@ -149,6 +156,7 @@ class Task:
     created_at: datetime
     error: DomainFailure | None = None
 
+    # 在构造完成后校验并固化领域不变式。
     def __post_init__(self) -> None:
         if self.attempt < 0:
             raise ValueError("attempt must not be negative")
@@ -166,6 +174,7 @@ class OutboxEvent:
     created_at: datetime
     published_at: datetime | None = None
 
+    # 在构造完成后校验并固化领域不变式。
     def __post_init__(self) -> None:
         if self.attempt < 0:
             raise ValueError("attempt must not be negative")
@@ -179,6 +188,7 @@ class IndexBuild:
     status: IndexBuildStatus
     created_at: datetime
 
+    # 在构造完成后校验并固化领域不变式。
     def __post_init__(self) -> None:
         if self.index_version < 1:
             raise ValueError("index_version must be at least 1")
@@ -193,6 +203,7 @@ class Locator:
     language: str | None = None
     metadata: Mapping[str, str] = field(default_factory=dict)
 
+    # 在构造完成后校验并固化领域不变式。
     def __post_init__(self) -> None:
         if self.page_number is not None and self.page_number < 1:
             raise ValueError("page_number must be at least 1")
@@ -215,6 +226,7 @@ class Chunk:
     locator: Locator
     metadata: Mapping[str, str] = field(default_factory=dict)
 
+    # 在构造完成后校验并固化领域不变式。
     def __post_init__(self) -> None:
         if self.index_version < 1:
             raise ValueError("index_version must be at least 1")
@@ -244,6 +256,7 @@ class Evidence:
     index_version: int
     metadata: Mapping[str, str] = field(default_factory=dict)
 
+    # 在构造完成后校验并固化领域不变式。
     def __post_init__(self) -> None:
         if self.index_version < 1:
             raise ValueError("index_version must be at least 1")

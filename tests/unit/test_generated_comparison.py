@@ -12,6 +12,7 @@ from check_generated import generated_files_match  # noqa: E402
 
 
 def test_generated_comparison_ignores_only_line_endings(tmp_path: Path) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     checked = tmp_path / "checked.py"
     regenerated = tmp_path / "regenerated.py"
     checked.write_bytes(b"alpha\r\nbeta\r\n")
@@ -21,6 +22,7 @@ def test_generated_comparison_ignores_only_line_endings(tmp_path: Path) -> None:
 
 
 def test_generated_comparison_rejects_content_changes(tmp_path: Path) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     checked = tmp_path / "checked.py"
     regenerated = tmp_path / "regenerated.py"
     checked.write_text("alpha\n", encoding="utf-8")

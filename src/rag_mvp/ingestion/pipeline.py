@@ -1,4 +1,4 @@
-"""Single-task document parsing, chunking, embedding, and indexing pipeline."""
+"""单 Task 摄取流水线：解析、规范化、切块、向量化并写入索引。"""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from rag_mvp.ports.storage import ObjectStorage
 
 
 class IngestionPipeline:
+    # 初始化该对象的依赖、配置或受控资源。
     def __init__(
         self,
         storage: ObjectStorage,
@@ -32,6 +33,8 @@ class IngestionPipeline:
         self._search = search
         self._failpoint = failpoint
 
+    # 关键语义：先确认正式对象，再按固定顺序构造 Chunk/ES record_id；
+    # 失败会交由上层 Task 状态机和 JetStream redelivery 收敛，不在此处确认消息。
     async def execute(self, claim: TaskClaim) -> tuple[Chunk, ...]:
         document = claim.document
         if document is None:
@@ -96,6 +99,7 @@ class IngestionPipeline:
         await self._checkpoint(Checkpoint.AFTER_INDEX_WRITE)
         return chunks
 
+    # 内部辅助：完成 checkpoint 所需的局部转换或校验。
     async def _checkpoint(self, checkpoint: Checkpoint) -> None:
         if self._failpoint is not None:
             await self._failpoint(checkpoint)

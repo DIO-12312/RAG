@@ -1,4 +1,4 @@
-"""Pure normalization from search candidates to traceable evidence."""
+"""将搜索候选纯转换为可追溯 evidence；最终引用编号由未来 Go 层生成。"""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from rag_mvp.retrieval.hybrid import HybridCandidate
 from rag_mvp.retrieval.rerank import RerankedCandidate
 
 
+# 执行稠密检索该方法负责的领域数据或基础设施状态。
 def dense_evidence(candidate: SearchCandidate) -> Evidence:
     chunk = candidate.chunk
     return Evidence(
@@ -22,6 +23,7 @@ def dense_evidence(candidate: SearchCandidate) -> Evidence:
     )
 
 
+# 实现 hybrid_evidence 对应的局部职责。
 def hybrid_evidence(candidate: HybridCandidate) -> Evidence:
     chunk = candidate.chunk
     return Evidence(
@@ -40,6 +42,7 @@ def hybrid_evidence(candidate: HybridCandidate) -> Evidence:
     )
 
 
+# 实现 reranked_evidence 对应的局部职责。
 def reranked_evidence(candidate: RerankedCandidate) -> Evidence:
     chunk = candidate.chunk
     return Evidence(

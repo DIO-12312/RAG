@@ -1,1 +1,1 @@
-"""Message queue adapter package."""
+"""消息队列适配器包：实现持久任务投递端口。"""

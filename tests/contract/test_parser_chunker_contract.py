@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 校验解析器和切块器输出可被摄取流水线稳定消费。
 import pytest
 
 from tests.fakes.chunker import FakeChunker
@@ -8,6 +9,7 @@ from tests.fakes.parser import FakeParser
 
 @pytest.mark.asyncio
 async def test_parser_and_chunker_preserve_text_order_and_locator() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     parser = FakeParser()
     chunker = FakeChunker()
 

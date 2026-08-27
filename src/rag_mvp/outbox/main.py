@@ -1,4 +1,4 @@
-"""Independent Object Finalizer and Outbox Relay process."""
+"""独立的 Object Finalizer 与 Outbox Relay 进程入口；不执行摄取 Task。"""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from rag_mvp.outbox.relay import run_relay
 from rag_mvp.outbox.sweeper import run_staging_sweeper
 
 
+# 运行该方法负责的领域数据或基础设施状态。
 async def run_outbox(
     settings: Settings,
     container: Container,
@@ -68,6 +69,7 @@ async def run_outbox(
         )
 
 
+# 内部辅助：完成 run 所需的局部转换或校验。
 async def _run() -> None:
     settings = load_settings()
     container = await build_outbox_container(settings)
@@ -79,6 +81,7 @@ async def _run() -> None:
         await container.close()
 
 
+# 控制台入口：解析运行环境后启动对应进程。
 def main() -> None:
     """Run the independent Outbox process."""
 

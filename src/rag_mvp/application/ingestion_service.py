@@ -1,4 +1,4 @@
-"""Application use case for conditionally executing one ingestion task."""
+"""有条件执行单个摄取 Task 的应用用例：负责状态栅栏，不消费消息。"""
 
 from __future__ import annotations
 
@@ -18,10 +18,12 @@ class IngestionExecution:
 
 
 class IngestionService:
+    # 初始化该对象的依赖、配置或受控资源。
     def __init__(self, metadata: MetadataRepository, pipeline: IngestionPipeline) -> None:
         self._metadata = metadata
         self._pipeline = pipeline
 
+    # 条件认领会同时检查取消标记与 generation fence，防止过期投递写回新版本。
     async def execute(
         self,
         task_id: str,

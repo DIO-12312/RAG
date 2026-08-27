@@ -1,4 +1,4 @@
-"""Real MySQL tests for upload idempotency and transaction atomicity."""
+"""验证真实 MySQL 上传幂等与元数据事务原子性。"""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from rag_mvp.ports.metadata import SubmitIngestion
 
 
 def _dataset(now: datetime) -> Dataset:
+    """构造用于摄取提交事务的最小 Dataset 聚合。"""
     return Dataset(
         id="dataset-1",
         tenant_id="default_tenant",
@@ -28,6 +29,7 @@ def _dataset(now: datetime) -> Dataset:
 
 
 def _submission(*, idempotency_key: str, staging_key: str, now: datetime) -> SubmitIngestion:
+    """构造固定指纹的提交命令，便于验证去重与幂等语义。"""
     return SubmitIngestion(
         idempotency_key=idempotency_key,
         dataset_id="dataset-1",
@@ -40,6 +42,7 @@ def _submission(*, idempotency_key: str, staging_key: str, now: datetime) -> Sub
 
 
 async def _counts(engine: AsyncEngine) -> dict[str, int]:
+    """统计提交事务涉及的表行数，供原子性断言使用。"""
     async with engine.connect() as connection:
         return {
             table_name: int(
@@ -62,6 +65,7 @@ async def _counts(engine: AsyncEngine) -> dict[str, int]:
 async def test_concurrent_same_fingerprint_creates_one_canonical_task_and_outbox(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """同一指纹并发提交只能生成一个 canonical Task 与 Outbox。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     await repository.create_dataset(_dataset(now))
@@ -102,6 +106,7 @@ async def test_concurrent_same_fingerprint_creates_one_canonical_task_and_outbox
 async def test_exception_before_commit_rolls_back_all_submission_rows(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """事务在写 Outbox 前异常时，前置元数据写入必须全部回滚。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     await repository.create_dataset(_dataset(now))
@@ -114,6 +119,7 @@ async def test_exception_before_commit_rolls_back_all_submission_rows(
         _context: object,
         _executemany: bool,
     ) -> None:
+        """故意在事务临界点抛错，模拟应用进程失败。"""
         if "insert into outbox_events" in statement.lower():
             raise RuntimeError("injected failure before transaction commit")
 
@@ -142,6 +148,7 @@ async def test_exception_before_commit_rolls_back_all_submission_rows(
 async def test_same_idempotency_key_replays_result_and_rejects_changed_command(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """相同幂等键重放返回既有结果，改变请求内容则明确拒绝。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     await repository.create_dataset(_dataset(now))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证领域实体不可变字段、默认值和序列化数据形状。
 from datetime import UTC, datetime
 
 import pytest
@@ -16,6 +17,7 @@ from rag_mvp.domain.models import Dataset, Document, Job, Task
 
 
 def test_dataset_requires_embedding_dimension_and_model() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValueError, match="embedding_dimension"):
         Dataset(
             id="dataset-1",
@@ -27,6 +29,7 @@ def test_dataset_requires_embedding_dimension_and_model() -> None:
 
 
 def test_dataset_preserves_tenant_boundary() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     dataset = Dataset(
         id="dataset-1",
         name="Docs",
@@ -40,6 +43,7 @@ def test_dataset_preserves_tenant_boundary() -> None:
 
 
 def test_dataset_starts_active_with_a_non_negative_lifecycle_generation() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     dataset = Dataset(
         id="dataset-1",
         name="Docs",
@@ -66,6 +70,7 @@ def test_dataset_starts_active_with_a_non_negative_lifecycle_generation() -> Non
 
 
 def test_dataset_cleanup_job_has_dataset_scope_but_no_document() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     job = Job(
         id="job-1",
         type=JobType.DELETE_DATASET,
@@ -84,6 +89,7 @@ def test_dataset_cleanup_job_has_dataset_scope_but_no_document() -> None:
 
 
 def test_every_job_requires_dataset_scope() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValueError, match="dataset_id"):
         Job(
             id="job-1",
@@ -99,6 +105,7 @@ def test_every_job_requires_dataset_scope() -> None:
 
 
 def test_document_versions_and_generation_are_non_negative() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValueError, match="next_index_version"):
         Document(
             id="doc-1",
@@ -114,6 +121,7 @@ def test_document_versions_and_generation_are_non_negative() -> None:
 
 
 def test_job_progress_is_normalized() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValueError, match="progress"):
         Job(
             id="job-1",
@@ -130,6 +138,7 @@ def test_job_progress_is_normalized() -> None:
 
 
 def test_task_delivery_counters_cannot_be_negative() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValueError, match="attempt"):
         Task(
             id="task-1",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证文档逻辑删除、异步清理及检索隔离的功能闭环。
 from datetime import UTC, datetime
 
 import pytest
@@ -16,6 +17,7 @@ from tests.functional.test_mock_upload_ingest_retrieve import _stub, _upload
 async def test_delete_is_immediately_invisible_then_worker_cleans_storage_and_index(
     tmp_path,
 ) -> None:
+    """删除先立即屏蔽检索，随后异步清理对象存储和索引。"""
     now = datetime.now(UTC)
     harness = MockFunctionalHarness.build(tmp_path / "objects", now)
 

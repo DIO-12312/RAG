@@ -1,4 +1,4 @@
-"""Safety and coordination rules for test-only file barrier failpoints."""
+"""测试专用文件屏障 failpoint 的安全性和协调规则。"""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ def test_non_test_environment_rejects_configured_fault_injection(
     tmp_path: Path,
     environment: Environment,
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValidationError, match="failpoints are allowed only in test"):
         Settings(
             environment=environment,
@@ -29,6 +30,7 @@ def test_non_test_environment_rejects_configured_fault_injection(
 
 
 def test_factory_defends_against_unconfigured_or_unvalidated_settings(tmp_path: Path) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     assert FileBarrierFailpoint.from_settings(Settings(_env_file=None)) is None
     unsafe = Settings.model_construct(
         environment=Environment.PRODUCTION,
@@ -52,6 +54,7 @@ def test_factory_defends_against_unconfigured_or_unvalidated_settings(tmp_path: 
 async def test_enabled_checkpoint_writes_reached_and_blocks_until_release(
     tmp_path: Path,
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     settings = Settings(
         environment=Environment.TEST,
         failpoint_root=tmp_path,
@@ -77,6 +80,7 @@ async def test_enabled_checkpoint_writes_reached_and_blocks_until_release(
 async def test_disabled_checkpoint_is_noop_and_cancellation_does_not_hang(
     tmp_path: Path,
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     barrier = FileBarrierFailpoint(tmp_path, {Checkpoint.AFTER_PARSE})
     await asyncio.wait_for(barrier(Checkpoint.AFTER_INDEX_WRITE), timeout=0.1)
 
@@ -88,6 +92,7 @@ async def test_disabled_checkpoint_is_noop_and_cancellation_does_not_hang(
 
 
 async def _wait_for_path(path: Path) -> None:
+    """构造本测试所需的输入、替身或运行环境。"""
     for _ in range(100):
         if path.exists():
             return

@@ -1,4 +1,4 @@
-"""Real Compose upload, ingestion, embedding, indexing, and retrieval E2E."""
+"""真实 Compose 下上传、摄取、向量化、索引和检索的端到端验证。"""
 
 from __future__ import annotations
 
@@ -77,6 +77,7 @@ async def test_real_upload_ingest_and_hybrid_retrieve_preserves_provenance(
     embedding_runtime: EmbeddingRuntime,
     case: DocumentCase,
 ) -> None:
+    """验证真实 Docker 链路摄取后可混合召回并保留来源定位。"""
     dataset_id = await create_dataset(rag_stub, embedding_runtime, case.source_name)
     document_id, job_id = await submit_document(
         rag_stub,

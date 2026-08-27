@@ -1,4 +1,4 @@
-"""Transport-independent application DTOs."""
+"""与 gRPC 和持久化实现无关的应用层命令、查询及视图 DTO。"""
 
 from __future__ import annotations
 

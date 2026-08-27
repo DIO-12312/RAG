@@ -1,4 +1,4 @@
-"""Text PDF parser preserving page-level provenance."""
+"""文本型 PDF 解析器：按页保留出处信息，不承担 OCR 职责。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from rag_mvp.ports.parser import ParsedSegment
 
 
 class PdfParser:
+    # 实现 parse 对应的局部职责。
     async def parse(self, source_name: str, content: bytes) -> tuple[ParsedSegment, ...]:
         del source_name
         try:

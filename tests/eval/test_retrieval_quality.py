@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 基于固定 fixture 验证召回率、MRR 和 evidence 来源质量。
 import json
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from rag_mvp.retrieval.evaluation import EvaluationCase, evaluate_rankings
 
 @pytest.mark.eval
 def test_fixed_thirty_question_quality_baseline() -> None:
+    """验证固定 30 题数据集满足既定的检索质量下限。"""
     fixture_path = Path(__file__).parent / "fixtures" / "retrieval_quality.json"
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     cases = tuple(

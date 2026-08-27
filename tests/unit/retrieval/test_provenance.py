@@ -7,6 +7,7 @@ from rag_mvp.retrieval.provenance import dense_evidence
 
 
 def test_dense_evidence_preserves_traceable_chunk_fields() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     chunk = Chunk(
         id="chunk-1",
         document_id="document-1",

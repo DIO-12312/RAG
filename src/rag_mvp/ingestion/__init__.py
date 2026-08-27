@@ -1,1 +1,1 @@
-"""Task worker and ingestion pipeline package."""
+"""摄取 Worker 与流水线包：从 Task 驱动解析、切块、向量化和索引。"""

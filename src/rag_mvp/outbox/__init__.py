@@ -1,1 +1,1 @@
-"""Object finalization and transactional outbox relay processes."""
+"""对象定稿与事务 Outbox Relay 进程包，消除数据库与消息队列双写风险。"""

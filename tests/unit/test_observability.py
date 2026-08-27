@@ -6,6 +6,7 @@ from rag_mvp.observability import emit_event
 
 
 def test_rag_event_always_contains_correlation_and_stage_fields() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with capture_logs() as logs:
         emit_event(
             "ingestion_completed",

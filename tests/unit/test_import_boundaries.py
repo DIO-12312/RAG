@@ -55,6 +55,7 @@ FORBIDDEN_IMPORT_PREFIXES: Final = {
 
 
 def _imports(path: Path) -> list[str]:
+    """构造本测试所需的输入、替身或运行环境。"""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     imports: list[str] = []
     for node in ast.walk(tree):
@@ -66,12 +67,14 @@ def _imports(path: Path) -> list[str]:
 
 
 def test_final_layer_packages_exist() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     missing = [name for name in REQUIRED_PACKAGES if not (SOURCE_ROOT / name).is_dir()]
 
     assert missing == []
 
 
 def test_source_imports_respect_layer_boundaries() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     violations: list[str] = []
     for layer, forbidden_prefixes in FORBIDDEN_IMPORT_PREFIXES.items():
         for path in sorted((SOURCE_ROOT / layer).rglob("*.py")):
@@ -84,6 +87,7 @@ def test_source_imports_respect_layer_boundaries() -> None:
 
 
 def test_production_source_never_imports_test_fakes() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     violations = [
         f"{path.relative_to(SOURCE_ROOT)}: forbidden test import {imported_module}"
         for path in sorted(SOURCE_ROOT.rglob("*.py"))
@@ -95,6 +99,7 @@ def test_production_source_never_imports_test_fakes() -> None:
 
 
 def test_all_declared_ports_are_protocols() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     expected = {
         "metadata": "MetadataRepository",
         "storage": "ObjectStorage",

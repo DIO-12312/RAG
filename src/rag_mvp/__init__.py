@@ -1,3 +1,3 @@
-"""Python RAG compute service."""
+"""Python RAG 计算服务包；仅承载摄取与检索等计算职责。"""
 
 __version__ = "0.1.0"

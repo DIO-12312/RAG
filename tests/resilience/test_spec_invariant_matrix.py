@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 将 SPEC 中关键可靠性承诺映射为可执行的测试覆盖检查。
 import json
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pytest
 
 @pytest.mark.resilience
 def test_every_spec_invariant_has_mock_evidence_and_explicit_real_validation_status() -> None:
+    """规格不变量必须有 Mock 证据，并声明真实环境的验证状态。"""
     fixture = Path(__file__).parents[1] / "fixtures" / "reliability_matrix.json"
     matrix = json.loads(fixture.read_text(encoding="utf-8"))
 

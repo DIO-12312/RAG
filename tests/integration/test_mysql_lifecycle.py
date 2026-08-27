@@ -1,4 +1,4 @@
-"""Real MySQL tests for cancel, delete, and cleanup lifecycle semantics."""
+"""针对真实 MySQL 的取消、删除与清理生命周期语义测试。"""
 
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ async def _submitted(
     repository: MySQLMetadataRepository,
     now: datetime,
 ) -> SubmitResult:
+    """创建生命周期测试所需的真实 MySQL 摄取聚合。"""
     await repository.create_dataset(
         Dataset(
             id="dataset-1",
@@ -58,6 +59,7 @@ async def _submitted(
 
 
 def _chunk(document_id: str, index_version: int = 1) -> Chunk:
+    """构造用于完成或取消路径的最小 Chunk。"""
     return Chunk(
         id="c" * 16,
         document_id=document_id,
@@ -75,6 +77,7 @@ def _chunk(document_id: str, index_version: int = 1) -> Chunk:
 async def test_pending_cancel_is_immediate_idempotent_and_withdraws_outbox(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """等待态取消必须立刻幂等并撤销 Outbox。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)
@@ -102,6 +105,7 @@ async def test_pending_cancel_is_immediate_idempotent_and_withdraws_outbox(
 async def test_running_cancel_converges_at_completion_without_activating_version(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """运行中取消在完成点收敛，且不得激活版本。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)
@@ -144,6 +148,7 @@ async def test_running_cancel_converges_at_completion_without_activating_version
 async def test_delete_hides_immediately_cancels_ingest_and_cleanup_honors_generation(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """删除立刻不可见、取消摄取并由清理任务遵守 generation。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)
@@ -196,6 +201,7 @@ async def test_delete_hides_immediately_cancels_ingest_and_cleanup_honors_genera
 async def test_new_delete_key_for_deleted_document_is_rejected(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """已删除文档使用新幂等键再次删除必须被拒绝。"""
     repository, _engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)
@@ -214,6 +220,7 @@ async def test_new_delete_key_for_deleted_document_is_rejected(
 async def test_delete_dataset_atomically_fences_children_and_enqueues_cleanup(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """删除数据集必须原子围栏全部子资源并创建清理任务。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)
@@ -274,6 +281,7 @@ async def test_delete_dataset_atomically_fences_children_and_enqueues_cleanup(
 async def test_delete_dataset_rejects_new_key_and_new_ingestion(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """数据集删除中时拒绝新删除键和新摄取请求。"""
     repository, _engine = mysql_repository
     now = datetime.now(UTC)
     await _submitted(repository, now)
@@ -303,6 +311,7 @@ async def test_delete_dataset_rejects_new_key_and_new_ingestion(
 async def test_dataset_cleanup_snapshot_and_final_purge_remove_complete_aggregate(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """数据集清理完成后必须彻底删除完整元数据聚合。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)

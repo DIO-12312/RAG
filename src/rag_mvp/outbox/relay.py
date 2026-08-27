@@ -1,4 +1,4 @@
-"""Publish READY transactional Outbox events with at-least-once semantics."""
+"""以至少一次语义发布 READY 事务 Outbox 事件；消息内容仅为 task_id。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from rag_mvp.ports.message_queue import TaskQueue
 from rag_mvp.ports.metadata import MetadataRepository
 
 
+# 关键语义：发布成功、标记已发布前崩溃会再次发布同一 task_id；Worker 必须幂等处理。
 async def relay_once(
     metadata: MetadataRepository,
     queue: TaskQueue,
@@ -29,6 +30,7 @@ async def relay_once(
     return published
 
 
+# Relay 只轮询 READY Outbox；不承担 ACK/NAK 或 Task 执行责任。
 async def run_relay(
     metadata: MetadataRepository,
     queue: TaskQueue,

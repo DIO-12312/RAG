@@ -25,6 +25,7 @@ def test_mutating_commands_require_request_and_idempotency_keys(
     command: str,
     extra: list[str],
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     parser = _parser()
 
     with pytest.raises(SystemExit):
@@ -47,6 +48,7 @@ def test_mutating_commands_require_request_and_idempotency_keys(
 async def test_submit_document_streams_one_header_then_bounded_data_frames(
     tmp_path: Path,
 ) -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     source = tmp_path / "guide.md"
     content = b"a" * (UPLOAD_FRAME_BYTES + 7)
     source.write_bytes(content)

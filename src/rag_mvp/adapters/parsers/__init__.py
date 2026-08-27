@@ -1,1 +1,1 @@
-"""Document parser adapter package."""
+"""文档解析器适配器包：将不同源格式规整为可追溯片段。"""

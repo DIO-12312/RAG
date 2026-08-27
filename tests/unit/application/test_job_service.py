@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 验证 Job 查询、取消、重试的状态机和并发语义。
 from datetime import UTC, datetime
 
 import pytest
@@ -15,6 +16,7 @@ from tests.fakes.storage import FakeObjectStorage
 
 @pytest.mark.asyncio
 async def test_job_service_returns_job_and_task_snapshot() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     now = datetime.now(UTC)
     repository = FakeMetadataRepository()
     documents = DocumentService(repository, FakeObjectStorage(), max_upload_bytes=1024)
@@ -47,6 +49,7 @@ async def test_job_service_returns_job_and_task_snapshot() -> None:
 
 @pytest.mark.asyncio
 async def test_job_service_returns_stable_not_found_failure() -> None:
+    """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(DomainError) as error:
         await JobService(FakeMetadataRepository()).get_job(GetJobQuery("request", "missing"))
 

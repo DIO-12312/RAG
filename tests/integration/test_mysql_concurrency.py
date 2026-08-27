@@ -1,4 +1,4 @@
-"""Real MySQL concurrency tests for retry, rebuild, and delete fences."""
+"""针对真实 MySQL 的重试、重建和删除围栏并发测试。"""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ async def _submitted(
     repository: MySQLMetadataRepository,
     now: datetime,
 ) -> SubmitResult:
+    """创建一份真实 MySQL 摄取提交，供并发场景复用。"""
     await repository.create_dataset(
         Dataset(
             id="dataset-1",
@@ -50,6 +51,7 @@ async def _submitted(
 
 
 def _chunk(document_id: str, index_version: int = 1) -> Chunk:
+    """构造指定版本的最小持久化 Chunk。"""
     return Chunk(
         id="c" * 16,
         document_id=document_id,
@@ -67,6 +69,7 @@ async def _ready_and_claim(
     submitted: SubmitResult,
     now: datetime,
 ) -> None:
+    """将等待态 Outbox 置就绪并认领摄取任务。"""
     event = (await repository.list_waiting_outbox(1))[0]
     assert await repository.mark_object_ready(event.id, "objects/document/source", now)
     assert await repository.claim_task(submitted.task_id, 1, now)
@@ -77,6 +80,7 @@ async def _ready_and_claim(
 async def test_concurrent_retry_keys_reuse_one_active_child_job(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """并发重试键只能复用同一个活跃子 Job。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)
@@ -130,6 +134,7 @@ async def test_concurrent_retry_keys_reuse_one_active_child_job(
 async def test_concurrent_rebuilds_allocate_distinct_index_versions(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """并发重建必须分配不同且连续的索引版本。"""
     repository, _engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)
@@ -172,6 +177,7 @@ async def test_concurrent_rebuilds_allocate_distinct_index_versions(
 async def test_out_of_order_rebuild_completion_never_regresses_active_version(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """较旧版本后完成时不得回退 active version。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)
@@ -254,6 +260,7 @@ async def test_out_of_order_rebuild_completion_never_regresses_active_version(
 async def test_delete_and_finalizer_race_never_leaves_ingest_outbox_ready(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """删除与 Finalizer 竞态不能遗留可发布的摄取 Outbox。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     submitted = await _submitted(repository, now)
@@ -290,6 +297,7 @@ async def test_delete_and_finalizer_race_never_leaves_ingest_outbox_ready(
 async def test_concurrent_dataset_delete_keys_create_one_cleanup_job(
     mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
 ) -> None:
+    """并发数据集删除只允许创建一个清理 Job。"""
     repository, engine = mysql_repository
     now = datetime.now(UTC)
     await _submitted(repository, now)

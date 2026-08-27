@@ -1,4 +1,4 @@
-"""Whole-document parser used only by focused tests."""
+"""仅供聚焦测试使用的整篇文档解析器。"""
 
 from rag_mvp.domain.models import Locator
 from rag_mvp.ports.parser import ParsedSegment
@@ -6,6 +6,7 @@ from rag_mvp.ports.parser import ParsedSegment
 
 class FakeParser:
     async def parse(self, source_name: str, content: bytes) -> tuple[ParsedSegment, ...]:
+        """模拟解析过程并返回可定位的文本片段。"""
         del source_name
         return (
             ParsedSegment(
