@@ -74,6 +74,7 @@ class JobService:
         return JobView(
             job_id=job.id,
             document_id=job.document_id,
+            dataset_id=job.dataset_id,
             type=job.type,
             status=job.status,
             progress=job.progress,

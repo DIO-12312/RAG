@@ -107,7 +107,8 @@ class CancelJobCommand:
 @dataclass(frozen=True, slots=True)
 class JobView:
     job_id: str
-    document_id: str
+    document_id: str | None
+    dataset_id: str
     type: JobType
     status: JobStatus
     progress: float

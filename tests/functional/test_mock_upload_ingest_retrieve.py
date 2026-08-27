@@ -121,3 +121,41 @@ async def test_mock_grpc_upload_async_ingest_and_dense_retrieve(tmp_path) -> Non
         assert retry.error.code == "IDEMPOTENCY_KEY_REQUIRED"
         assert cancel.error.code == "IDEMPOTENCY_KEY_REQUIRED"
         assert delete.error.code == "IDEMPOTENCY_KEY_REQUIRED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.functional
+async def test_deleted_dataset_is_rejected_before_cleanup_worker_runs(tmp_path) -> None:
+    harness = MockFunctionalHarness.build(tmp_path / "objects", datetime.now(UTC))
+
+    async with _stub(harness) as stub:
+        created = await stub.CreateDataset(
+            rag_service_pb2.CreateDatasetRequest(
+                context=rag_service_pb2.RequestContext(
+                    request_id="create-disposable", idempotency_key="create-disposable"
+                ),
+                name="Disposable",
+                embedding_model="fake",
+                embedding_dimension=8,
+            )
+        )
+        deleted = await stub.DeleteDataset(
+            rag_service_pb2.DeleteDatasetRequest(
+                context=rag_service_pb2.RequestContext(
+                    request_id="delete-disposable", idempotency_key="delete-disposable"
+                ),
+                dataset_id=created.result.dataset_id,
+            )
+        )
+        retrieved = await stub.Retrieve(
+            rag_service_pb2.RetrieveRequest(
+                request_id="retrieve-deleted",
+                dataset_id=created.result.dataset_id,
+                query="anything",
+                top_k=6,
+                max_context_tokens=100,
+            )
+        )
+
+        assert deleted.result.job_id
+        assert retrieved.error.code == "DATASET_DELETING"

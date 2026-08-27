@@ -18,6 +18,7 @@ from rag_mvp.dev.cli import UPLOAD_FRAME_BYTES, _parser, _upload_requests
         ("retry-job", ["--job-id", "job-1"]),
         ("cancel-job", ["--job-id", "job-1"]),
         ("delete-document", ["--document-id", "document-1"]),
+        ("delete-dataset", ["--dataset-id", "dataset-1"]),
     ],
 )
 def test_mutating_commands_require_request_and_idempotency_keys(

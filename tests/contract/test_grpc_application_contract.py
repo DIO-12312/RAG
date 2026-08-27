@@ -93,6 +93,74 @@ async def test_open_rpc_methods_convert_application_results() -> None:
 
 
 @pytest.mark.asyncio
+async def test_delete_dataset_maps_success_reuse_and_stable_failures() -> None:
+    service, _repository = _service()
+    created = await service.CreateDataset(
+        rag_service_pb2.CreateDatasetRequest(
+            context=rag_service_pb2.RequestContext(
+                request_id="create-delete", idempotency_key="create-delete"
+            ),
+            name="Disposable",
+            embedding_model="fake",
+            embedding_dimension=8,
+        ),
+        None,
+    )
+    dataset_id = created.result.dataset_id
+
+    first = await service.DeleteDataset(
+        rag_service_pb2.DeleteDatasetRequest(
+            context=rag_service_pb2.RequestContext(
+                request_id="delete-1", idempotency_key="delete-key"
+            ),
+            dataset_id=dataset_id,
+        ),
+        None,
+    )
+    repeated = await service.DeleteDataset(
+        rag_service_pb2.DeleteDatasetRequest(
+            context=rag_service_pb2.RequestContext(
+                request_id="delete-repeat", idempotency_key="delete-key"
+            ),
+            dataset_id=dataset_id,
+        ),
+        None,
+    )
+    conflicting = await service.DeleteDataset(
+        rag_service_pb2.DeleteDatasetRequest(
+            context=rag_service_pb2.RequestContext(
+                request_id="delete-2", idempotency_key="other-key"
+            ),
+            dataset_id=dataset_id,
+        ),
+        None,
+    )
+    missing = await service.DeleteDataset(
+        rag_service_pb2.DeleteDatasetRequest(
+            context=rag_service_pb2.RequestContext(
+                request_id="delete-missing", idempotency_key="missing-key"
+            ),
+            dataset_id="missing",
+        ),
+        None,
+    )
+    invalid = await service.DeleteDataset(
+        rag_service_pb2.DeleteDatasetRequest(
+            context=rag_service_pb2.RequestContext(request_id="delete-invalid"),
+            dataset_id="missing",
+        ),
+        None,
+    )
+
+    assert first.result.dataset_id == dataset_id
+    assert first.result.job_id
+    assert repeated.result.job_id == first.result.job_id
+    assert conflicting.error.code == "DATASET_DELETION_IN_PROGRESS"
+    assert missing.error.code == "DATASET_NOT_FOUND"
+    assert invalid.error.code == "IDEMPOTENCY_KEY_REQUIRED"
+
+
+@pytest.mark.asyncio
 async def test_rpc_maps_domain_failures_and_keeps_future_methods_closed() -> None:
     service, _ = _service()
     missing = await service.GetJob(

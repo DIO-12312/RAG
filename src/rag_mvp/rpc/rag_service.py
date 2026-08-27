@@ -9,6 +9,7 @@ from rag_mvp.application.document_service import DocumentService
 from rag_mvp.application.dto import (
     CancelJobCommand,
     CreateDatasetCommand,
+    DeleteDatasetCommand,
     DeleteDocumentCommand,
     GetJobQuery,
     JobView,
@@ -46,6 +47,7 @@ _JOB_TYPE: Mapping[JobType, rag_service_pb2.JobType] = {
     JobType.INGEST_DOCUMENT: rag_service_pb2.JOB_TYPE_INGEST_DOCUMENT,
     JobType.DELETE_DOCUMENT: rag_service_pb2.JOB_TYPE_DELETE_DOCUMENT,
     JobType.CLEANUP_INDEX_VERSION: rag_service_pb2.JOB_TYPE_CLEANUP_INDEX_VERSION,
+    JobType.DELETE_DATASET: rag_service_pb2.JOB_TYPE_DELETE_DATASET,
 }
 _DOCUMENT_STATUS: Mapping[DocumentStatus, rag_service_pb2.DocumentStatus] = {
     DocumentStatus.PENDING: rag_service_pb2.DOCUMENT_STATUS_PENDING,
@@ -85,7 +87,8 @@ def _unexpected(error: Exception, request_id: str) -> rag_service_pb2.BusinessEr
 def _job_result(view: JobView) -> rag_service_pb2.JobResult:
     result = rag_service_pb2.JobResult(
         job_id=view.job_id,
-        document_id=view.document_id,
+        document_id=view.document_id or "",
+        dataset_id=view.dataset_id,
         type=_JOB_TYPE[view.type],
         status=_JOB_STATUS[view.status],
         progress=view.progress,
@@ -296,6 +299,36 @@ class RagService:
             )
         except Exception as error:
             return rag_service_pb2.SubmitDocumentResponse(error=_unexpected(error, request_id))
+
+    async def DeleteDataset(
+        self,
+        request: rag_service_pb2.DeleteDatasetRequest,
+        context: object,
+    ) -> rag_service_pb2.DeleteDatasetResponse:
+        del context
+        if self._documents is None:
+            return rag_service_pb2.DeleteDatasetResponse(
+                error=_unavailable(request.context.request_id)
+            )
+        try:
+            result = await self._documents.delete_dataset(
+                DeleteDatasetCommand(
+                    request_id=request.context.request_id,
+                    idempotency_key=request.context.idempotency_key,
+                    dataset_id=request.dataset_id,
+                    now=self._now(),
+                )
+            )
+            return rag_service_pb2.DeleteDatasetResponse(
+                result=rag_service_pb2.DeleteDatasetResult(
+                    dataset_id=result.dataset_id,
+                    job_id=result.job_id,
+                )
+            )
+        except Exception as error:
+            return rag_service_pb2.DeleteDatasetResponse(
+                error=_unexpected(error, request.context.request_id)
+            )
 
     async def GetJob(
         self,

@@ -274,6 +274,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_new_delete_request_for_deleted_document_is_rejected` | 已删除文档的新删除请求返回稳定错误。 |
 | `test_generated_code.py` | `test_generated_python_is_in_sync_with_proto` | Python protobuf 生成物与 `.proto` 保持同步。 |
 | `test_grpc_application_contract.py` | `test_open_rpc_methods_convert_application_results` | 已开放 RPC 正确转换 application 结果，上传摘要使用注入的 parser/chunk/model 配置。 |
+| 同上 | `test_delete_dataset_maps_success_reuse_and_stable_failures` | DeleteDataset 映射成功与幂等复用，并保留删除中、不存在和缺少幂等键错误码。 |
 | 同上 | `test_rpc_maps_domain_failures_and_keeps_future_methods_closed` | 领域错误映射正确，未来方法保持关闭。 |
 | 同上 | `test_submit_document_rejects_data_before_header` | 上传流首帧必须为 header。 |
 | 同上 | `test_open_methods_work_through_generated_grpc_transport` | 已开放方法可经生成的 gRPC transport 调用。 |
@@ -352,6 +353,7 @@ Functional 测试负责验证跨层调用链。它们使用真实 gRPC、applica
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
 | `test_mock_upload_ingest_retrieve.py` | `test_mock_grpc_upload_async_ingest_and_dense_retrieve` | 通过 gRPC 完成上传、异步摄取、Job 查询和 Dense evidence 检索。 |
+| 同上 | `test_deleted_dataset_is_rejected_before_cleanup_worker_runs` | Dataset 删除 RPC 受理后、清理 Worker 执行前，检索已立即被拒绝。 |
 | `test_mock_four_formats.py` | `test_four_supported_formats_return_precise_provenance` | 四种支持格式均能摄取、检索并返回精确 provenance。 |
 | `test_mock_dedup_and_redelivery.py` | `test_mock_dedup_and_relay_duplicate_delivery_converge` | 内容去重与 Relay 重复投递最终收敛为一份可见索引。 |
 | `test_mock_retry_job.py` | `test_retry_rpc_creates_new_job_and_worker_completes_it` | Retry RPC 创建新任务，Worker 可完成该重试任务。 |

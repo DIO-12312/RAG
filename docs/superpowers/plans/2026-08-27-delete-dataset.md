@@ -133,9 +133,9 @@ if claim.task.type is TaskType.CLEANUP_DATASET:
 - Consumes `DocumentService.delete_dataset(DeleteDatasetCommand)`.
 - Produces `RagService.DeleteDataset` and `dev/cli.py delete-dataset --request-id --idempotency-key --dataset-id`.
 
-- [ ] Write failing RPC tests for success mapping, empty idempotency rejection, reuse, `DATASET_DELETION_IN_PROGRESS`, and `DATASET_NOT_FOUND`; write CLI parser test requiring all three mutation identifiers.
-- [ ] Run `uv run pytest tests/unit/test_dev_cli.py tests/unit/test_process_lifecycle.py tests/contract/test_proto_contract.py tests/contract/test_grpc_application_contract.py -q`; expect method/command failures.
-- [ ] Add RPC conversion only; do not import adapters into `rpc/rag_service.py`. Add generated-client CLI command and a functional test that a deleted Dataset’s retrieval is rejected before worker completion.
+- [x] Write failing RPC tests for success mapping, empty idempotency rejection, reuse, `DATASET_DELETION_IN_PROGRESS`, and `DATASET_NOT_FOUND`; write CLI parser test requiring all three mutation identifiers.
+- [x] Run `uv run pytest tests/unit/test_dev_cli.py tests/unit/test_process_lifecycle.py tests/contract/test_proto_contract.py tests/contract/test_grpc_application_contract.py -q`; expect method/command failures.
+- [x] Add RPC conversion only; do not import adapters into `rpc/rag_service.py`. Add generated-client CLI command and a functional test that a deleted Dataset’s retrieval is rejected before worker completion.
 
 ```python
 result = await self._documents.delete_dataset(
@@ -146,8 +146,8 @@ return rag_service_pb2.DeleteDatasetResponse(
     result=rag_service_pb2.DeleteDatasetResult(dataset_id=result.dataset_id, job_id=result.job_id)
 )
 ```
-- [ ] Run the preceding unit/contract tests plus `uv run pytest tests/functional/test_mock_upload_ingest_retrieve.py -q`; expect PASS.
-- [ ] Update `tests/TEST.md`, inspect status, commit: `feat(rpc): 暴露知识库删除接口`.
+- [x] Run the preceding unit/contract tests plus `uv run pytest tests/functional/test_mock_upload_ingest_retrieve.py -q`; expect PASS.（本次宽回归：194 passed。）
+- [x] Update `tests/TEST.md`, inspect status, commit: `feat(rpc): 暴露知识库删除接口`.
 
 ### Task 5: 删除并发与真实 eval 的一次性 teardown
 

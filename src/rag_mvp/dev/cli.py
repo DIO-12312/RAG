@@ -78,6 +78,10 @@ def _parser() -> argparse.ArgumentParser:
     delete = subparsers.add_parser("delete-document")
     _add_context_arguments(delete)
     delete.add_argument("--document-id", required=True)
+
+    delete_dataset = subparsers.add_parser("delete-dataset")
+    _add_context_arguments(delete_dataset)
+    delete_dataset.add_argument("--dataset-id", required=True)
     return parser
 
 
@@ -184,6 +188,14 @@ async def _run(arguments: argparse.Namespace) -> int:
                 rag_service_pb2.DeleteDocumentRequest(
                     context=_context(arguments),
                     document_id=arguments.document_id,
+                ),
+                timeout=arguments.timeout,
+            )
+        elif arguments.command == "delete-dataset":
+            response = await stub.DeleteDataset(
+                rag_service_pb2.DeleteDatasetRequest(
+                    context=_context(arguments),
+                    dataset_id=arguments.dataset_id,
                 ),
                 timeout=arguments.timeout,
             )
