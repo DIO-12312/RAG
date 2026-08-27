@@ -266,15 +266,12 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | `test_build_entrypoints.py` | `test_makefile_offline_targets_are_commented_earthly_only_entrypoints` | Makefile 的离线公共入口均有说明，并且只负责转发 Earthly target。 |
 | 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界。 |
 | 同上 | `test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes` | Docker 公共入口使用合法的复用 Function，验证 suite、静默校验 Compose、扫描日志并安全停服；eval suite 必须同时收集既有 30 问和本地 PDF 五十问，且禁止删除持久卷。 |
-| 同上 | `test_hook_and_quick_workflow_delegate_only_to_make_ci` | Git Hook 与无 Secret quick workflow 只调用固定 Earthly 环境下的 `make ci`。 |
-| 同上 | `test_docker_workflow_delegates_real_suites_and_always_cleans_up` | Secret-backed Docker workflow 只转发三个真实测试 suite，并保证两个 job 始终调用统一清理入口。 |
 | `test_container_artifacts.py` | `test_package_and_container_use_canonical_root_readme` | GitHub 首页、Python package、Docker 镜像与 Earthly 依赖安装统一使用仓库根 README，禁止保留重复入口。 |
 | `test_container_artifacts.py` | `test_runtime_image_and_context_exclude_secrets_and_test_artifacts` | runtime/test 镜像目标、非 root 用户及 build context 排除规则正确。 |
 | 同上 | `test_compose_declares_migration_health_role_secrets_and_shared_storage` | Compose 固定迁移顺序、健康依赖、共享对象卷及模型密钥角色边界。 |
 | 同上 | `test_secret_scanner_fails_without_echoing_the_secret` | 日志命中模型密钥时扫描失败且不回显 Secret。 |
 | 同上 | `test_healthcheck_parses_ndjson_and_requires_every_process_to_be_healthy` | 健康检查要求基础设施和应用健康、迁移成功退出。 |
 | 同上 | `test_healthcheck_decodes_docker_output_as_utf8` | Windows 宿主机按 UTF-8 安全解析 Docker Unicode 输出。 |
-| 同上 | `test_quality_workflows_keep_offline_and_secret_backed_suites_separate` | PR 门禁通过 `make ci` 保持离线，真实 Docker 作业只由 push/手动/夜间触发，并经 Make/Earthly 使用 Secret-backed 测试入口。 |
 | `test_delete_document_contract.py` | `test_delete_atomically_hides_document_cancels_ingest_and_creates_cleanup` | 删除原子隐藏文档、取消摄取并创建清理任务。 |
 | 同上 | `test_new_delete_request_for_deleted_document_is_rejected` | 已删除文档的新删除请求返回稳定错误。 |
 | `test_generated_code.py` | `test_generated_python_is_in_sync_with_proto` | Python protobuf 生成物与 `.proto` 保持同步。 |

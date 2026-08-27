@@ -136,13 +136,6 @@ make docker-up
 | NATS | 4222 | JetStream 客户端连接 |
 | NATS monitoring | 8222 | 开发环境健康检查 |
 
-检查服务：
-
-```bash
-docker compose ps
-docker compose logs --tail=100 rag-server rag-worker rag-outbox
-```
-
 ## 8. 运行真实验收
 
 服务启动后，使用真实 MySQL、ES、NATS 和 Embedding provider 运行：
