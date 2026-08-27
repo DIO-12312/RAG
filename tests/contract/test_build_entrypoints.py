@@ -115,6 +115,10 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
         assert re.search(rf"^# .+\n{re.escape(target)}:", earthfile, re.MULTILINE)
     assert "LOCALLY" in earthfile
     assert "docker compose config --quiet" in earthfile
+    assert (
+        "docker compose --profile test build rag-migrate rag-server rag-worker "
+        "rag-outbox rag-test" in earthfile
+    )
     for suite in ("integration", "resilience", "eval", "all"):
         assert f"{suite})" in earthfile
     eval_command = next(line for line in earthfile.splitlines() if "run_eval()" in line)

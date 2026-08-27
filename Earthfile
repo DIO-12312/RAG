@@ -103,7 +103,7 @@ ci:
 DOCKER_START:
     FUNCTION
     RUN docker compose config --quiet
-    RUN docker compose --profile test build rag-server rag-worker rag-outbox rag-test
+    RUN docker compose --profile test build rag-migrate rag-server rag-worker rag-outbox rag-test
     RUN docker compose up -d --wait --wait-timeout 240 rag-server rag-worker rag-outbox
 
 # Start the complete RAG service topology and wait for every declared health condition.
