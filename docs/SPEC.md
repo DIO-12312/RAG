@@ -230,7 +230,7 @@ Elasticsearch 是 RAG 的私有基础设施，不是对外 API。默认 Compose�
 
 检索服务固定采用 Elasticsearch `8.19.19` 与 Search Guard FLX `4.1.2`，插件工件必须校验 SHA-256。首次引入 Search Guard 必须按全量重启迁移执行，启用 transport TLS、HTTP TLS，并以管理员客户端证书初始化；禁止使用 demo 证书、demo 用户、匿名访问或 `xpack.security.enabled: false`。用户认证使用 Search Guard `basic/internal_users_db`；其内部库只保存 BCrypt 哈希。
 
-运行时由 `RAG_ELASTICSEARCH_URL`、`RAG_ELASTICSEARCH_USERNAME`、`RAG_ELASTICSEARCH_PASSWORD` 和 `RAG_ELASTICSEARCH_CA_CERT` 配置 HTTPS Basic 客户端。应用身份 `rag_mvp` 仅可操作 `rag-chunks-v1*`：完成 index mapping/创建、bulk 写入、检索、delete-by-query、index 版本清理和必要 cluster health/复合操作；不得拥有 `SGS_ALL_ACCESS`、访问 Search Guard 系统索引、其他业务索引、节点管理或用户/角色管理权限。密码、私钥、管理员证书与 `Authorization` 值只能通过 Secret 注入，绝不写入 Git、镜像、日志、trace、测试 artifact 或生成的 Compose 配置。
+运行时由 `RAG_ELASTICSEARCH_URL`、`RAG_ELASTICSEARCH_USERNAME`、`RAG_ELASTICSEARCH_CA_CERT` 和二选一的 `RAG_ELASTICSEARCH_PASSWORD`/`RAG_ELASTICSEARCH_PASSWORD_FILE` 配置 HTTPS Basic 客户端。`Settings` 仅在装配 Elasticsearch client 时读取密码文件，且将密码建模为 secret 类型；URL 不是完整 HTTPS endpoint、CA path 为空、密码为空或同时配置两种密码来源时必须拒绝启动。应用身份 `rag_mvp` 仅可操作 `rag-chunks-v1*`：完成 index mapping/创建、bulk 写入、检索、delete-by-query、index 版本清理和必要 cluster health/复合操作；不得拥有 `SGS_ALL_ACCESS`、访问 Search Guard 系统索引、其他业务索引、节点管理或用户/角色管理权限。密码、私钥、管理员证书与 `Authorization` 值只能通过 Secret 注入，绝不写入 Git、镜像、日志、trace、测试 artifact 或生成的 Compose 配置。
 
 所有 TLS/认证/证书错误 fail closed：ES healthcheck 必须用 CA、`rag_mvp` 和 `/_searchguard/health` 验证 `status=UP`；安全 bootstrap 成功前 `rag-migrate`、Server、Worker 与 Outbox 不得启动。禁止 `verify_certs=false`、`curl -k`、明文 HTTP 回退或为排障关闭 Search Guard。真实 Docker suite 必须验证无凭据拒绝、错误凭据/CA 拒绝、最小权限隔离、受保护 ES 的完整摄取/检索/删除闭环和无公网 9200 listener。
 

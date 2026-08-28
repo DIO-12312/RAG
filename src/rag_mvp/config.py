@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Self
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,6 +35,16 @@ class EmbeddingProfile:
     max_retries: int
 
 
+@dataclass(frozen=True, slots=True)
+class ElasticsearchProfile:
+    """Validated HTTPS credentials consumed only when creating the ES client."""
+
+    endpoint: str
+    username: str
+    password: SecretStr
+    ca_cert: Path
+
+
 class Settings(BaseSettings):
     """Configuration passed explicitly to process entry points and the container."""
 
@@ -55,7 +66,11 @@ class Settings(BaseSettings):
 
     mysql_dsn: str = DEFAULT_MYSQL_DSN
     migrations_root: Path = Path(".")
-    elasticsearch_url: str = "http://elasticsearch:9200"
+    elasticsearch_url: str = "https://elasticsearch:9200"
+    elasticsearch_username: str = "rag_mvp"
+    elasticsearch_password: SecretStr | None = None
+    elasticsearch_password_file: Path | None = None
+    elasticsearch_ca_cert: Path | None = None
     elasticsearch_index: str = "rag-chunks-v1"
     nats_url: str = "nats://nats:4222"
     nats_stream: str = "RAG_TASKS"
@@ -140,6 +155,44 @@ class Settings(BaseSettings):
             batch_size=self.embedding_batch_size,
             timeout_seconds=self.embedding_timeout_seconds,
             max_retries=self.embedding_max_retries,
+        )
+
+    # 实现 require_elasticsearch_profile 对应的局部职责。
+    def require_elasticsearch_profile(self) -> ElasticsearchProfile:
+        """Return fail-closed HTTPS credentials for the Elasticsearch adapter."""
+
+        endpoint = self.elasticsearch_url.strip()
+        parsed = urlsplit(endpoint)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise ValueError("Elasticsearch URL must be a complete HTTPS endpoint")
+        username = self.elasticsearch_username.strip()
+        if not username:
+            raise ValueError("Elasticsearch username must not be empty")
+        configured_password = self.elasticsearch_password
+        password_file = self.elasticsearch_password_file
+        if configured_password is not None and password_file is not None:
+            raise ValueError("Elasticsearch password must use exactly one secret source")
+        if configured_password is None and password_file is None:
+            raise ValueError("Elasticsearch password is not configured")
+        if password_file is not None:
+            try:
+                value = password_file.read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                raise ValueError("Elasticsearch password file is unavailable") from exc
+            password = SecretStr(value)
+        else:
+            assert configured_password is not None
+            password = configured_password
+        if not password.get_secret_value().strip():
+            raise ValueError("Elasticsearch password must not be empty")
+        ca_cert = self.elasticsearch_ca_cert
+        if ca_cert is None or not str(ca_cert).strip():
+            raise ValueError("Elasticsearch CA certificate path is not configured")
+        return ElasticsearchProfile(
+            endpoint=endpoint,
+            username=username,
+            password=password,
+            ca_cert=ca_cert,
         )
 
     @property

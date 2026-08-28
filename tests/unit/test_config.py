@@ -80,6 +80,50 @@ def test_settings_builds_a_normalized_secret_embedding_profile() -> None:
     assert api_key not in repr(profile)
 
 
+def test_elasticsearch_profile_reads_file_secret_without_repr_leak(tmp_path: Path) -> None:
+    """ES 密码文件只在装配时读取，且 Secret 不得进入对象表示。"""
+
+    password_file = tmp_path / "rag_mvp_password"
+    password_file.write_text("test-es-password\n", encoding="utf-8")
+    settings = Settings(
+        _env_file=None,
+        elasticsearch_url="https://elasticsearch:9200",
+        elasticsearch_username="rag_mvp",
+        elasticsearch_password_file=password_file,
+        elasticsearch_ca_cert=tmp_path / "ca.pem",
+    )
+
+    profile = settings.require_elasticsearch_profile()
+
+    assert profile.password.get_secret_value() == "test-es-password"
+    assert "test-es-password" not in repr(settings)
+    assert "test-es-password" not in repr(profile)
+
+
+@pytest.mark.parametrize("url", ["http://elasticsearch:9200", "https://"])
+def test_elasticsearch_profile_rejects_insecure_or_invalid_endpoint(url: str) -> None:
+    """HTTP 或不完整 endpoint 不得绕过 Elasticsearch TLS 边界。"""
+
+    with pytest.raises(ValueError, match="Elasticsearch"):
+        Settings(_env_file=None, elasticsearch_url=url).require_elasticsearch_profile()
+
+
+def test_elasticsearch_profile_rejects_multiple_secret_sources(tmp_path: Path) -> None:
+    """同一运行角色必须从唯一密码来源读取，避免配置歧义。"""
+
+    password_file = tmp_path / "rag_mvp_password"
+    password_file.write_text("file-secret\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="password"):
+        Settings(
+            _env_file=None,
+            elasticsearch_url="https://elasticsearch:9200",
+            elasticsearch_password="environment-secret",
+            elasticsearch_password_file=password_file,
+            elasticsearch_ca_cert=tmp_path / "ca.pem",
+        ).require_elasticsearch_profile()
+
+
 def test_embedding_profile_rejects_missing_or_partial_configuration() -> None:
     """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValueError, match="embedding model configuration"):

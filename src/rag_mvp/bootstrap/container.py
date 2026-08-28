@@ -259,7 +259,13 @@ async def _storage_resource(settings: Settings) -> ManagedResource[ObjectStorage
 # 内部辅助：完成 search_resource 所需的局部转换或校验。
 async def _search_resource(settings: Settings) -> ManagedResource[SearchEngine]:
     profile = settings.require_embedding_profile()
-    client = AsyncElasticsearch(settings.elasticsearch_url)
+    elasticsearch = settings.require_elasticsearch_profile()
+    client = AsyncElasticsearch(
+        elasticsearch.endpoint,
+        basic_auth=(elasticsearch.username, elasticsearch.password.get_secret_value()),
+        ca_certs=str(elasticsearch.ca_cert),
+        verify_certs=True,
+    )
     search = ElasticsearchSearchEngine(
         client,
         settings.elasticsearch_index,

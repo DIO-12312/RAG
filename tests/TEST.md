@@ -236,6 +236,9 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | `test_config.py` | `test_package_import_has_no_runtime_side_effects` | 包导入不建立运行时外部连接。 |
 | 同上 | `test_settings_can_be_constructed_explicitly_for_tests` | 测试可显式构造 Settings，migration root 有稳定默认值。 |
 | 同上 | `test_settings_builds_a_normalized_secret_embedding_profile` | 完整模型配置生成规范化 `/embeddings` endpoint，并在对象表示中隐藏 API Key。 |
+| 同上 | `test_elasticsearch_profile_reads_file_secret_without_repr_leak` | ES password file 仅在 profile 装配时读取，且密码不进入 Settings/Profile 表示。 |
+| 同上 | `test_elasticsearch_profile_rejects_insecure_or_invalid_endpoint` | 非 HTTPS 或不完整 ES endpoint 不能绕过 TLS 配置。 |
+| 同上 | `test_elasticsearch_profile_rejects_multiple_secret_sources` | ES 明文环境变量与 password file 同时出现时拒绝含糊配置。 |
 | 同上 | `test_embedding_profile_rejects_missing_or_partial_configuration` | Server/Worker 获取模型配置时拒绝缺失或不完整的 provider 设置。 |
 | 同上 | `test_parser_and_chunk_runtime_settings_reject_inconsistent_values` | parser 版本和 chunk overlap/size 的运行配置必须自洽。 |
 | 同上 | `test_production_rejects_grpc_reflection` | 生产环境禁止 gRPC Reflection。 |
