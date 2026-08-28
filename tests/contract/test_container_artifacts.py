@@ -154,6 +154,40 @@ def test_secret_scanner_fails_without_echoing_the_secret() -> None:
     assert secret not in completed.stderr
 
 
+def test_secret_scanner_detects_elasticsearch_password_without_echoing_it(
+    tmp_path: Path,
+) -> None:
+    """ES password file 命中日志时扫描器必须失败且不得二次泄漏。"""
+
+    secret = "elasticsearch-secret-sentinel"
+    password_file = tmp_path / "rag_mvp_password"
+    password_file.write_text(f"{secret}\n", encoding="utf-8")
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "EMBEDDING_MODEL_API_KEY": "embedding-secret-sentinel",
+            "RAG_ELASTICSEARCH_URL": "https://elasticsearch:9200",
+            "RAG_ELASTICSEARCH_USERNAME": "rag_mvp",
+            "RAG_ELASTICSEARCH_PASSWORD_FILE": str(password_file),
+            "RAG_ELASTICSEARCH_CA_CERT": str(tmp_path / "ca.pem"),
+        }
+    )
+
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "check_secret_leaks.py")],
+        input=f"Authorization: Basic {secret}\n",
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stdout.strip() == "secret leak detected"
+    assert secret not in completed.stdout
+    assert secret not in completed.stderr
+
+
 def test_healthcheck_parses_ndjson_and_requires_every_process_to_be_healthy() -> None:
     """验证本测试场景的预期行为与边界条件。"""
     records = {

@@ -122,8 +122,9 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
     assert "LOCALLY" in earthfile
     assert "docker compose config --quiet" in earthfile
     assert (
-        "docker compose --profile test build rag-migrate rag-server rag-worker "
-        "rag-outbox rag-test" in earthfile
+        "docker compose --profile test build rag-security-materials elasticsearch "
+        "rag-search-guard-bootstrap rag-migrate rag-server rag-worker rag-outbox rag-test"
+        in earthfile
     )
     for suite in ("integration", "resilience", "eval", "all"):
         assert f"{suite})" in earthfile
@@ -136,3 +137,17 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
     assert "docker compose down --remove-orphans" in earthfile
     assert "down -v" not in earthfile
     assert "./tests/eval/log:/app/tests/eval/log:rw" in compose
+
+
+def test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths() -> None:
+    """真实 Docker 入口必须构建安全服务且只传递 ES secret 文件路径。"""
+
+    earthfile = _text("Earthfile")
+
+    assert "Dockerfile.elasticsearch" in _text("docker-compose.yml")
+    assert "rag-security-materials" in earthfile
+    assert "rag-search-guard-bootstrap" in earthfile
+    assert "RAG_TEST_ELASTICSEARCH_PASSWORD_FILE=/run/secrets/rag_mvp_password" in earthfile
+    assert "RAG_TEST_ELASTICSEARCH_CA_CERT=/run/secrets/ca.pem" in earthfile
+    assert "docker compose config --quiet" in earthfile
+    assert "docker compose config >" not in earthfile

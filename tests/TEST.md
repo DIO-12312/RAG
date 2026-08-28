@@ -270,6 +270,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | `test_build_entrypoints.py` | `test_makefile_offline_targets_are_commented_earthly_only_entrypoints` | Makefile 的离线公共入口均有说明，并且只负责转发 Earthly target。 |
 | 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界。 |
 | 同上 | `test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes` | Docker 公共入口使用合法的复用 Function，验证 suite、静默校验 Compose、扫描日志并安全停服；eval suite 必须同时收集既有 30 问和本地 PDF 五十问，且禁止删除持久卷。 |
+| 同上 | `test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths` | Docker 入口构建安全材料/ES/bootstrap 服务，并仅向测试容器传递 ES password file 与 CA path。 |
 | `test_container_artifacts.py` | `test_package_and_container_use_canonical_root_readme` | GitHub 首页、Python package、Docker 镜像与 Earthly 依赖安装统一使用仓库根 README，禁止保留重复入口。 |
 | `test_search_guard_assets.py` | `test_development_material_generator_creates_separate_node_and_client_secrets` | development 材料生成器使用独立 node/admin 私钥，客户端密码不回显到进程输出。 |
 | 同上 | `test_production_material_generator_refuses_to_self_sign_missing_material` | production 缺失外部 Search Guard 材料时 fail closed，禁止生成自签名替代品。 |
@@ -279,6 +280,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_compose_keeps_infrastructure_private_and_orders_search_guard_bootstrap` | 默认 Compose 不发布 MySQL/NATS/ES，且安全材料、ES、Search Guard bootstrap 与下游服务按 fail-closed 顺序启动。 |
 | 同上 | `test_debug_override_binds_elasticsearch_to_loopback_only` | 调试 override 仅将受 TLS/认证保护的 ES 绑定到 `127.0.0.1`。 |
 | 同上 | `test_secret_scanner_fails_without_echoing_the_secret` | 日志命中模型密钥时扫描失败且不回显 Secret。 |
+| 同上 | `test_secret_scanner_detects_elasticsearch_password_without_echoing_it` | 日志命中 Elasticsearch password file 的内容时扫描失败且不回显该密码。 |
 | 同上 | `test_healthcheck_parses_ndjson_and_requires_every_process_to_be_healthy` | 健康检查要求基础设施和应用健康、迁移成功退出。 |
 | 同上 | `test_healthcheck_decodes_docker_output_as_utf8` | Windows 宿主机按 UTF-8 安全解析 Docker Unicode 输出。 |
 | `test_delete_document_contract.py` | `test_delete_atomically_hides_document_cancels_ingest_and_creates_cleanup` | 删除原子隐藏文档、取消摄取并创建清理任务。 |

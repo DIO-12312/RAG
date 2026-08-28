@@ -103,7 +103,7 @@ ci:
 DOCKER_START:
     FUNCTION
     RUN docker compose config --quiet
-    RUN docker compose --profile test build rag-migrate rag-server rag-worker rag-outbox rag-test
+    RUN docker compose --profile test build rag-security-materials elasticsearch rag-search-guard-bootstrap rag-migrate rag-server rag-worker rag-outbox rag-test
     RUN docker compose up -d --wait --wait-timeout 240 rag-server rag-worker rag-outbox
 
 # Start the complete RAG service topology and wait for every declared health condition.
@@ -119,7 +119,7 @@ docker-test:
     RUN case "$SUITE" in integration|resilience|eval|all) ;; *) echo "Unknown SUITE: $SUITE" >&2; exit 2 ;; esac
     RUN case "$EVAL_FIXTURE" in original|rephrased) ;; *) echo "Unknown EVAL_FIXTURE: $EVAL_FIXTURE" >&2; exit 2 ;; esac
     DO +DOCKER_START
-    RUN run_integration() { docker compose --profile test run --rm -e RAG_MIGRATIONS_ROOT=/app -e RAG_TEST_MYSQL_DSN=mysql+asyncmy://rag:rag@mysql:3306/rag -e RAG_TEST_ELASTICSEARCH_URL=http://elasticsearch:9200 -e RAG_TEST_NATS_URL=nats://nats:4222 rag-test uv run pytest -m "integration or model_integration or e2e" tests/integration tests/e2e -q; }; \
+    RUN run_integration() { docker compose --profile test run --rm -e RAG_MIGRATIONS_ROOT=/app -e RAG_TEST_MYSQL_DSN=mysql+asyncmy://rag:rag@mysql:3306/rag -e RAG_TEST_ELASTICSEARCH_URL=https://elasticsearch:9200 -e RAG_TEST_ELASTICSEARCH_USERNAME=rag_mvp -e RAG_TEST_ELASTICSEARCH_PASSWORD_FILE=/run/secrets/rag_mvp_password -e RAG_TEST_ELASTICSEARCH_CA_CERT=/run/secrets/ca.pem -e RAG_TEST_NATS_URL=nats://nats:4222 rag-test uv run pytest -m "integration or model_integration or e2e" tests/integration tests/e2e -q; }; \
         run_resilience() { docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml config --quiet && docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test build rag-server rag-worker rag-outbox rag-test && docker compose -f docker-compose.yml -f tests/resilience/docker/docker-compose.resilience.yml --profile test run --rm rag-test uv run pytest -m docker_resilience tests/resilience/docker -q; }; \
         run_eval() { docker compose --profile test run --rm --user "$(id -u):$(id -g)" -e EVAL_FIXTURE="$EVAL_FIXTURE" rag-test uv run pytest -m eval tests/eval/test_real_retrieval_quality.py tests/eval/test_real_computer_architecture_pdf_quality.py -q; }; \
         case "$SUITE" in integration) run_integration ;; resilience) run_resilience ;; eval) run_eval ;; all) run_integration && run_resilience && run_eval ;; esac
