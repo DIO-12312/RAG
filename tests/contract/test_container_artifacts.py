@@ -107,6 +107,32 @@ def test_compose_declares_migration_health_role_secrets_and_shared_storage() -> 
         assert "EMBEDDING_MODEL_URL" not in blocks[role]
 
 
+def test_compose_keeps_infrastructure_private_and_orders_search_guard_bootstrap() -> None:
+    """安全启动前不能暴露中间件，且下游必须等待 Search Guard 初始化。"""
+
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    elasticsearch = _service_block(compose, "elasticsearch")
+    bootstrap = _service_block(compose, "rag-search-guard-bootstrap")
+    outbox = _service_block(compose, "rag-outbox")
+
+    for public_port in ('"9200:9200"', '"3306:3306"', '"4222:4222"', '"8222:8222"'):
+        assert public_port not in compose
+    assert "rag-security-materials:" in elasticsearch
+    assert "condition: service_completed_successfully" in elasticsearch
+    assert "elasticsearch:" in bootstrap
+    assert "condition: service_started" in bootstrap
+    assert "RAG_ELASTICSEARCH_PASSWORD_FILE" not in outbox
+
+
+def test_debug_override_binds_elasticsearch_to_loopback_only() -> None:
+    """排障 override 只能将已认证 HTTPS ES 绑定到本机回环地址。"""
+
+    debug_compose = (ROOT / "docker-compose.debug.yml").read_text(encoding="utf-8")
+
+    assert '"127.0.0.1:9200:9200"' in debug_compose
+    assert '"9200:9200"' not in debug_compose.replace('"127.0.0.1:9200:9200"', "")
+
+
 def test_secret_scanner_fails_without_echoing_the_secret() -> None:
     """验证本测试场景的预期行为与边界条件。"""
     secret = "contract-secret-sentinel"
