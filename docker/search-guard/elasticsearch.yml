@@ -1,0 +1,12 @@
+searchguard.ssl.transport.pemcert_filepath: search-guard/node.pem
+searchguard.ssl.transport.pemkey_filepath: search-guard/node-key.pem
+searchguard.ssl.transport.pemtrustedcas_filepath: search-guard/ca.pem
+searchguard.ssl.transport.enforce_hostname_verification: true
+searchguard.ssl.http.enabled: true
+searchguard.ssl.http.pemcert_filepath: search-guard/node.pem
+searchguard.ssl.http.pemkey_filepath: search-guard/node-key.pem
+searchguard.ssl.http.pemtrustedcas_filepath: search-guard/ca.pem
+searchguard.nodes_dn:
+  - CN=elasticsearch,OU=RAG,O=RAG,L=Local,C=CN
+searchguard.authcz.admin_dn:
+  - CN=sg_admin,OU=RAG,O=RAG,L=Local,C=CN

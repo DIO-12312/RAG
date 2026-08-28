@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1.7
+
+FROM docker.elastic.co/elasticsearch/elasticsearch:8.19.19
+
+ARG SEARCH_GUARD_PLUGIN_URL=https://maven.search-guard.com/search-guard-flx-release/com/floragunn/search-guard-flx-elasticsearch-plugin/4.1.2-es-8.19.19/search-guard-flx-elasticsearch-plugin-4.1.2-es-8.19.19.zip
+ARG SEARCH_GUARD_PLUGIN_SHA256=6fa46190b1fd62f6c54d6c11d17757f043110f8c0db016e16c62c59b953f3c91
+
+USER root
+
+RUN curl --fail --location --silent --show-error "$SEARCH_GUARD_PLUGIN_URL" -o /tmp/search-guard.zip \
+    && echo "$SEARCH_GUARD_PLUGIN_SHA256  /tmp/search-guard.zip" | sha256sum --check --strict \
+    && bin/elasticsearch-plugin install --batch file:///tmp/search-guard.zip \
+    && rm /tmp/search-guard.zip
+
+COPY docker/search-guard/elasticsearch.yml /usr/share/elasticsearch/config/elasticsearch.yml
+
+USER elasticsearch

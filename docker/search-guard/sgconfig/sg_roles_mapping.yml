@@ -1,0 +1,3 @@
+rag_mvp_search:
+  backend_roles:
+    - rag_mvp_runtime

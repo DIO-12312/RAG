@@ -24,6 +24,7 @@ tests/
 │  ├─ test_proto_contract.py
 │  ├─ test_retry_job_contract.py
 │  ├─ test_search_engine_contract.py
+│  ├─ test_search_guard_assets.py           # Search Guard 镜像、TLS 材料和最小权限边界
 │  └─ test_task_queue_contract.py
 ├─ e2e/                                     # 真实 Compose 与模型的 gRPC 业务闭环
 │  ├─ conftest.py                            # generated gRPC client、真实运行配置、Job 与 Dataset purge 轮询 helpers
@@ -267,6 +268,9 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界。 |
 | 同上 | `test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes` | Docker 公共入口使用合法的复用 Function，验证 suite、静默校验 Compose、扫描日志并安全停服；eval suite 必须同时收集既有 30 问和本地 PDF 五十问，且禁止删除持久卷。 |
 | `test_container_artifacts.py` | `test_package_and_container_use_canonical_root_readme` | GitHub 首页、Python package、Docker 镜像与 Earthly 依赖安装统一使用仓库根 README，禁止保留重复入口。 |
+| `test_search_guard_assets.py` | `test_development_material_generator_creates_separate_node_and_client_secrets` | development 材料生成器使用独立 node/admin 私钥，客户端密码不回显到进程输出。 |
+| 同上 | `test_production_material_generator_refuses_to_self_sign_missing_material` | production 缺失外部 Search Guard 材料时 fail closed，禁止生成自签名替代品。 |
+| 同上 | `test_search_guard_assets_pin_tls_and_least_privilege` | Search Guard 镜像固定 ES/插件校验和，TLS、节点 DN 和 `rag-chunks-v1*` 最小权限配置齐全。 |
 | `test_container_artifacts.py` | `test_runtime_image_and_context_exclude_secrets_and_test_artifacts` | runtime/test 镜像目标、非 root 用户及 build context 排除规则正确。 |
 | 同上 | `test_compose_declares_migration_health_role_secrets_and_shared_storage` | Compose 固定迁移顺序、健康依赖、共享对象卷及模型密钥角色边界。 |
 | 同上 | `test_secret_scanner_fails_without_echoing_the_secret` | 日志命中模型密钥时扫描失败且不回显 Secret。 |

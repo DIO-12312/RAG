@@ -53,9 +53,11 @@ site/
 
 # Runtime data, logs, and temporary files
 data/
+data/search-guard/
 logs/
 *.log
 tests/eval/log/
+tests/.search-guard/
 *.pid
 *.tmp
 tmp/

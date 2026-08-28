@@ -1,0 +1,20 @@
+rag_mvp_search:
+  cluster_permissions:
+    - SGS_CLUSTER_COMPOSITE_OPS
+    - cluster:monitor/health
+  index_permissions:
+    - index_patterns:
+        - "rag-chunks-v1*"
+      allowed_actions:
+        - indices:admin/exists
+        - indices:admin/create
+        - indices:admin/delete
+        - indices:admin/mapping/put
+        - indices:admin/mappings/get
+        - indices:admin/refresh
+        - indices:data/read/search
+        - indices:data/read/msearch
+        - indices:data/write/bulk
+        - indices:data/write/index
+        - indices:data/write/delete
+        - indices:data/write/delete/byquery

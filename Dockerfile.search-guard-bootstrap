@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1.7
+
+FROM eclipse-temurin:21-jre-jammy
+
+ARG SGCTL_URL=https://maven.search-guard.com/search-guard-flx-release/com/floragunn/sgctl/4.1.2/sgctl-4.1.2-shaded.jar
+ARG SGCTL_SHA256=02d46e8166a87a9b524993d3842c59b13a7c7dc52d799e36c33f15e457947d29
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends curl python3 python3-cryptography \
+    && curl --fail --location --silent --show-error "$SGCTL_URL" -o /opt/sgctl-4.1.2-shaded.jar \
+    && echo "$SGCTL_SHA256  /opt/sgctl-4.1.2-shaded.jar" | sha256sum --check --strict \
+    && apt-get purge --yes curl \
+    && apt-get autoremove --yes \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY scripts/search_guard /app/scripts/search_guard
+COPY docker/search-guard /app/docker/search-guard
+
+ENTRYPOINT ["java", "-jar", "/opt/sgctl-4.1.2-shaded.jar"]
