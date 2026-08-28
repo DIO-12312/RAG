@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -14,6 +15,23 @@ from rag_mvp.adapters.search_engine.elasticsearch import ElasticsearchSearchEngi
 from rag_mvp.domain.ids import es_record_id
 from rag_mvp.domain.models import Chunk, Locator
 from rag_mvp.ports.search_engine import IndexedChunk, SearchRequest
+
+
+def _client_from_environment(prefix: str) -> AsyncElasticsearch:
+    """用 Docker test 容器的 CA 和 password file 创建 HTTPS ES client。"""
+
+    password = (
+        Path(os.environ[f"{prefix}_ELASTICSEARCH_PASSWORD_FILE"])
+        .read_text(encoding="utf-8")
+        .strip()
+    )
+    return AsyncElasticsearch(
+        os.environ[f"{prefix}_ELASTICSEARCH_URL"],
+        basic_auth=(os.environ[f"{prefix}_ELASTICSEARCH_USERNAME"], password),
+        ca_certs=os.environ[f"{prefix}_ELASTICSEARCH_CA_CERT"],
+        verify_certs=True,
+        request_timeout=10,
+    )
 
 
 def _indexed(
@@ -51,9 +69,8 @@ async def elasticsearch_search() -> AsyncIterator[
     tuple[ElasticsearchSearchEngine, AsyncElasticsearch]
 ]:
     """创建隔离索引并在测试结束后清理。"""
-    url = os.environ.get("RAG_TEST_ELASTICSEARCH_URL", "http://127.0.0.1:9200")
     index_name = f"rag-test-{uuid.uuid4().hex}"
-    client = AsyncElasticsearch(url, request_timeout=10)
+    client = _client_from_environment("RAG_TEST")
     search = ElasticsearchSearchEngine(client, index_name, embedding_dimension=3)
     try:
         await search.ensure_index()

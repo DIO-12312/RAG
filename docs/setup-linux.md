@@ -126,15 +126,19 @@ make ci
 make docker-up
 ```
 
-该命令会校验 Compose、构建镜像、执行 MySQL migration，并等待 MySQL、Elasticsearch、NATS、gRPC Server、Worker 和 Outbox 达到健康条件。默认端口如下：
+该命令会校验 Compose、生成开发期 Search Guard 材料、构建镜像、执行 MySQL migration，并等待 MySQL、受 HTTPS/Basic 保护的 Elasticsearch、NATS、gRPC Server、Worker 和 Outbox 达到健康条件。默认只有 gRPC 对宿主机开放：
 
 | 服务 | 主机端口 | 用途 |
 | --- | ---: | --- |
 | gRPC | 50051 | Python RAG 服务 |
-| MySQL | 3306 | 元数据与任务状态 |
-| Elasticsearch | 9200 | BM25/KNN 文档引擎 |
-| NATS | 4222 | JetStream 客户端连接 |
-| NATS monitoring | 8222 | 开发环境健康检查 |
+
+Elasticsearch、MySQL 和 NATS 仅在 Compose 私有网络内可达。不要将 9200 发布到公网，也不要在默认环境用浏览器或未认证 curl 直连 Elasticsearch。必须本机排障时，显式叠加仅绑定回环地址的 override：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.debug.yml ps elasticsearch
+```
+
+该 override 只开放 `127.0.0.1:9200:9200`，ES 仍要求 CA 校验和 `rag_mvp` Basic 身份；它不得用于 CI 或生产。
 
 ## 8. 运行真实验收
 
@@ -180,9 +184,8 @@ Earthly 本身不是第二个容器运行时；确认 `docker version`在同一�
 
 ### 端口已被占用
 
-检查 3306、4222、8222、9200、50051 的占用情况，停止冲突服务或在本地 Compose 覆盖端口映射。不要直接修改应用内部连接地址。
+默认只检查 50051 的占用情况。ES/MySQL/NATS 没有宿主机端口；如需诊断 ES，使用上文 loopback-only override，不要直接修改应用内部连接地址或公开 9200。
 
 ### 想重新开始但保留镜像
 
 运行 `make docker-down` 后再次 `make docker-up`。只有需要丢弃持久化数据时才使用带 `-v` 的 Compose down。
-

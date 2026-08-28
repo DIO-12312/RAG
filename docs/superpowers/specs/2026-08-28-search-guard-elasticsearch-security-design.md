@@ -26,7 +26,7 @@ https://maven.search-guard.com/search-guard-flx-release/com/floragunn/search-gua
 6fa46190b1fd62f6c54d6c11d17757f043110f8c0db016e16c62c59b953f3c91
 ```
 
-`elasticsearch` 不再声明 `9200:9200`。RAG Server、Worker、Outbox、迁移容器和测试容器仅通过 Compose 私有网络的 `https://elasticsearch:9200` 访问它。若本地排障确有需要，单独的开发 Compose override 才可发布 `127.0.0.1:9200:9200`；该 override 不得进入生产部署或 CI。
+`elasticsearch` 不再声明 `9200:9200`，但必须以 `http.host: 0.0.0.0` 监听 Docker 私有网络。RAG Server、Worker、Outbox、迁移容器和测试容器仅通过 Compose 私有网络的 `https://elasticsearch:9200` 访问它；监听容器网卡不等同于发布宿主机端口。若本地排障确有需要，单独的开发 Compose override 才可发布 `127.0.0.1:9200:9200`；该 override 不得进入生产部署或 CI。
 
 ```text
 rag-server / rag-worker / rag-test
@@ -40,9 +40,9 @@ rag-chunks-v1* only
 
 ## TLS、初始化与秘密
 
-Search Guard 首次安装要求全量重启并要求 transport TLS；本设计同时启用 HTTP TLS。证书分为 CA、节点证书和仅用于 `sgctl` 初始化的管理员客户端证书。生产中节点与管理员证书必须不同；私钥、管理员证书、用户密码、CA 私钥及其派生文件均不得进入 Git、镜像层、日志或测试 artifact。
+Search Guard 首次安装要求全量重启并要求 transport TLS；本设计同时启用 HTTP TLS。基于 Elastic 官方发行版安装 Search Guard 时，`elasticsearch.yml` 必须设置 `xpack.security.enabled: false`，以停用会与 Search Guard 重复注册 transport 安全层的 X-Pack Security；认证、TLS 和授权继续全部由 Search Guard 强制执行。证书分为 CA、节点证书和仅用于 `sgctl` 初始化的管理员客户端证书。生产中节点与管理员证书必须不同；私钥、管理员证书、用户密码、CA 私钥及其派生文件均不得进入 Git、镜像层、日志或测试 artifact。
 
-提供受版本控制的非秘密配置模板和显式 bootstrap 命令。bootstrap 只接受通过环境变量或 Docker/Kubernetes Secret 注入的材料，在受限目录生成或挂载证书，并以管理员客户端证书运行 `sgctl` 完成初始化。它必须可重复执行：已初始化的配置只做一致性校验，不覆盖运行中用户或角色。丢失或错误的秘密必须使启动失败，不能回退到 HTTP、匿名访问或 demo 用户。
+提供受版本控制的非秘密配置模板和显式 bootstrap 命令。development/test 的 `rag-security-materials` one-shot 服务在两个私有命名卷中生成独立 CA、节点/管理员证书及随机 `rag_mvp` password file；节点私钥只供 ES UID 读取，应用密码只供 RAG UID 读取，ES healthcheck 使用节点卷中仅 ES 可读的同值副本。production 只接受外部注入材料，缺失即失败。`rag-search-guard-bootstrap` 使用管理员客户端证书运行 `sgctl` 完成初始化。它必须可重复执行：已初始化的配置只做一致性校验，不覆盖运行中用户或角色。丢失或错误的秘密必须使启动失败，不能回退到 HTTP、匿名访问或 demo 用户。
 
 Search Guard 初始化配置使用 `basic/internal_users_db`。内部用户数据库只保存 BCrypt 密码哈希；明文密码只以一次性 Secret 形式提供给 bootstrap 和 RAG 进程。Search Guard 自身配置、角色及用户更新优先经 `sgctl` 完成，不启用 Enterprise REST 管理 API。
 
@@ -70,7 +70,7 @@ RAG_ELASTICSEARCH_CA_CERT=/run/secrets/search_guard_ca.pem
 
 `Settings` 将密码建模为 secret 类型；container 仅将其传递给 Elasticsearch async client 的 Basic Auth 和 CA 校验配置。日志、异常、trace、pytest 快照、Earthly 输出和 Compose config 不得包含 password 或 `Authorization` 值。客户端不得以 `verify_certs=false`、`curl -k` 或明文 HTTP 绕过 TLS。
 
-Elasticsearch healthcheck 改为使用 CA、`rag_mvp` Basic 身份和 `/_searchguard/health`，要求 `status=UP`。启动顺序为：Search Guard Elasticsearch 健康 → 安全 bootstrap 成功 → `rag-migrate` → RAG Server/Worker/Outbox。任何一步失败均阻止下游服务启动。
+Elasticsearch healthcheck 使用 CA、`rag_mvp` Basic 身份和 `/_searchguard/health`，要求 `status=UP`。由于首次初始化前尚不存在 `rag_mvp`，bootstrap 只等待 ES `service_started` 并以管理员证书重试；完成配置后 healthcheck 才会变为健康。完整顺序为：安全材料成功 → ES 启动 → bootstrap 成功 → ES 健康 → `rag-migrate` → RAG Server/Worker/Outbox。任何一步失败均阻止下游服务启动。
 
 已有 `elasticsearch-data` 卷不可原地升级为带插件的集群；迁移 runbook 必须要求维护窗口、备份/快照、停止所有节点、安装插件、挂载证书、初始化、验证，再恢复 shard allocation。测试环境使用独立卷，不得以删除生产卷作为迁移手段。
 
@@ -84,7 +84,7 @@ Elasticsearch healthcheck 改为使用 CA、`rag_mvp` Basic 身份和 `/_searchg
 2. 使用错误密码、错误 CA 或缺失凭据时，RAG 进程/测试容器失败且日志不泄露秘密。
 3. `rag_mvp` 能完成 `ensure_index`、bulk upsert、KNN/BM25、delete-by-query 和 dataset cleanup，但不能读取非 `rag-chunks-v1*` 索引或调用 Search Guard 管理 API。
 4. `/_searchguard/health` 为 `UP` 后，完整 integration、resilience、real eval 均可通过；真实 eval 的 Dataset 删除仍能清理 MySQL、ES 和对象存储。
-5. 构建入口测试固定 ES/插件精确版本、插件 checksum、禁止 `xpack.security.enabled: false`、禁止默认 `9200:9200` 和 TLS bypass。
+5. 构建入口测试固定 ES/插件精确版本、插件 checksum、要求 `xpack.security.enabled: false`、禁止默认 `9200:9200` 和 TLS bypass。
 
 ## 失败处理与回滚
 

@@ -241,7 +241,15 @@ def metadata_repository(database_probe: DatabaseProbe) -> MySQLMetadataRepositor
 @pytest_asyncio.fixture
 async def es_client() -> AsyncIterator[AsyncElasticsearch]:
     """创建真实 Elasticsearch 客户端，并在测试后关闭。"""
-    client = AsyncElasticsearch(os.environ["RAG_ELASTICSEARCH_URL"])
+    password = (
+        Path(os.environ["RAG_ELASTICSEARCH_PASSWORD_FILE"]).read_text(encoding="utf-8").strip()
+    )
+    client = AsyncElasticsearch(
+        os.environ["RAG_ELASTICSEARCH_URL"],
+        basic_auth=(os.environ["RAG_ELASTICSEARCH_USERNAME"], password),
+        ca_certs=os.environ["RAG_ELASTICSEARCH_CA_CERT"],
+        verify_certs=True,
+    )
     try:
         yield client
     finally:

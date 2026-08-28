@@ -50,7 +50,6 @@ services:
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
       - search-guard-node-secrets:/usr/share/elasticsearch/config/search-guard:ro
-      - search-guard-client-secrets:/usr/share/elasticsearch/config/client-secrets:ro
     depends_on:
       rag-security-materials:
         condition: service_completed_successfully
@@ -58,7 +57,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "password=$$(cat /usr/share/elasticsearch/config/client-secrets/rag_mvp_password) && curl --fail --silent --show-error --cacert /usr/share/elasticsearch/config/client-secrets/ca.pem --user rag_mvp:$$password https://localhost:9200/_searchguard/health | grep -q '\"status\"[[:space:]]*:[[:space:]]*\"UP\"'",
+          "password=$$(cat /usr/share/elasticsearch/config/search-guard/rag_mvp_password) && curl --fail --silent --show-error --cacert /usr/share/elasticsearch/config/search-guard/ca.pem --user rag_mvp:$$password https://localhost:9200/_searchguard/health | grep -q '\"status\"[[:space:]]*:[[:space:]]*\"UP\"'",
         ]
       interval: 10s
       timeout: 5s

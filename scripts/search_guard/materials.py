@@ -29,7 +29,14 @@ ADMIN_DN: Final = {
     NameOID.LOCALITY_NAME: "Local",
     NameOID.COUNTRY_NAME: "CN",
 }
-NODE_FILES: Final = ("ca.pem", "node.pem", "node-key.pem", "admin.pem", "admin-key.pem")
+NODE_FILES: Final = (
+    "ca.pem",
+    "node.pem",
+    "node-key.pem",
+    "admin.pem",
+    "admin-key.pem",
+    "rag_mvp_password",
+)
 CLIENT_FILES: Final = ("ca.pem", "rag_mvp_password")
 
 
@@ -170,9 +177,13 @@ def generate(node_output: Path, client_output: Path) -> None:
     _write_private(node_output / "node-key.pem", node_key)
     _write_public(node_output / "admin.pem", admin_certificate)
     _write_private(node_output / "admin-key.pem", admin_key)
-    password_path = client_output / "rag_mvp_password"
-    password_path.write_text(secrets.token_urlsafe(32) + "\n", encoding="utf-8")
-    password_path.chmod(0o600)
+    password = secrets.token_urlsafe(32) + "\n"
+    for password_path in (
+        node_output / "rag_mvp_password",
+        client_output / "rag_mvp_password",
+    ):
+        password_path.write_text(password, encoding="utf-8")
+        password_path.chmod(0o600)
 
 
 def _parser() -> argparse.ArgumentParser:

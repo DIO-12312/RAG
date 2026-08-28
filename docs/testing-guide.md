@@ -19,7 +19,7 @@ Python 3.12+ 与 `uv` 只在需要直接定位单个测试或本机启动进程�
 Copy-Item .env.example .env
 ```
 
-`.env` 必须包含真实 Embedding provider 的 URL、模型名、API Key 和声明维度，禁止提交。离线 `make lint`、`make test` 和 `make ci` 使用独立空白 Earthly 环境文件，不读取 `.env`。
+`.env` 必须包含真实 Embedding provider 的 URL、模型名、API Key 和声明维度，禁止提交。development/test Compose 会在私有命名卷生成 Search Guard CA、节点/管理员证书和 `rag_mvp` password file；生产必须预置外部材料，缺失时启动失败。离线 `make lint`、`make test` 和 `make ci` 使用独立空白 Earthly 环境文件，不读取 `.env`。
 
 ## 2. 公共验证入口
 
@@ -109,12 +109,12 @@ make docker-down
 
 真实测试注意事项：
 
-- `integration` 会调用真实 Embedding API，产生网络请求、延迟和费用；缺少模型配置必须失败，不能静默回退 Fake。
+- `integration` 会调用真实 Embedding API，产生网络请求、延迟和费用；缺少模型配置必须失败，不能静默回退 Fake。该 suite 同时验证 Search Guard HTTPS、匿名/错误凭据拒绝与 `rag_mvp` 最小权限。
 - `tests/object/计组复习.pdf` 是 Git 忽略的本地真实输入：存在时由 integration/E2E 与 eval 套件执行，缺失时只跳过对应本地 PDF 用例。可用 `RAG_E2E_PDF_PATH` 指向测试进程可见的替代路径；Docker 内路径必须通过 bind mount 可见。
 - Embedding 仍以 32 条为配置批次上限；若兼容供应商用 HTTP 400 拒绝多输入批次，Adapter 会保持顺序二分请求，单条输入仍被拒绝时保留稳定失败，不回退 Fake。
 - `resilience` 使用测试专用 Compose override、共享 barrier 和 Docker socket，能够 KILL/stop/start 精确容器；只允许在隔离的测试宿主机运行。
 - `eval` 始终摄取固定语料并调用真实模型完成 30 问；本地 PDF 存在时还会完整摄取 44 页文档并执行 50 次 query embedding，因此通常是模型请求最多的 suite。
-- 真实测试只传必要 Secret 给 `rag-server`、`rag-worker` 和 `rag-test`；Migration 与 Outbox 不应获得模型 API Key。
+- 真实测试只传必要 Secret 给 `rag-server`、`rag-worker` 和 `rag-test`；Migration 与 Outbox 不应获得模型 API Key。ES password 以只读文件挂载，`docker-down` 同时扫描模型 API Key 与该 password，扫描命中不会回显任何 Secret。
 
 固定 30 问的真实和离线评测门槛均为 `Recall@6 ≥ 0.85`、`MRR@6 ≥ 0.70`、locator accuracy `= 1.0`。本地 PDF 五十问门槛为 `Recall@6 ≥ 0.80`、`MRR@6 ≥ 0.65`、Top-1 页命中率 `≥ 0.60`、答案包含度 `≥ 0.70`。不得通过降低阈值、修改向量 snapshot 或 LLM 自由文本 snapshot 消除失败。
 

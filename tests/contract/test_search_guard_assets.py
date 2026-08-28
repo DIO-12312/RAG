@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts.search_guard import bootstrap
+
 ROOT = Path(__file__).resolve().parents[2]
 MATERIALS_SCRIPT = ROOT / "scripts" / "search_guard" / "materials.py"
 
@@ -40,6 +42,7 @@ def test_development_material_generator_creates_separate_node_and_client_secrets
     ).read_bytes()
     password = (client_output / "rag_mvp_password").read_text(encoding="utf-8").strip()
     assert password
+    assert (node_output / "rag_mvp_password").read_text(encoding="utf-8").strip() == password
     assert password not in completed.stdout
     assert password not in completed.stderr
 
@@ -84,6 +87,49 @@ def test_search_guard_assets_pin_tls_and_least_privilege() -> None:
     assert "6fa46190b1fd62f6c54d6c11d17757f043110f8c0db016e16c62c59b953f3c91" in dockerfile
     assert "searchguard.ssl.transport.pemcert_filepath" in config
     assert "searchguard.ssl.http.enabled: true" in config
+    assert "xpack.security.enabled: false" in config
+    assert "http.host: 0.0.0.0" in config
     assert "searchguard.nodes_dn" in config
     assert "SGS_ALL_ACCESS" not in roles
     assert '"rag-chunks-v1*"' in roles
+
+
+def test_bootstrap_connect_allows_first_time_search_guard_initialization(monkeypatch) -> None:
+    """首次安装的 SG11 状态必须允许 bootstrap 继续上传配置。"""
+
+    calls: list[tuple[str, ...]] = []
+
+    def successful_run(*arguments: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(bootstrap, "_run", successful_run)
+
+    bootstrap._connect("elasticsearch", 9200, Path("/node-secrets"))
+
+    assert "--skip-connection-check" in calls[0]
+
+
+def test_bootstrap_upload_skips_connection_check_for_first_initialization(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """首次上传配置同样不能因尚无认证域而被 sgctl 拒绝。"""
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    for name in bootstrap.STATIC_CONFIGS:
+        (config_dir / name).write_text("_readonly: {type: map}\n", encoding="utf-8")
+    client_dir = tmp_path / "client"
+    client_dir.mkdir()
+    (client_dir / "rag_mvp_password").write_text("not-logged\n", encoding="utf-8")
+    calls: list[tuple[str, ...]] = []
+
+    def successful_run(*arguments: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(bootstrap, "_run", successful_run)
+
+    bootstrap._initialize(config_dir, client_dir, tmp_path / "work")
+
+    assert calls[-1][-1] == "--skip-connection-check"

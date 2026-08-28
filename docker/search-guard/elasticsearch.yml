@@ -6,6 +6,10 @@ searchguard.ssl.http.enabled: true
 searchguard.ssl.http.pemcert_filepath: search-guard/node.pem
 searchguard.ssl.http.pemkey_filepath: search-guard/node-key.pem
 searchguard.ssl.http.pemtrustedcas_filepath: search-guard/ca.pem
+xpack.security.enabled: false
+# Keep the HTTPS endpoint reachable to containers on the private Compose network.
+# This does not publish 9200 to the Docker host.
+http.host: 0.0.0.0
 searchguard.nodes_dn:
   - CN=elasticsearch,OU=RAG,O=RAG,L=Local,C=CN
 searchguard.authcz.admin_dn:

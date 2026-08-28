@@ -141,7 +141,7 @@ make docker-test SUITE=eval
 make docker-down
 ```
 
-`make docker-up` 会通过 Earthly 构建并启动 MySQL、Elasticsearch、NATS、gRPC Server、Worker 和 Outbox。gRPC 服务从 Windows 主机访问时使用 `localhost:50051`；ES 开发检查地址为 `http://localhost:9200`，NATS 客户端地址为 `nats://localhost:4222`。
+`make docker-up` 会通过 Earthly 构建并启动 MySQL、受 Search Guard TLS/Basic 保护的 Elasticsearch、NATS、gRPC Server、Worker 和 Outbox。gRPC 服务从 Windows 主机访问时使用 `localhost:50051`；默认不发布 ES、MySQL 或 NATS 端口。需要本机排障 ES 时只能在 WSL 中显式使用 `docker-compose.debug.yml` 的 `127.0.0.1:9200:9200` override，且仍必须使用 CA 与 `rag_mvp` 凭据；不得将 9200 发布到 Windows 局域网或公网。
 
 ## 8. Windows 与 WSL2 的边界
 
@@ -178,7 +178,7 @@ wsl --shutdown
 
 ### Elasticsearch 启动后反复不健康
 
-为 Docker Desktop 分配更多内存，检查 9200 端口没有冲突，并查看：
+为 Docker Desktop 分配更多内存，确认 Search Guard 材料/初始化容器没有失败，并查看：
 
 ```bash
 docker compose logs --tail=200 elasticsearch
@@ -187,4 +187,3 @@ docker compose logs --tail=200 elasticsearch
 ### 想清空本地卷
 
 普通停止使用 `make docker-down`，它保留命名卷。只有明确要删除 MySQL、ES、NATS 和对象数据时才执行 `docker compose down -v`。
-

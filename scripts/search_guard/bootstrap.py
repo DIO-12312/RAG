@@ -23,26 +23,31 @@ def _run(*arguments: str, input_text: str | None = None) -> subprocess.Completed
         input=input_text,
         capture_output=True,
         text=True,
+        timeout=10,
     )
 
 
 def _connect(host: str, port: int, node_dir: Path) -> None:
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
-        completed = _run(
-            "connect",
-            host,
-            "--port",
-            str(port),
-            "--ca-cert",
-            str(node_dir / "ca.pem"),
-            "--cert",
-            str(node_dir / "admin.pem"),
-            "--key",
-            str(node_dir / "admin-key.pem"),
-        )
-        if completed.returncode == 0:
-            return
+        try:
+            completed = _run(
+                "connect",
+                host,
+                "--skip-connection-check",
+                "--port",
+                str(port),
+                "--ca-cert",
+                str(node_dir / "ca.pem"),
+                "--cert",
+                str(node_dir / "admin.pem"),
+                "--key",
+                str(node_dir / "admin-key.pem"),
+            )
+            if completed.returncode == 0:
+                return
+        except subprocess.TimeoutExpired:
+            pass
         time.sleep(2)
     raise RuntimeError("Search Guard admin connection did not become ready")
 
@@ -70,7 +75,7 @@ def _initialize(config_dir: Path, client_dir: Path, work_dir: Path) -> None:
     )
     if added.returncode != 0:
         raise RuntimeError("could not create Search Guard internal user")
-    uploaded = _run("update-config", str(work_dir))
+    uploaded = _run("update-config", str(work_dir), "--skip-connection-check")
     if uploaded.returncode != 0:
         raise RuntimeError("could not initialize Search Guard configuration")
 

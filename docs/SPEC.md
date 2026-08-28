@@ -226,9 +226,9 @@ MVP 的一个运行实例只配置一个 Embedding 模型、一个声明维度�
 
 ### 3.4 Elasticsearch 安全边界
 
-Elasticsearch 是 RAG 的私有基础设施，不是对外 API。默认 Compose、CI 与生产部署均不得发布 `9200` 到宿主机全网卡；RAG Server、Worker、Outbox 和测试容器只能经内部网络访问 `https://elasticsearch:9200`。仅本地排障 override 可绑定 `127.0.0.1:9200`，不得用于 CI 或生产。MySQL、NATS client/monitoring 端口同样不得因本地便利而默认对外发布。
+Elasticsearch 是 RAG 的私有基础设施，不是对外 API。默认 Compose、CI 与生产部署均不得发布 `9200` 到宿主机全网卡；`elasticsearch.yml` 必须以 `http.host: 0.0.0.0` 监听 Docker 私有网络，RAG Server、Worker、Outbox 和测试容器只能经该网络访问 `https://elasticsearch:9200`。仅本地排障 override 可绑定 `127.0.0.1:9200`，不得用于 CI 或生产。MySQL、NATS client/monitoring 端口同样不得因本地便利而默认对外发布。
 
-检索服务固定采用 Elasticsearch `8.19.19` 与 Search Guard FLX `4.1.2`，插件工件必须校验 SHA-256。首次引入 Search Guard 必须按全量重启迁移执行，启用 transport TLS、HTTP TLS，并以管理员客户端证书初始化；禁止使用 demo 证书、demo 用户、匿名访问或 `xpack.security.enabled: false`。用户认证使用 Search Guard `basic/internal_users_db`；其内部库只保存 BCrypt 哈希。
+检索服务固定采用 Elasticsearch `8.19.19` 与 Search Guard FLX `4.1.2`，插件工件必须校验 SHA-256。首次引入 Search Guard 必须按全量重启迁移执行，启用 transport TLS、HTTP TLS，并以管理员客户端证书初始化。由于 Search Guard 与随 Elastic 发行版捆绑的 X-Pack Security 不能同时注册 transport 安全层，`elasticsearch.yml` 必须设置 `xpack.security.enabled: false`；此设置只停用 X-Pack Security，TLS、HTTP Basic、RBAC 与 fail-closed 行为仍必须由 Search Guard 实现。禁止使用 demo 证书、demo 用户或匿名访问。用户认证使用 Search Guard `basic/internal_users_db`；其内部库只保存 BCrypt 哈希。
 
 运行时由 `RAG_ELASTICSEARCH_URL`、`RAG_ELASTICSEARCH_USERNAME`、`RAG_ELASTICSEARCH_CA_CERT` 和二选一的 `RAG_ELASTICSEARCH_PASSWORD`/`RAG_ELASTICSEARCH_PASSWORD_FILE` 配置 HTTPS Basic 客户端。`Settings` 仅在装配 Elasticsearch client 时读取密码文件，且将密码建模为 secret 类型；URL 不是完整 HTTPS endpoint、CA path 为空、密码为空或同时配置两种密码来源时必须拒绝启动。应用身份 `rag_mvp` 仅可操作 `rag-chunks-v1*`：完成 index mapping/创建、bulk 写入、检索、delete-by-query、index 版本清理和必要 cluster health/复合操作；不得拥有 `SGS_ALL_ACCESS`、访问 Search Guard 系统索引、其他业务索引、节点管理或用户/角色管理权限。密码、私钥、管理员证书与 `Authorization` 值只能通过 Secret 注入，绝不写入 Git、镜像、日志、trace、测试 artifact 或生成的 Compose 配置。
 
