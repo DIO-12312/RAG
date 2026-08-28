@@ -207,7 +207,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 |---|---|---|---|
 | 关系数据 | MySQL 8.0+（InnoDB） | Tenant、带生命周期 generation 的 Dataset、Document、IngestionFingerprint、Job、Task、Chunk manifest、IndexBuild、OutboxEvent | 事务维护业务状态、去重锁、Outbox、索引版本与引用完整性；`DeleteDataset` 成功清理后物理删除该 Dataset 的全部聚合行；不把向量正文存到此处，也不保存 Go 的 Conversation/Message。 |
 | 原文件 | 本地 `data/objects/` | 上传的二进制、可下载源文件 | Key 由 document ID 派生，不用原始文件名作唯一键。 |
-| 检索索引 | Elasticsearch 8.x | `dense_vector` KNN、BM25 全文、chunk payload 与 metadata filter | `chunk_id` 是逻辑引用 ID；ES 物理 `_id` 为 `{document_id}:{index_version}:{chunk_id}`，同一版本 upsert 必须幂等。 |
+| 检索索引 | Elasticsearch 8.19.19 + Search Guard FLX 4.1.2 | HTTPS、HTTP Basic、`dense_vector` KNN、BM25 全文、chunk payload 与 metadata filter | Search Guard 插件必须与 ES 精确版本匹配；`chunk_id` 是逻辑引用 ID；ES 物理 `_id` 为 `{document_id}:{index_version}:{chunk_id}`，同一版本 upsert 必须幂等。 |
 | 队列 | NATS JetStream | 持久化 Task 消息、durable consumer、ACK/NAK、延迟重投 | 使用显式 ACK 与 `ack_wait`/`max_deliver`，不以数据库行 claim 作为消费协调机制。 |
 
 ### 3.3 模型与 RAG 算法
@@ -224,7 +224,17 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 
 MVP 的一个运行实例只配置一个 Embedding 模型、一个声明维度和一套 ES vector mapping。`CreateDataset` 仍保存 `embedding_model` 与 `embedding_dimension`，但二者必须与当前运行实例的 ModelGateway 配置一致；不一致时返回稳定 `EMBEDDING_CONFIG_MISMATCH`，不得创建 Dataset。真实 API 返回的每个向量都必须与声明维度一致。若需要使用不同模型或维度，应启动使用独立 ES index/schema 的另一部署；同一 index 不得混写不同维度。
 
-### 3.4 不直接复制 RAGFlow 的部分
+### 3.4 Elasticsearch 安全边界
+
+Elasticsearch 是 RAG 的私有基础设施，不是对外 API。默认 Compose、CI 与生产部署均不得发布 `9200` 到宿主机全网卡；RAG Server、Worker、Outbox 和测试容器只能经内部网络访问 `https://elasticsearch:9200`。仅本地排障 override 可绑定 `127.0.0.1:9200`，不得用于 CI 或生产。MySQL、NATS client/monitoring 端口同样不得因本地便利而默认对外发布。
+
+检索服务固定采用 Elasticsearch `8.19.19` 与 Search Guard FLX `4.1.2`，插件工件必须校验 SHA-256。首次引入 Search Guard 必须按全量重启迁移执行，启用 transport TLS、HTTP TLS，并以管理员客户端证书初始化；禁止使用 demo 证书、demo 用户、匿名访问或 `xpack.security.enabled: false`。用户认证使用 Search Guard `basic/internal_users_db`；其内部库只保存 BCrypt 哈希。
+
+运行时由 `RAG_ELASTICSEARCH_URL`、`RAG_ELASTICSEARCH_USERNAME`、`RAG_ELASTICSEARCH_PASSWORD` 和 `RAG_ELASTICSEARCH_CA_CERT` 配置 HTTPS Basic 客户端。应用身份 `rag_mvp` 仅可操作 `rag-chunks-v1*`：完成 index mapping/创建、bulk 写入、检索、delete-by-query、index 版本清理和必要 cluster health/复合操作；不得拥有 `SGS_ALL_ACCESS`、访问 Search Guard 系统索引、其他业务索引、节点管理或用户/角色管理权限。密码、私钥、管理员证书与 `Authorization` 值只能通过 Secret 注入，绝不写入 Git、镜像、日志、trace、测试 artifact 或生成的 Compose 配置。
+
+所有 TLS/认证/证书错误 fail closed：ES healthcheck 必须用 CA、`rag_mvp` 和 `/_searchguard/health` 验证 `status=UP`；安全 bootstrap 成功前 `rag-migrate`、Server、Worker 与 Outbox 不得启动。禁止 `verify_certs=false`、`curl -k`、明文 HTTP 回退或为排障关闭 Search Guard。真实 Docker suite 必须验证无凭据拒绝、错误凭据/CA 拒绝、最小权限隔离、受保护 ES 的完整摄取/检索/删除闭环和无公网 9200 listener。
+
+### 3.5 不直接复制 RAGFlow 的部分
 
 RAGFlow 需要复杂文档理解、多个检索引擎、对象存储、模型提供商、双语言后端、Agent Canvas 和大量连接器，因此使用了更复杂的 Quart/Peewee、Redis、MinIO、ES/Infinity、深度解析及多层任务体系。本项目借鉴其领域边界、幂等摄取、混合检索和引用血缘，不复制其产品规模和双实现负担。
 
@@ -675,7 +685,7 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 
 ### 5.7 配置与可观测性
 
-`Settings` 只从环境变量/`.env` 读取：MySQL DSN、Alembic migration root、对象目录、Elasticsearch URL/索引名、NATS URL/stream/consumer、模型 URL/名称/API Key/声明维度、parser 版本、chunk 大小/重叠、上传上限、`ack_wait`、`max_deliver`、Worker 空闲等待、Outbox 轮询/批量/Finalizer 尝试上限、staging sweep 间隔/TTL、重试退避和日志级别。容器镜像必须复制 Alembic 配置与版本脚本，并由 `rag-migrate` 显式设置 migration root 后执行 `upgrade head`；应用角色只能在迁移成功后启动。RPC 上传计算 `config_digest` 与 Worker Pipeline 必须使用同一份 parser/chunk/model Settings，禁止入口使用硬编码配置造成去重摘要与真实执行参数不一致。所有循环在超时轮询期间仍必须能被 stop event 立即唤醒。生产容器要求 `EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_MODEL_API_KEY` 与 `EMBEDDING_MODEL_DIMENSION`；维度不得在代码中按供应商写死。API Key 只存在环境变量或密钥管理系统，禁止写入 Dataset、Job、日志、trace、镜像或测试 artifact。
+`Settings` 只从环境变量/`.env` 读取：MySQL DSN、Alembic migration root、对象目录、Elasticsearch URL/索引名/用户名/密码/CA 证书路径、NATS URL/stream/consumer、模型 URL/名称/API Key/声明维度、parser 版本、chunk 大小/重叠、上传上限、`ack_wait`、`max_deliver`、Worker 空闲等待、Outbox 轮询/批量/Finalizer 尝试上限、staging sweep 间隔/TTL、重试退避和日志级别。容器镜像必须复制 Alembic 配置与版本脚本，并由 `rag-migrate` 显式设置 migration root 后执行 `upgrade head`；Search Guard 安全 bootstrap 必须先于 migration 成功，应用角色只能在二者成功后启动。RPC 上传计算 `config_digest` 与 Worker Pipeline 必须使用同一份 parser/chunk/model Settings，禁止入口使用硬编码配置造成去重摘要与真实执行参数不一致。所有循环在超时轮询期间仍必须能被 stop event 立即唤醒。生产容器要求 `EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_MODEL_API_KEY` 与 `EMBEDDING_MODEL_DIMENSION`；维度不得在代码中按供应商写死。API Key、Elasticsearch 密码、证书私钥和管理员客户端证书只存在环境变量、受保护挂载或密钥管理系统，禁止写入 Dataset、Job、日志、trace、镜像或测试 artifact。
 
 真实模型 integration 和 Docker E2E 被显式选择时，缺少模型配置必须使门禁失败，不得静默 skip 或回退 Fake。Unit、快速 Contract 与 pre-commit 继续使用确定性 Fake，避免将外部网络抖动和费用引入每次提交；Fake 结果仍不能替代真实发布验收。
 
@@ -790,8 +800,10 @@ Python RAG: 给定合法 Dataset 和 Query，返回可靠、可解释、可引�
 - [x] `Retrieve` 返回的每个 hit 都含稳定 `chunk_id`、分数及来源定位；Go 可据此构造 Citation，Python 不分配 `[n]`。
 - [x] Unit/contract/resilience/integration/E2E 测试均通过；核心覆盖率达到本规范门槛。
 - [x] `docker compose up` 可启动完整本地演示；密钥不被提交或记录在日志。
+- [ ] Elasticsearch 使用 Search Guard FLX 4.1.2 与 HTTPS Basic Auth；无认证、错误凭据或错误 CA 均被拒绝，`rag_mvp` 仅能访问 `rag-chunks-v1*`。
+- [ ] 默认部署没有公网或宿主全网卡的 `9200` listener；安全 bootstrap、受保护 healthcheck 和所有真实 Docker suites 均通过。
 
-**发布验收记录（2026-08-25）：** 使用 `qwen3.7-text-embedding`、1024 维向量完成验收；运行环境为 Docker Engine 29.4.0、Docker Compose 5.1.1、MySQL 8.4.6、Elasticsearch 8.19.3、NATS 2.11.8。离线门禁 190 项通过、核心覆盖率 88.01%；真实 adapter/model 与四格式 E2E 合计 27 项通过；Docker Resilience 8 项通过；真实 30 问评测 1 项通过且达到上述指标门槛。API Key、模型 URL 和向量值不写入文档或测试 artifact。
+**发布验收记录（2026-08-25）：** 使用 `qwen3.7-text-embedding`、1024 维向量完成验收；运行环境为 Docker Engine 29.4.0、Docker Compose 5.1.1、MySQL 8.4.6、Elasticsearch 8.19.3、NATS 2.11.8。离线门禁 190 项通过、核心覆盖率 88.01%；真实 adapter/model 与四格式 E2E 合计 27 项通过；Docker Resilience 8 项通过；真实 30 问评测 1 项通过且达到上述指标门槛。该记录早于 Search Guard 安全加固，不能作为受保护 Elasticsearch 的验收证据。API Key、模型 URL 和向量值不写入文档或测试 artifact。
 
 ## 附录 B：参考来源
 
@@ -811,5 +823,13 @@ Python RAG: 给定合法 Dataset 和 Query，返回可靠、可解释、可引�
 
 - [MODULAR-RAG-MCP-SERVER DEV_SPEC](vscode://file/D:/AI/github/MODULAR-RAG-MCP-SERVER-main/MODULAR-RAG-MCP-SERVER-main/DEV_SPEC.md:1:1)
 - [MODULAR-RAG-MCP-SERVER README](vscode://file/D:/AI/github/MODULAR-RAG-MCP-SERVER-main/MODULAR-RAG-MCP-SERVER-main/README.md:1:1)
+
+### Elasticsearch 安全
+
+- [Search Guard HTTP Basic Authorization](https://docs.search-guard.com/latest/http-basic-authorization)
+- [Search Guard 版本矩阵](https://docs.search-guard.com/latest/search-guard-versions)
+- [Search Guard 安装、TLS 与初始化](https://docs.search-guard.com/latest/search-guard-installation)
+- [Search Guard 内部用户数据库](https://docs.search-guard.com/latest/internal-users-database)
+- [Search Guard 角色权限](https://docs.search-guard.com/latest/roles-permissions)
 
 本 SPEC 借鉴前者的七章规格结构和模块化 RAG 思路；借鉴 RAGFlow 的任务状态机、检索端口、深文档到引用的数据血缘、消息重投幂等与测试分层。它有意不复制二者的 Agent/MCP/多供应商规模，以保持 Python MVP 可在小团队内完成和验证。
