@@ -42,7 +42,7 @@ rag-chunks-v1* only
 
 Search Guard 首次安装要求全量重启并要求 transport TLS；本设计同时启用 HTTP TLS。基于 Elastic 官方发行版安装 Search Guard 时，`elasticsearch.yml` 必须设置 `xpack.security.enabled: false`，以停用会与 Search Guard 重复注册 transport 安全层的 X-Pack Security；认证、TLS 和授权继续全部由 Search Guard 强制执行。证书分为 CA、节点证书和仅用于 `sgctl` 初始化的管理员客户端证书。生产中节点与管理员证书必须不同；私钥、管理员证书、用户密码、CA 私钥及其派生文件均不得进入 Git、镜像层、日志或测试 artifact。
 
-提供受版本控制的非秘密配置模板和显式 bootstrap 命令。development/test 的 `rag-security-materials` one-shot 服务在两个私有命名卷中生成独立 CA、节点/管理员证书及随机 `rag_mvp` password file；节点私钥只供 ES UID 读取，应用密码只供 RAG UID 读取，ES healthcheck 使用节点卷中仅 ES 可读的同值副本。production 只接受外部注入材料，缺失即失败。`rag-search-guard-bootstrap` 使用管理员客户端证书运行 `sgctl` 完成初始化。它必须可重复执行：已初始化的配置只做一致性校验，不覆盖运行中用户或角色。丢失或错误的秘密必须使启动失败，不能回退到 HTTP、匿名访问或 demo 用户。
+提供受版本控制的非秘密配置模板和显式 bootstrap 命令。development/test 的 `rag-security-materials` one-shot 服务在两个私有命名卷中生成独立 CA、节点/管理员证书及随机 `rag_mvp` password file；节点私钥只供 ES UID 读取，应用密码只供 RAG UID 读取，ES healthcheck 使用节点卷中仅 ES 可读的同值副本。`rag-search-guard-bootstrap` 使用管理员客户端证书运行 `sgctl` 完成初始化。它必须可重复执行：已初始化的配置只做一致性校验，不覆盖运行中用户或角色。丢失或错误的秘密必须使启动失败，不能回退到 HTTP、匿名访问或 demo 用户。
 
 Search Guard 初始化配置使用 `basic/internal_users_db`。内部用户数据库只保存 BCrypt 密码哈希；明文密码只以一次性 Secret 形式提供给 bootstrap 和 RAG 进程。Search Guard 自身配置、角色及用户更新优先经 `sgctl` 完成，不启用 Enterprise REST 管理 API。
 
@@ -70,7 +70,11 @@ RAG_ELASTICSEARCH_CA_CERT=/run/secrets/ca.pem
 
 `Settings` 将密码建模为 secret 类型；container 仅将其传递给 Elasticsearch async client 的 Basic Auth 和 CA 校验配置。日志、异常、trace、pytest 快照、Earthly 输出和 Compose config 不得包含 password 或 `Authorization` 值。客户端不得以 `verify_certs=false`、`curl -k` 或明文 HTTP 绕过 TLS。
 
-Compose 的服务名与顺序为：`rag-security-materials → elasticsearch → rag-search-guard-bootstrap → rag-migrate → rag-server/rag-worker/rag-outbox`。`rag-security-materials` 将 node/admin 材料写入 `search-guard-node-secrets`：它对 bootstrap 挂载为 `/node-secrets`，对 ES 只读挂载为 `/usr/share/elasticsearch/config/search-guard`；将 runtime CA/password 写入 `search-guard-client-secrets`，只读挂载给需要 ES 的应用和测试容器为 `/run/secrets/ca.pem`、`/run/secrets/rag_mvp_password`。Elasticsearch healthcheck 使用 CA、`rag_mvp` Basic 身份和 `/_searchguard/health`，要求 `status=UP`。由于首次初始化前尚不存在 `rag_mvp`，bootstrap 只等待 ES `service_started` 并以管理员证书重试；完成配置后 healthcheck 才会变为健康。这是刻意的两阶段 healthcheck，任何一步失败都阻止下游服务启动。
+development/test 的 Compose 服务名与顺序为：`rag-security-materials → elasticsearch → rag-search-guard-bootstrap → rag-migrate → rag-server/rag-worker/rag-outbox`。`rag-security-materials` 将 node/admin 材料写入 `search-guard-node-secrets`：它对 bootstrap 挂载为 `/node-secrets`，对 ES 只读挂载为 `/usr/share/elasticsearch/config/search-guard`；将 runtime CA/password 写入 `search-guard-client-secrets`，只读挂载给需要 ES 的应用和测试容器为 `/run/secrets/ca.pem`、`/run/secrets/rag_mvp_password`。Elasticsearch healthcheck 使用 CA、`rag_mvp` Basic 身份和 `/_searchguard/health`，要求 `status=UP`。由于首次初始化前尚不存在 `rag_mvp`，bootstrap 只等待 ES `service_started` 并以管理员证书重试；完成配置后 healthcheck 才会变为健康。这是刻意的两阶段 healthcheck，任何一步失败都阻止下游服务启动。
+
+### 生产编排边界（后续工作）
+
+production 必须使用独立、尚待平台化的 deployment manifest/编排；本仓库当前没有、也不得宣称已有可执行的 production Compose 或 Helm 文件。该编排只能只读挂载外部 CA/node/admin/client Secret，禁止定义或启动 `rag-security-materials`。部署前必须运行 `--environment production` 的材料校验或等效 fail closed 检查；材料缺失、权限错误或证书主体不匹配时，必须阻断 ES、bootstrap 与下游服务启动。按目标平台实现、集成测试和运维验收该 production manifest 是后续工作；development/test Compose 不能替代或推断为生产部署。
 
 已有 `elasticsearch-data` 卷不可原地升级为带插件的集群；迁移 runbook 必须要求维护窗口、备份/快照、停止所有节点、安装插件、挂载证书、初始化、验证，再恢复 shard allocation。测试环境使用独立卷，不得以删除生产卷作为迁移手段。
 
@@ -79,8 +83,8 @@ Compose 的服务名与顺序为：`rag-security-materials → elasticsearch →
 1. 维护窗口内暂停业务；通过受控、TLS 校验的运维通道创建 Elasticsearch snapshot，并在独立恢复或读取演练中验证。记录 snapshot、旧镜像 digest、插件版本与索引清单。
 2. 禁用 shard allocation，停止所有 ES 节点与依赖 RAG 服务，确认无写入后备份 data volume。备份不能替代已验证 snapshot。
 3. 构建精确 `elasticsearch:8.19.19` + Search Guard FLX `4.1.2` 镜像，校验插件 SHA-256、镜像 digest、TLS 配置和 node DN；不符即停止。
-4. 从生产密钥管理系统预置 CA、node/admin 证书与私钥、`rag_mvp` password；生产材料缺失、权限过宽或证书主体错误必须失败，不得自签名替代。
-5. 启动材料、ES 和 bootstrap；bootstrap 后以 `rag_mvp` 验证 `/_searchguard/health`、`rag-chunks-v1*` 访问限制和 RAG 摄取/检索闭环。验证成功后才恢复 allocation 与业务流量。
+4. 由目标平台的 production manifest 从生产密钥管理系统只读挂载 CA、node/admin 证书与私钥、`rag_mvp` password；先运行 `--environment production` 材料校验。生产材料缺失、权限过宽或证书主体错误必须 fail closed，不得自签名替代。
+5. 仅在上述校验成功后由 production 编排启动 ES 和 bootstrap；不得定义或启动 `rag-security-materials`。bootstrap 后以 `rag_mvp` 验证 `/_searchguard/health`、`rag-chunks-v1*` 访问限制和 RAG 摄取/检索闭环。验证成功后才恢复 allocation 与业务流量。
 
 失败只能 fail closed：证书、密码或 bootstrap 问题不得通过关闭 Search Guard、关闭 TLS 或重新发布宿主 9200 来“恢复”。回滚仅可在维护窗口使用验证过的 snapshot 与旧镜像，恢复后仍保持私网访问。若怀疑历史 9200 暴露，轮换全部密码/证书、检查索引和集群操作日志，并重建可信索引。
 

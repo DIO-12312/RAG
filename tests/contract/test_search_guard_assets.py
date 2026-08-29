@@ -95,11 +95,19 @@ def test_search_guard_assets_pin_tls_and_least_privilege() -> None:
 
 
 def test_search_guard_operator_docs_preserve_private_tls_runbook() -> None:
-    """运维文档必须隔离开发材料、生产迁移与受保护验收边界。"""
+    """规格、设计和运维文档必须隔离开发材料与尚待平台化的生产编排。"""
 
     linux_setup = (ROOT / "docs" / "setup" / "setup-linux.md").read_text(encoding="utf-8")
     windows_setup = (ROOT / "docs" / "setup" / "setup-windows.md").read_text(encoding="utf-8")
     testing_guide = (ROOT / "docs" / "test" / "testing-guide.md").read_text(encoding="utf-8")
+    security_spec = (ROOT / "SPEC.md").read_text(encoding="utf-8")
+    security_design = (
+        ROOT
+        / "docs"
+        / "superpowers"
+        / "specs"
+        / "2026-08-28-search-guard-elasticsearch-security-design.md"
+    ).read_text(encoding="utf-8")
 
     for setup in (linux_setup, windows_setup):
         assert "localhost:9200" not in setup
@@ -114,6 +122,17 @@ def test_search_guard_operator_docs_preserve_private_tls_runbook() -> None:
         assert "fail closed" in setup
         assert "启动 `rag-security-materials`" not in setup
         assert "docker compose down -v" not in setup
+
+    for document in (security_spec, security_design):
+        assert "development/test" in document
+        assert "rag-security-materials → elasticsearch → rag-search-guard-bootstrap" in document
+        assert "独立、尚待平台化的 deployment manifest/编排" in document
+        assert "只读挂载外部 CA/node/admin/client Secret" in document
+        assert "禁止定义或启动 `rag-security-materials`" in document
+        assert "--environment production" in document
+        assert "fail closed" in document
+        assert "阻断 ES、bootstrap 与下游服务启动" in document
+        assert "后续工作" in document
 
     assert "make docker-test SUITE=all" in testing_guide
     assert "make docker-test SUITE=integration" in testing_guide
