@@ -25,10 +25,9 @@ python-workspace:
     COPY tests ./tests
     COPY docs ./docs
     COPY .github ./.github
-    COPY .githooks ./.githooks
     COPY docker ./docker
     COPY Earthfile Makefile Dockerfile Dockerfile.elasticsearch docker-compose.yml docker-compose.debug.yml alembic.ini ./
-    COPY SPEC.md PLAN.md ./
+    COPY SPEC.md PLAN.md AGENTS.md ./
     COPY .dockerignore .gitattributes .earthly.env ./
     RUN uv sync --frozen --group dev
 
@@ -116,7 +115,7 @@ docker-up:
 # Run a selected real Docker suite and preserve the service state for diagnosis after failure.
 docker-test:
     LOCALLY
-    ARG SUITE=integration
+    ARG SUITE=all
     ARG EVAL_FIXTURE=rephrased
     RUN case "$SUITE" in integration|resilience|eval|all) ;; *) echo "Unknown SUITE: $SUITE" >&2; exit 2 ;; esac
     RUN case "$EVAL_FIXTURE" in original|rephrased) ;; *) echo "Unknown EVAL_FIXTURE: $EVAL_FIXTURE" >&2; exit 2 ;; esac

@@ -94,6 +94,7 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
     earthfile = _text("Earthfile")
     compose = _text("docker-compose.yml")
     public = {
+        "all",
         "proto",
         "lint",
         "test",
@@ -106,7 +107,7 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
     }
 
     assert _make_targets(makefile) == public
-    assert "SUITE ?= integration" in makefile
+    assert "SUITE ?= all" in makefile
     assert "EVAL_FIXTURE ?= rephrased" in makefile
     assert "+docker-test --SUITE=$(SUITE)" in makefile
     assert "--EVAL_FIXTURE=$(EVAL_FIXTURE)" in makefile

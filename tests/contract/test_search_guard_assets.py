@@ -144,7 +144,7 @@ def test_search_guard_operator_docs_preserve_private_tls_runbook() -> None:
         assert "预期索引、文档计数/完整性与一次 RAG 可检索性" in document
         assert "失败必须保持停止" in document
 
-    assert "COPY SPEC.md PLAN.md ./" in earthfile
+    assert "COPY SPEC.md PLAN.md AGENTS.md ./" in earthfile
     assert "docs/SPEC.md" not in agents
     assert "`SPEC.md`" in agents
 
