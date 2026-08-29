@@ -140,7 +140,23 @@ docker compose -f docker-compose.yml -f docker-compose.debug.yml ps elasticsearc
 
 该 override 只开放 `127.0.0.1:9200:9200`，ES 仍要求 CA 校验和 `rag_mvp` Basic 身份；它不得用于 CI 或生产。
 
-## 8. 运行真实验收
+默认部署不向浏览器、`curl` 或 Kibana 暴露 Elasticsearch；Kibana 也不在本项目的 Compose 范围内。排障 override 不是常规启动入口：不要把它写入 shell profile、CI 或生产 Compose 文件，也不要用 `curl -k`、明文 HTTP 或关闭 Search Guard 来绕过 TLS。
+
+## 8. 生产迁移 Search Guard
+
+这是一次**全量重启**迁移，不可把已有 `elasticsearch-data` 卷原地改造成带插件的集群。先在隔离维护网络中演练，并由能校验证书的集群内运维客户端执行管理 API；不要为了执行迁移临时开放 9200。
+
+1. 建立维护窗口，暂停文档上传、摄取与检索流量；使用现有受控身份创建 Elasticsearch snapshot，并在独立环境实际恢复或读取后标记为“已验证”。记录旧镜像 digest、插件版本、索引清单和 snapshot 位置。
+2. 在仍受保护的运维通道禁用 shard allocation，随后停止**所有** ES 节点和依赖 RAG 服务；确认没有节点继续写入。备份 Elasticsearch data volume，备份不替代已验证 snapshot。
+3. 构建/拉取精确的 `elasticsearch:8.19.19` + Search Guard FLX `4.1.2` 镜像，核对插件 SHA-256、镜像 digest 与配置中的 TLS/node DN；任一校验不符即停止。
+4. 从生产密钥管理系统预置 CA、节点证书/私钥、管理员客户端证书/私钥和 `rag_mvp` password。node/admin 材料挂入 `/node-secrets`，RAG client CA 与 password 挂入 `/client-secrets`；运行时服务只读挂入 `/run/secrets/ca.pem` 与 `/run/secrets/rag_mvp_password`。生产缺少、权限过宽或证书主体不匹配时不得自签名补齐。
+5. 启动 `rag-security-materials`、`elasticsearch` 和 `rag-search-guard-bootstrap`。bootstrap 只在 ES `service_started` 阶段使用管理员证书重试初始化；它成功后 Elasticsearch healthcheck 才以 CA + `rag_mvp` 请求 `/_searchguard/health` 并要求 `status=UP`。这是避免首次初始化前普通应用身份尚不存在的两阶段设计。
+6. healthcheck 通过后再启动 `rag-migrate`、`rag-server`、`rag-worker`、`rag-outbox`。用 `rag_mvp` 在受控网络验证 `/_searchguard/health`、`rag-chunks-v1*` 索引限制，以及一次 RAG 摄取/检索闭环；同时确认它不能访问其他索引或 Search Guard 管理 API。
+7. 仅在上述验证完整通过后恢复 shard allocation 和业务流量，并持续观察集群与 RAG 审计日志。
+
+证书错误、密码错误、插件校验失败或 bootstrap 不通过时，停在当前步骤并保留脱敏诊断；严禁关闭 Search Guard、禁用 TLS 或恢复公网端口。回滚仅能在维护窗口内使用**已验证 snapshot**和旧镜像，恢复后仍保持私网端口策略。若怀疑历史上 9200 曾暴露，应轮换全部密码和证书、检查索引/集群操作日志，并从可信来源重建受影响索引。
+
+## 9. 运行真实验收
 
 服务启动后，使用真实 MySQL、ES、NATS 和 Embedding provider 运行：
 
@@ -158,7 +174,7 @@ make docker-down
 
 `make docker-down`会先扫描日志中的模型密钥，再停止容器并保留命名卷。只有明确要清空数据时才执行 `docker compose down -v`；该命令会删除 MySQL、ES、NATS 和对象存储卷。
 
-## 9. 本机 gRPC 调试
+## 10. 本机 gRPC 调试
 
 Python 服务没有 HTTP/FastAPI adapter。本机调试必须使用 generated gRPC client、`grpcurl`、`grpcui`或仓库 CLI。服务启动后可用：
 
@@ -168,7 +184,7 @@ uv run python -m rag_mvp.dev.cli --help
 
 开发 Compose 默认开启 Server Reflection；生产环境应关闭 `RAG_GRPC_REFLECTION`，并通过 Go 控制面暴露认证后的公网 API。
 
-## 10. 常见问题
+## 11. 常见问题
 
 ### `permission denied` 访问 Docker socket
 

@@ -13,7 +13,7 @@ from typing import Final
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID, ObjectIdentifier
 
 NODE_DN: Final = {
     NameOID.COMMON_NAME: "elasticsearch",
@@ -40,7 +40,7 @@ NODE_FILES: Final = (
 CLIENT_FILES: Final = ("ca.pem", "rag_mvp_password")
 
 
-def _name(values: dict[NameOID, str]) -> x509.Name:
+def _name(values: dict[ObjectIdentifier, str]) -> x509.Name:
     return x509.Name([x509.NameAttribute(oid, value) for oid, value in values.items()])
 
 
@@ -93,7 +93,7 @@ def _build_ca(now: datetime) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
 
 def _build_leaf(
     *,
-    values: dict[NameOID, str],
+    values: dict[ObjectIdentifier, str],
     ca_key: rsa.RSAPrivateKey,
     ca_certificate: x509.Certificate,
     now: datetime,

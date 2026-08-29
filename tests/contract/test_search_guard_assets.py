@@ -94,12 +94,31 @@ def test_search_guard_assets_pin_tls_and_least_privilege() -> None:
     assert '"rag-chunks-v1*"' in roles
 
 
+def test_search_guard_operator_docs_preserve_private_tls_runbook() -> None:
+    """运维文档必须避免默认 ES 暴露，并说明完整受保护验收入口。"""
+
+    linux_setup = (ROOT / "docs" / "setup-linux.md").read_text(encoding="utf-8")
+    windows_setup = (ROOT / "docs" / "setup-windows.md").read_text(encoding="utf-8")
+    testing_guide = (ROOT / "docs" / "testing-guide.md").read_text(encoding="utf-8")
+
+    for setup in (linux_setup, windows_setup):
+        assert "localhost:9200" not in setup
+        assert "Search Guard" in setup
+        assert "127.0.0.1:9200:9200" in setup
+
+    assert "make docker-test SUITE=all" in testing_guide
+    assert "Search Guard" in testing_guide
+    assert "TLS" in testing_guide
+
+
 def test_bootstrap_connect_allows_first_time_search_guard_initialization(monkeypatch) -> None:
     """首次安装的 SG11 状态必须允许 bootstrap 继续上传配置。"""
 
     calls: list[tuple[str, ...]] = []
 
-    def successful_run(*arguments: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+    def successful_run(
+        *arguments: str, input_text: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
         calls.append(arguments)
         return subprocess.CompletedProcess(arguments, 0, "", "")
 
@@ -124,7 +143,9 @@ def test_bootstrap_upload_skips_connection_check_for_first_initialization(
     (client_dir / "rag_mvp_password").write_text("not-logged\n", encoding="utf-8")
     calls: list[tuple[str, ...]] = []
 
-    def successful_run(*arguments: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+    def successful_run(
+        *arguments: str, input_text: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
         calls.append(arguments)
         return subprocess.CompletedProcess(arguments, 0, "", "")
 

@@ -1,12 +1,12 @@
 # Search Guard Elasticsearch 安全加固设计
 
 **日期：** 2026-08-28  
-**状态：** 已确认，待实施  
+**状态：** 已实施，待真实 Docker 全量验收
 **范围：** 将本项目的 Elasticsearch 从无认证、宿主机全网卡暴露，迁移为 Search Guard FLX 管理的 HTTPS + HTTP Basic 服务。
 
 ## 背景与目标
 
-当前 Compose 使用 Elasticsearch `8.19.3`、显式关闭安全功能，并将 `9200` 发布到所有宿主机网卡。任意可达该端口的客户端可以读取、修改或删除索引。目标是保留 Python RAG 服务对 Elasticsearch 的内部依赖，同时以网络隔离、TLS 和最小权限认证消除未鉴权暴露。
+迁移前 Compose 使用 Elasticsearch `8.19.3`、显式关闭安全功能，并将 `9200` 发布到所有宿主机网卡；任意可达该端口的客户端都可能读取、修改或删除索引。当前实现保留 Python RAG 服务对 Elasticsearch 的内部依赖，同时以网络隔离、TLS 和最小权限认证消除未鉴权暴露。
 
 本设计采用 Elasticsearch `8.19.19` 与 Search Guard FLX `4.1.2`。二者必须精确匹配；不允许继续使用已 EOL 的 `8.19.3 + 3.1.2` 组合。
 
@@ -64,15 +64,25 @@ Search Guard 初始化配置使用 `basic/internal_users_db`。内部用户数�
 ```text
 RAG_ELASTICSEARCH_URL=https://elasticsearch:9200
 RAG_ELASTICSEARCH_USERNAME=rag_mvp
-RAG_ELASTICSEARCH_PASSWORD=<secret>
-RAG_ELASTICSEARCH_CA_CERT=/run/secrets/search_guard_ca.pem
+RAG_ELASTICSEARCH_PASSWORD_FILE=/run/secrets/rag_mvp_password
+RAG_ELASTICSEARCH_CA_CERT=/run/secrets/ca.pem
 ```
 
 `Settings` 将密码建模为 secret 类型；container 仅将其传递给 Elasticsearch async client 的 Basic Auth 和 CA 校验配置。日志、异常、trace、pytest 快照、Earthly 输出和 Compose config 不得包含 password 或 `Authorization` 值。客户端不得以 `verify_certs=false`、`curl -k` 或明文 HTTP 绕过 TLS。
 
-Elasticsearch healthcheck 使用 CA、`rag_mvp` Basic 身份和 `/_searchguard/health`，要求 `status=UP`。由于首次初始化前尚不存在 `rag_mvp`，bootstrap 只等待 ES `service_started` 并以管理员证书重试；完成配置后 healthcheck 才会变为健康。完整顺序为：安全材料成功 → ES 启动 → bootstrap 成功 → ES 健康 → `rag-migrate` → RAG Server/Worker/Outbox。任何一步失败均阻止下游服务启动。
+Compose 的服务名与顺序为：`rag-security-materials → elasticsearch → rag-search-guard-bootstrap → rag-migrate → rag-server/rag-worker/rag-outbox`。`rag-security-materials` 将 node/admin 材料写入 `search-guard-node-secrets`：它对 bootstrap 挂载为 `/node-secrets`，对 ES 只读挂载为 `/usr/share/elasticsearch/config/search-guard`；将 runtime CA/password 写入 `search-guard-client-secrets`，只读挂载给需要 ES 的应用和测试容器为 `/run/secrets/ca.pem`、`/run/secrets/rag_mvp_password`。Elasticsearch healthcheck 使用 CA、`rag_mvp` Basic 身份和 `/_searchguard/health`，要求 `status=UP`。由于首次初始化前尚不存在 `rag_mvp`，bootstrap 只等待 ES `service_started` 并以管理员证书重试；完成配置后 healthcheck 才会变为健康。这是刻意的两阶段 healthcheck，任何一步失败都阻止下游服务启动。
 
 已有 `elasticsearch-data` 卷不可原地升级为带插件的集群；迁移 runbook 必须要求维护窗口、备份/快照、停止所有节点、安装插件、挂载证书、初始化、验证，再恢复 shard allocation。测试环境使用独立卷，不得以删除生产卷作为迁移手段。
+
+### 生产迁移 runbook
+
+1. 维护窗口内暂停业务；通过受控、TLS 校验的运维通道创建 Elasticsearch snapshot，并在独立恢复或读取演练中验证。记录 snapshot、旧镜像 digest、插件版本与索引清单。
+2. 禁用 shard allocation，停止所有 ES 节点与依赖 RAG 服务，确认无写入后备份 data volume。备份不能替代已验证 snapshot。
+3. 构建精确 `elasticsearch:8.19.19` + Search Guard FLX `4.1.2` 镜像，校验插件 SHA-256、镜像 digest、TLS 配置和 node DN；不符即停止。
+4. 从生产密钥管理系统预置 CA、node/admin 证书与私钥、`rag_mvp` password；生产材料缺失、权限过宽或证书主体错误必须失败，不得自签名替代。
+5. 启动材料、ES 和 bootstrap；bootstrap 后以 `rag_mvp` 验证 `/_searchguard/health`、`rag-chunks-v1*` 访问限制和 RAG 摄取/检索闭环。验证成功后才恢复 allocation 与业务流量。
+
+失败只能 fail closed：证书、密码或 bootstrap 问题不得通过关闭 Search Guard、关闭 TLS 或重新发布宿主 9200 来“恢复”。回滚仅可在维护窗口使用验证过的 snapshot 与旧镜像，恢复后仍保持私网访问。若怀疑历史 9200 暴露，轮换全部密码/证书、检查索引和集群操作日志，并重建可信索引。
 
 ## 测试与验收
 
@@ -83,7 +93,7 @@ Elasticsearch healthcheck 使用 CA、`rag_mvp` Basic 身份和 `/_searchguard/h
 1. 未带凭据的 HTTPS 请求返回认证拒绝，明文 HTTP 连接失败；宿主非 loopback 地址没有 9200 listener。
 2. 使用错误密码、错误 CA 或缺失凭据时，RAG 进程/测试容器失败且日志不泄露秘密。
 3. `rag_mvp` 能完成 `ensure_index`、bulk upsert、KNN/BM25、delete-by-query 和 dataset cleanup，但不能读取非 `rag-chunks-v1*` 索引或调用 Search Guard 管理 API。
-4. `/_searchguard/health` 为 `UP` 后，完整 integration、resilience、real eval 均可通过；真实 eval 的 Dataset 删除仍能清理 MySQL、ES 和对象存储。
+4. `/_searchguard/health` 为 `UP` 后，完整 integration、resilience、real eval 均可通过；真实 eval 的 Dataset 删除仍能清理 MySQL、ES 和对象存储。静态与真实安全证据分别位于 `tests/contract/test_search_guard_assets.py`、`tests/contract/test_container_artifacts.py` 与 `tests/integration/test_search_guard_security.py`。
 5. 构建入口测试固定 ES/插件精确版本、插件 checksum、要求 `xpack.security.enabled: false`、禁止默认 `9200:9200` 和 TLS bypass。
 
 ## 失败处理与回滚

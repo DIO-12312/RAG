@@ -26,7 +26,8 @@ python-workspace:
     COPY docs ./docs
     COPY .github ./.github
     COPY .githooks ./.githooks
-    COPY Earthfile Makefile Dockerfile docker-compose.yml alembic.ini ./
+    COPY docker ./docker
+    COPY Earthfile Makefile Dockerfile Dockerfile.elasticsearch docker-compose.yml docker-compose.debug.yml alembic.ini ./
     COPY .dockerignore .gitattributes .earthly.env ./
     RUN uv sync --frozen --group dev
 

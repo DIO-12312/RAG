@@ -19,7 +19,7 @@ Python 3.12+ 与 `uv` 只在需要直接定位单个测试或本机启动进程�
 Copy-Item .env.example .env
 ```
 
-`.env` 必须包含真实 Embedding provider 的 URL、模型名、API Key 和声明维度，禁止提交。development/test Compose 会在私有命名卷生成 Search Guard CA、节点/管理员证书和 `rag_mvp` password file；生产必须预置外部材料，缺失时启动失败。离线 `make lint`、`make test` 和 `make ci` 使用独立空白 Earthly 环境文件，不读取 `.env`。
+`.env` 必须包含真实 Embedding provider 的 URL、模型名、API Key 和声明维度，禁止提交。development/test Compose 会在私有命名卷生成 Search Guard TLS CA、节点/管理员证书和 `rag_mvp` password file；生产必须预置外部材料，缺失时启动失败。离线 `make lint`、`make test` 和 `make ci` 使用独立空白 Earthly 环境文件，不读取 `.env`。
 
 ## 2. 公共验证入口
 
@@ -105,7 +105,9 @@ make docker-test SUITE=all
 make docker-down
 ```
 
-`SUITE=all` 固定按 `integration → resilience → eval` 执行；任一步失败即停止后续 suite。`docker-test` 会验证、构建、启动并等待完整 Compose 拓扑，但测试结束或失败后不会自动关闭服务，以便保留日志和现场。无论成功失败，最后都应显式运行 `make docker-down`；该入口先扫描服务日志中的 API Key，再执行不删除持久卷的 `down --remove-orphans`，禁止用 `down -v` 代替。
+`SUITE=all` 固定按 `integration → resilience → eval` 执行；任一步失败即停止后续 suite。`docker-test` 会验证、构建、启动并等待完整 Compose 拓扑，但测试结束或失败后不会自动关闭服务，以便保留日志和现场。真实 suite 会验证 Search Guard TLS、匿名/错误凭据拒绝、`rag_mvp` 的索引最小权限和受保护 ES 上的 RAG 闭环；具体证据在 `tests/integration/test_search_guard_security.py`、`tests/contract/test_search_guard_assets.py` 与 `tests/contract/test_container_artifacts.py`。
+
+无论成功失败，最后都应显式运行 `make docker-down`；该入口先扫描服务日志中的 API Key 与 ES password，再执行不删除持久卷的 `down --remove-orphans`，禁止用 `down -v` 代替。除 MySQL/ES/NATS/object 数据卷外，它也必须保留 `search-guard-node-secrets` 和 `search-guard-client-secrets` 材料卷：删除它们会破坏受控的开发材料、使诊断失去可重现性，不能作为“修复”启动错误的手段。
 
 真实测试注意事项：
 
@@ -129,7 +131,7 @@ make docker-down
 | Functional 失败 | 按 upload → Finalizer → Relay → Worker → Retrieve 顺序定位。 |
 | Resilience 失败 | 检查 Task/Job、Outbox、generation、delivery sequence 和 ACK/NAK。 |
 | 覆盖率低于 85% | 为新分支补 unit/functional 测试，不降低 `--cov-fail-under`。 |
-| 真实测试失败 | 保留服务，检查容器状态和脱敏日志，随后运行 `make docker-down`。 |
+| 真实测试失败 | 保留服务，检查容器状态和脱敏日志；TLS/证书/密码/bootstrap 错误必须 fail closed，随后运行 `make docker-down`，不得关闭 Search Guard 或发布 9200。 |
 | Secret 扫描失败 | 先修复日志泄漏；扫描器只报告命中，不回显密钥。 |
 
 ## 7. CI 边界

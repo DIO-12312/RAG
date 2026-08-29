@@ -143,7 +143,23 @@ make docker-down
 
 `make docker-up` 会通过 Earthly 构建并启动 MySQL、受 Search Guard TLS/Basic 保护的 Elasticsearch、NATS、gRPC Server、Worker 和 Outbox。gRPC 服务从 Windows 主机访问时使用 `localhost:50051`；默认不发布 ES、MySQL 或 NATS 端口。需要本机排障 ES 时只能在 WSL 中显式使用 `docker-compose.debug.yml` 的 `127.0.0.1:9200:9200` override，且仍必须使用 CA 与 `rag_mvp` 凭据；不得将 9200 发布到 Windows 局域网或公网。
 
-## 8. Windows 与 WSL2 的边界
+默认 Elasticsearch 不供浏览器、`curl` 或 Kibana 直连；Kibana 不在本项目 Compose 范围内。排障 override 只用于 WSL 内的短时诊断，不得加入 CI、shell profile 或生产 Compose；严禁 `curl -k`、HTTP 回退或关闭 Search Guard。
+
+## 8. 生产迁移 Search Guard
+
+生产迁移必须在 Linux/WSL 运维终端配合 Docker daemon 完成，不能从 PowerShell 直接绕过 Make/Earthly 或把 9200 映射到 Windows 网卡。这是全量重启迁移，不能原地复用未迁移的 `elasticsearch-data` 卷。
+
+1. 预约维护窗口，暂停上传、摄取和检索；在受控网络通过已配置 CA 与管理员身份创建 Elasticsearch snapshot，并在独立恢复或读取演练中验证。记录 snapshot、旧镜像 digest、插件版本和索引清单。
+2. 通过受保护运维通道禁用 shard allocation，停止所有 ES 节点及依赖 RAG 服务，确认没有写入后备份 data volume。备份不是 snapshot 验证的替代物。
+3. 构建精确的 `elasticsearch:8.19.19` + Search Guard FLX `4.1.2` 镜像，核验插件 SHA-256、镜像 digest、TLS 配置和节点 DN；任一不符立即停止。
+4. 由生产密钥管理系统预置 CA、节点证书/私钥、管理员客户端证书/私钥和 `rag_mvp` password。node/admin 材料挂入 `/node-secrets`，client CA/password 挂入 `/client-secrets`；RAG 运行时只能只读使用 `/run/secrets/ca.pem` 与 `/run/secrets/rag_mvp_password`。缺少或权限错误时不得让服务自签名替代。
+5. 按 `rag-security-materials → elasticsearch → rag-search-guard-bootstrap` 启动。bootstrap 在 ES `service_started` 后用管理员证书初始化；成功后 ES 才通过 CA + `rag_mvp` 对 `/_searchguard/health` 的 `status=UP` healthcheck。这一两阶段顺序避免首次启动时应用用户尚未创建。
+6. 然后启动 `rag-migrate`、`rag-server`、`rag-worker` 和 `rag-outbox`。在 Docker 私有网络中用 `rag_mvp` 验证 health、只能访问 `rag-chunks-v1*`，并完成一次 RAG 摄取/检索；同时验证其不能读其他索引或调用 Search Guard 管理 API。
+7. 验证全部成功才恢复 shard allocation 与业务流量，并保存脱敏审计记录。
+
+证书/密码错误、bootstrap 失败或插件校验异常都必须停止，而不是关闭安全或开放端口。回滚仅可在维护窗口中从已验证 snapshot 与旧镜像恢复，恢复后仍保持 ES 私有网络访问。若怀疑历史 9200 暴露，轮换密码和证书、检查操作日志，并重建可信索引。
+
+## 9. Windows 与 WSL2 的边界
 
 | 操作 | 推荐终端 | 说明 |
 | --- | --- | --- |
@@ -156,7 +172,7 @@ make docker-down
 
 不要从 `C:\...` 路径直接在 PowerShell 调用 Linux Earthly，也不要同时让 WSL2 和 PowerShell 使用不同的工作副本；这样会导致路径转换、缓存和 `LOCALLY` 阶段行为不一致。
 
-## 9. 常见问题
+## 10. 常见问题
 
 ### WSL 中 `docker version` 无法连接 daemon
 
