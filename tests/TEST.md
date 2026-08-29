@@ -273,8 +273,13 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths` | Docker 入口构建安全材料/ES/bootstrap 服务，并仅向测试容器传递 ES password file 与 CA path。 |
 | `test_container_artifacts.py` | `test_package_and_container_use_canonical_root_readme` | GitHub 首页、Python package、Docker 镜像与 Earthly 依赖安装统一使用仓库根 README，禁止保留重复入口。 |
 | `test_search_guard_assets.py` | `test_development_material_generator_creates_separate_node_and_client_secrets` | development 材料生成器使用独立 node/admin 私钥，客户端密码不回显到进程输出。 |
+| 同上 | `test_development_material_generator_writes_certificate_key_identifiers` | development CA 与节点证书生成 SKI/AKI，保证运行时 TLS 链校验可用。 |
+| 同上 | `test_development_material_validator_rejects_malformed_existing_files` | 开发命名卷中的畸形或不完整 TLS 材料不得仅因文件齐全而被复用。 |
 | 同上 | `test_production_material_generator_refuses_to_self_sign_missing_material` | production 缺失外部 Search Guard 材料时 fail closed，禁止生成自签名替代品。 |
-| 同上 | `test_search_guard_assets_pin_tls_and_least_privilege` | Search Guard 镜像固定 ES/插件校验和，TLS、节点 DN 和 `rag-chunks-v1*` 最小权限配置齐全。 |
+| 同上 | `test_search_guard_assets_pin_tls_and_least_privilege` | Search Guard 镜像固定 ES/插件校验和，TLS、节点 DN、`rag-chunks-v1*` 最小权限及 `indices.exists()` 所需的 `indices:admin/get` 齐全。 |
+| 同上 | `test_first_bootstrap_declares_search_guard_principals_in_extractor_order` | 首次 SG11 初始化时，`admin_dn` 与 `nodes_dn` 必须使用 Search Guard principal extractor 的逆序 RDN。 |
+| 同上 | `test_first_bootstrap_uploads_all_required_search_guard_config_types` | bootstrap 必须上传 internal users、action groups、authc、roles、roles mapping 与 tenants 所需的配置文件。 |
+| 同上 | `test_bootstrap_retries_config_upload_until_elasticsearch_is_ready` | ES 进程已启动但尚未接受 SG 配置时，bootstrap 重试 `update-config`，而非立即阻断下游服务。 |
 | 同上 | `test_search_guard_operator_docs_preserve_private_tls_runbook` | SPEC、安全设计、AGENTS、Earthfile 与 Linux/Windows runbook 一致区分 development/test 材料拓扑和尚待平台化的生产编排：生产只读挂载外部材料、先 fail closed 验证，禁止定义/启动材料服务；bootstrap/health 后必须在新受保护目标卷/集群恢复已确认 snapshot，核验索引/文档完整性与一次 RAG 可检索性，失败保持停止，不能验证空集群。 |
 | `test_container_artifacts.py` | `test_runtime_image_and_context_exclude_secrets_and_test_artifacts` | runtime/test 镜像目标、非 root 用户及 build context 排除规则正确。 |
 | 同上 | `test_compose_declares_migration_health_role_secrets_and_shared_storage` | Compose 固定迁移顺序、健康依赖、共享对象卷及模型密钥角色边界。 |

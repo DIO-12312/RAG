@@ -6,7 +6,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from scripts.search_guard import bootstrap
+from cryptography import x509
+
+from scripts.search_guard import bootstrap, materials
 
 ROOT = Path(__file__).resolve().parents[2]
 MATERIALS_SCRIPT = ROOT / "scripts" / "search_guard" / "materials.py"
@@ -45,6 +47,43 @@ def test_development_material_generator_creates_separate_node_and_client_secrets
     assert (node_output / "rag_mvp_password").read_text(encoding="utf-8").strip() == password
     assert password not in completed.stdout
     assert password not in completed.stderr
+
+
+def test_development_material_generator_writes_certificate_key_identifiers(
+    tmp_path: Path,
+) -> None:
+    """生成的 CA/节点证书必须具备 Python TLS 校验所需的 SKI/AKI。"""
+
+    node_output = tmp_path / "node"
+    client_output = tmp_path / "client"
+
+    materials.generate(node_output, client_output)
+
+    ca_certificate = x509.load_pem_x509_certificate((node_output / "ca.pem").read_bytes())
+    node_certificate = x509.load_pem_x509_certificate((node_output / "node.pem").read_bytes())
+    ca_ski = ca_certificate.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+    node_aki = node_certificate.extensions.get_extension_for_class(
+        x509.AuthorityKeyIdentifier
+    ).value
+
+    assert node_aki.key_identifier == ca_ski.digest
+
+
+def test_development_material_validator_rejects_malformed_existing_files(
+    tmp_path: Path,
+) -> None:
+    """旧卷中的畸形材料不能只因文件齐全就被当作可复用。"""
+
+    node_output = tmp_path / "node"
+    client_output = tmp_path / "client"
+    node_output.mkdir()
+    client_output.mkdir()
+    for name in materials.NODE_FILES:
+        (node_output / name).write_text("not a certificate", encoding="utf-8")
+    for name in materials.CLIENT_FILES:
+        (client_output / name).write_text("not a certificate", encoding="utf-8")
+
+    assert not materials._validate_existing(node_output, client_output)
 
 
 def test_production_material_generator_refuses_to_self_sign_missing_material(
@@ -92,6 +131,32 @@ def test_search_guard_assets_pin_tls_and_least_privilege() -> None:
     assert "searchguard.nodes_dn" in config
     assert "SGS_ALL_ACCESS" not in roles
     assert '"rag-chunks-v1*"' in roles
+    assert "indices:admin/get" in roles
+
+
+def test_first_bootstrap_declares_search_guard_principals_in_extractor_order() -> None:
+    """首次 SG11 初始化时，admin/node DN 必须匹配提取器的逆序 principal。"""
+
+    config = (ROOT / "docker" / "search-guard" / "elasticsearch.yml").read_text(encoding="utf-8")
+
+    assert "- C=CN,L=Local,O=RAG,OU=RAG,CN=elasticsearch" in config
+    assert "- C=CN,L=Local,O=RAG,OU=RAG,CN=sg_admin" in config
+
+
+def test_first_bootstrap_uploads_all_required_search_guard_config_types() -> None:
+    """首次初始化必须提供 Search Guard 所需的五类配置文档。"""
+
+    config_dir = ROOT / "docker" / "search-guard" / "sgconfig"
+
+    assert set(bootstrap.STATIC_CONFIGS) == {
+        "sg_action_groups.yml",
+        "sg_authc.yml",
+        "sg_roles.yml",
+        "sg_roles_mapping.yml",
+        "sg_tenants.yml",
+    }
+    for name in bootstrap.STATIC_CONFIGS:
+        assert (config_dir / name).is_file()
 
 
 def test_search_guard_operator_docs_preserve_private_tls_runbook() -> None:
@@ -204,3 +269,38 @@ def test_bootstrap_upload_skips_connection_check_for_first_initialization(
     bootstrap._initialize(config_dir, client_dir, tmp_path / "work")
 
     assert calls[-1][-1] == "--skip-connection-check"
+
+
+def test_bootstrap_retries_config_upload_until_elasticsearch_is_ready(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """ES 刚启动时的首次上传失败必须重试，而不是使依赖服务永久阻断。"""
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    for name in bootstrap.STATIC_CONFIGS:
+        (config_dir / name).write_text("{}\n", encoding="utf-8")
+    client_dir = tmp_path / "client"
+    client_dir.mkdir()
+    (client_dir / "rag_mvp_password").write_text("not-logged\n", encoding="utf-8")
+    calls: list[tuple[str, ...]] = []
+    update_attempts = 0
+
+    def eventually_ready(
+        *arguments: str, input_text: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal update_attempts
+        calls.append(arguments)
+        if arguments[0] == "update-config":
+            update_attempts += 1
+            if update_attempts == 1:
+                return subprocess.CompletedProcess(arguments, 1, "", "SG11")
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(bootstrap, "_run", eventually_ready)
+    monkeypatch.setattr(bootstrap.time, "sleep", lambda _: None)
+
+    bootstrap._initialize(config_dir, client_dir, tmp_path / "work")
+
+    assert update_attempts == 2
+    assert sum(call[0] == "add-user-local" for call in calls) == 1

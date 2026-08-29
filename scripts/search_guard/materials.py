@@ -72,6 +72,7 @@ def _build_ca(now: datetime) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
         .not_valid_before(now - timedelta(minutes=1))
         .not_valid_after(now + timedelta(days=30))
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
         .add_extension(
             x509.KeyUsage(
                 digital_signature=True,
@@ -110,6 +111,13 @@ def _build_leaf(
         .not_valid_before(now - timedelta(minutes=1))
         .not_valid_after(now + timedelta(days=30))
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(
+                ca_certificate.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+            ),
+            critical=False,
+        )
         .add_extension(x509.ExtendedKeyUsage(usages), critical=False)
     )
     if names is not None:
@@ -128,7 +136,30 @@ def _required_paths(
 
 def _validate_existing(node_output: Path, client_output: Path) -> bool:
     node_paths, client_paths = _required_paths(node_output, client_output)
-    return all(path.is_file() for path in (*node_paths, *client_paths))
+    if not all(path.is_file() for path in (*node_paths, *client_paths)):
+        return False
+    try:
+        ca_certificate = x509.load_pem_x509_certificate((node_output / "ca.pem").read_bytes())
+        node_certificate = x509.load_pem_x509_certificate((node_output / "node.pem").read_bytes())
+        admin_certificate = x509.load_pem_x509_certificate((node_output / "admin.pem").read_bytes())
+        ca_ski = ca_certificate.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+        node_aki = node_certificate.extensions.get_extension_for_class(
+            x509.AuthorityKeyIdentifier
+        ).value
+        admin_aki = admin_certificate.extensions.get_extension_for_class(
+            x509.AuthorityKeyIdentifier
+        ).value
+    except (ValueError, x509.ExtensionNotFound):
+        return False
+    return (
+        (client_output / "ca.pem").read_bytes() == (node_output / "ca.pem").read_bytes()
+        and node_certificate.subject == _name(NODE_DN)
+        and admin_certificate.subject == _name(ADMIN_DN)
+        and node_certificate.issuer == ca_certificate.subject
+        and admin_certificate.issuer == ca_certificate.subject
+        and node_aki.key_identifier == ca_ski.digest
+        and admin_aki.key_identifier == ca_ski.digest
+    )
 
 
 def _validate_production(node_output: Path, client_output: Path) -> bool:

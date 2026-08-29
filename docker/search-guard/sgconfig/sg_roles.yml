@@ -6,6 +6,8 @@ rag_mvp_search:
     - index_patterns:
         - "rag-chunks-v1*"
       allowed_actions:
+        # Search Guard maps the Python client's indices.exists() request to this action.
+        - indices:admin/get
         - indices:admin/exists
         - indices:admin/create
         - indices:admin/delete

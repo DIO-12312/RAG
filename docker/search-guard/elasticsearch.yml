@@ -11,6 +11,7 @@ xpack.security.enabled: false
 # This does not publish 9200 to the Docker host.
 http.host: 0.0.0.0
 searchguard.nodes_dn:
-  - CN=elasticsearch,OU=RAG,O=RAG,L=Local,C=CN
+  # Search Guard extracts client principals with the RDN sequence reversed.
+  - C=CN,L=Local,O=RAG,OU=RAG,CN=elasticsearch
 searchguard.authcz.admin_dn:
-  - CN=sg_admin,OU=RAG,O=RAG,L=Local,C=CN
+  - C=CN,L=Local,O=RAG,OU=RAG,CN=sg_admin

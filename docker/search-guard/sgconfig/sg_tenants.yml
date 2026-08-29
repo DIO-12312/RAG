@@ -1,0 +1,2 @@
+# This MVP does not run Kibana multi-tenancy, but Search Guard requires the config type at bootstrap.
+{}

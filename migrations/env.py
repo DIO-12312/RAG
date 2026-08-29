@@ -1,4 +1,4 @@
-"""Alembic environment for the async MySQL metadata store."""
+"""Alembic 异步 MySQL 元数据存储的迁移环境配置。"""
 
 from __future__ import annotations
 
@@ -11,11 +11,14 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from rag_mvp.adapters.metadata.tables import Base
 
+# 获取 Alembic 配置对象
 config = context.config
 
+# 如果配置文件存在，则加载日志配置
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# 目标元数据：指向 SQL 模型的 Base，Alembic 据此生成迁移
 target_metadata = Base.metadata
 
 

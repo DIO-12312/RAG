@@ -13,7 +13,14 @@ import urllib.request
 from pathlib import Path
 
 SGCTL = ("java", "-jar", "/opt/sgctl-4.1.2-shaded.jar")
-STATIC_CONFIGS = ("sg_authc.yml", "sg_roles.yml", "sg_roles_mapping.yml")
+# Search Guard must receive every required configuration type on its first bootstrap.
+STATIC_CONFIGS = (
+    "sg_action_groups.yml",
+    "sg_authc.yml",
+    "sg_roles.yml",
+    "sg_roles_mapping.yml",
+    "sg_tenants.yml",
+)
 
 
 def _run(*arguments: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -75,9 +82,14 @@ def _initialize(config_dir: Path, client_dir: Path, work_dir: Path) -> None:
     )
     if added.returncode != 0:
         raise RuntimeError("could not create Search Guard internal user")
-    uploaded = _run("update-config", str(work_dir), "--skip-connection-check")
-    if uploaded.returncode != 0:
-        raise RuntimeError("could not initialize Search Guard configuration")
+    # Docker marks Elasticsearch as started before its HTTPS endpoint accepts SG config.
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        uploaded = _run("update-config", str(work_dir), "--skip-connection-check")
+        if uploaded.returncode == 0:
+            return
+        time.sleep(2)
+    raise RuntimeError("could not initialize Search Guard configuration")
 
 
 def _verify_existing(config_dir: Path, work_dir: Path) -> bool:
