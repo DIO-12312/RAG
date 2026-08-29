@@ -144,13 +144,13 @@ docker compose -f docker-compose.yml -f docker-compose.debug.yml ps elasticsearc
 
 ## 8. 生产迁移 Search Guard
 
-这是一次**全量重启**迁移，不可把已有 `elasticsearch-data` 卷原地改造成带插件的集群。先在隔离维护网络中演练，并由能校验证书的集群内运维客户端执行管理 API；不要为了执行迁移临时开放 9200。
+这是一次**全量重启**迁移，不可把已有 `elasticsearch-data` 卷原地改造成带插件的集群。`docker-compose.yml` 与 `make docker-up` 是 development/test 材料生成拓扑：其中 `rag-security-materials` 会生成本地开发材料，绝不可直接作为 production 部署。生产必须使用独立的 **production manifest/编排**，从密钥管理系统注入外部 CA、node、admin 和 client Secret；先在隔离维护网络中演练，并由能校验证书的集群内运维客户端执行管理 API，不要为了执行迁移临时开放 9200。
 
 1. 建立维护窗口，暂停文档上传、摄取与检索流量；使用现有受控身份创建 Elasticsearch snapshot，并在独立环境实际恢复或读取后标记为“已验证”。记录旧镜像 digest、插件版本、索引清单和 snapshot 位置。
 2. 在仍受保护的运维通道禁用 shard allocation，随后停止**所有** ES 节点和依赖 RAG 服务；确认没有节点继续写入。备份 Elasticsearch data volume，备份不替代已验证 snapshot。
 3. 构建/拉取精确的 `elasticsearch:8.19.19` + Search Guard FLX `4.1.2` 镜像，核对插件 SHA-256、镜像 digest 与配置中的 TLS/node DN；任一校验不符即停止。
-4. 从生产密钥管理系统预置 CA、节点证书/私钥、管理员客户端证书/私钥和 `rag_mvp` password。node/admin 材料挂入 `/node-secrets`，RAG client CA 与 password 挂入 `/client-secrets`；运行时服务只读挂入 `/run/secrets/ca.pem` 与 `/run/secrets/rag_mvp_password`。生产缺少、权限过宽或证书主体不匹配时不得自签名补齐。
-5. 启动 `rag-security-materials`、`elasticsearch` 和 `rag-search-guard-bootstrap`。bootstrap 只在 ES `service_started` 阶段使用管理员证书重试初始化；它成功后 Elasticsearch healthcheck 才以 CA + `rag_mvp` 请求 `/_searchguard/health` 并要求 `status=UP`。这是避免首次初始化前普通应用身份尚不存在的两阶段设计。
+4. 在 production manifest 中从外部密钥管理系统预置 CA、节点证书/私钥、管理员客户端证书/私钥和 `rag_mvp` password。node/admin 材料挂入 `/node-secrets`，RAG client CA 与 password 挂入 `/client-secrets`；运行时服务只读挂入 `/run/secrets/ca.pem` 与 `/run/secrets/rag_mvp_password`。以 `--environment production` 运行材料校验器或等效 fail closed 检查；生产缺少、权限过宽或证书主体不匹配时必须停止，不得自签名补齐。
+5. 仅在外部材料校验成功后，由 production manifest 启动 `elasticsearch` 和 `rag-search-guard-bootstrap`。bootstrap 只在 ES `service_started` 阶段使用管理员证书重试初始化；它成功后 Elasticsearch healthcheck 才以 CA + `rag_mvp` 请求 `/_searchguard/health` 并要求 `status=UP`。这是避免首次初始化前普通应用身份尚不存在的两阶段设计。
 6. healthcheck 通过后再启动 `rag-migrate`、`rag-server`、`rag-worker`、`rag-outbox`。用 `rag_mvp` 在受控网络验证 `/_searchguard/health`、`rag-chunks-v1*` 索引限制，以及一次 RAG 摄取/检索闭环；同时确认它不能访问其他索引或 Search Guard 管理 API。
 7. 仅在上述验证完整通过后恢复 shard allocation 和业务流量，并持续观察集群与 RAG 审计日志。
 
@@ -172,7 +172,7 @@ make docker-test SUITE=eval
 make docker-down
 ```
 
-`make docker-down`会先扫描日志中的模型密钥，再停止容器并保留命名卷。只有明确要清空数据时才执行 `docker compose down -v`；该命令会删除 MySQL、ES、NATS 和对象存储卷。
+`make docker-down`会先扫描日志中的模型密钥，再停止容器并保留命名卷。普通 `docker compose down` 同样保留命名卷，包括 Search Guard node/client 材料；安全 bootstrap、证书或密码故障不得以删卷“修复”，应保留材料并按 fail closed 诊断。
 
 ## 10. 本机 gRPC 调试
 
@@ -204,4 +204,4 @@ Earthly 本身不是第二个容器运行时；确认 `docker version`在同一�
 
 ### 想重新开始但保留镜像
 
-运行 `make docker-down` 后再次 `make docker-up`。只有需要丢弃持久化数据时才使用带 `-v` 的 Compose down。
+运行 `make docker-down` 后再次 `make docker-up`。如确有数据销毁或环境重建需求，应仅在隔离演练环境执行经审批的卷回收流程；不得通过删除包括 Search Guard 材料在内的命名卷来“修复”安全故障。

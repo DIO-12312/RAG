@@ -147,13 +147,13 @@ make docker-down
 
 ## 8. 生产迁移 Search Guard
 
-生产迁移必须在 Linux/WSL 运维终端配合 Docker daemon 完成，不能从 PowerShell 直接绕过 Make/Earthly 或把 9200 映射到 Windows 网卡。这是全量重启迁移，不能原地复用未迁移的 `elasticsearch-data` 卷。
+生产迁移必须在 Linux/WSL 运维终端配合 Docker daemon 完成，不能从 PowerShell 直接绕过 Make/Earthly 或把 9200 映射到 Windows 网卡。这是全量重启迁移，不能原地复用未迁移的 `elasticsearch-data` 卷。`docker-compose.yml` 与 `make docker-up` 仅是 development/test 材料生成拓扑，其中 `rag-security-materials` 生成本地材料；production 必须使用独立的 **production manifest/编排**，从密钥管理系统注入外部 CA、node、admin 和 client Secret。
 
 1. 预约维护窗口，暂停上传、摄取和检索；在受控网络通过已配置 CA 与管理员身份创建 Elasticsearch snapshot，并在独立恢复或读取演练中验证。记录 snapshot、旧镜像 digest、插件版本和索引清单。
 2. 通过受保护运维通道禁用 shard allocation，停止所有 ES 节点及依赖 RAG 服务，确认没有写入后备份 data volume。备份不是 snapshot 验证的替代物。
 3. 构建精确的 `elasticsearch:8.19.19` + Search Guard FLX `4.1.2` 镜像，核验插件 SHA-256、镜像 digest、TLS 配置和节点 DN；任一不符立即停止。
-4. 由生产密钥管理系统预置 CA、节点证书/私钥、管理员客户端证书/私钥和 `rag_mvp` password。node/admin 材料挂入 `/node-secrets`，client CA/password 挂入 `/client-secrets`；RAG 运行时只能只读使用 `/run/secrets/ca.pem` 与 `/run/secrets/rag_mvp_password`。缺少或权限错误时不得让服务自签名替代。
-5. 按 `rag-security-materials → elasticsearch → rag-search-guard-bootstrap` 启动。bootstrap 在 ES `service_started` 后用管理员证书初始化；成功后 ES 才通过 CA + `rag_mvp` 对 `/_searchguard/health` 的 `status=UP` healthcheck。这一两阶段顺序避免首次启动时应用用户尚未创建。
+4. 由 production manifest 从外部密钥管理系统预置 CA、节点证书/私钥、管理员客户端证书/私钥和 `rag_mvp` password。node/admin 材料挂入 `/node-secrets`，client CA/password 挂入 `/client-secrets`；RAG 运行时只能只读使用 `/run/secrets/ca.pem` 与 `/run/secrets/rag_mvp_password`。先以 `--environment production` 执行材料校验器或等效 fail closed 检查；缺少、权限错误或证书主体不匹配时必须停止，不得自签名替代。
+5. 外部材料校验成功后，按 `elasticsearch → rag-search-guard-bootstrap` 启动 production manifest 中的服务。bootstrap 在 ES `service_started` 后用管理员证书初始化；成功后 ES 才通过 CA + `rag_mvp` 对 `/_searchguard/health` 的 `status=UP` healthcheck。这一两阶段顺序避免首次启动时应用用户尚未创建。
 6. 然后启动 `rag-migrate`、`rag-server`、`rag-worker` 和 `rag-outbox`。在 Docker 私有网络中用 `rag_mvp` 验证 health、只能访问 `rag-chunks-v1*`，并完成一次 RAG 摄取/检索；同时验证其不能读其他索引或调用 Search Guard 管理 API。
 7. 验证全部成功才恢复 shard allocation 与业务流量，并保存脱敏审计记录。
 
@@ -202,4 +202,4 @@ docker compose logs --tail=200 elasticsearch
 
 ### 想清空本地卷
 
-普通停止使用 `make docker-down`，它保留命名卷。只有明确要删除 MySQL、ES、NATS 和对象数据时才执行 `docker compose down -v`。
+普通停止使用 `make docker-down`，它保留命名卷；普通 `docker compose down` 也保留 MySQL、ES、NATS、对象和 Search Guard node/client 材料卷。不得把删卷当作 bootstrap、证书或密码故障的修复方法，应保留材料并按 fail closed 流程诊断。

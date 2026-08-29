@@ -95,26 +95,37 @@ def test_search_guard_assets_pin_tls_and_least_privilege() -> None:
 
 
 def test_search_guard_operator_docs_preserve_private_tls_runbook() -> None:
-    """运维文档必须避免默认 ES 暴露，并说明完整受保护验收入口。"""
+    """运维文档必须隔离开发材料、生产迁移与受保护验收边界。"""
 
-    linux_setup = (ROOT / "docs" / "setup" / "setup-linux.md").read_text(
-        encoding="utf-8"
-    )
-    windows_setup = (ROOT / "docs" / "setup" / "setup-windows.md").read_text(
-        encoding="utf-8"
-    )
-    testing_guide = (ROOT / "docs" / "test" / "testing-guide.md").read_text(
-        encoding="utf-8"
-    )
+    linux_setup = (ROOT / "docs" / "setup" / "setup-linux.md").read_text(encoding="utf-8")
+    windows_setup = (ROOT / "docs" / "setup" / "setup-windows.md").read_text(encoding="utf-8")
+    testing_guide = (ROOT / "docs" / "test" / "testing-guide.md").read_text(encoding="utf-8")
 
     for setup in (linux_setup, windows_setup):
         assert "localhost:9200" not in setup
         assert "Search Guard" in setup
         assert "127.0.0.1:9200:9200" in setup
+        assert "外部" in setup
+        assert "production manifest" in setup
+        assert "--environment production" in setup
+        assert "snapshot" in setup
+        assert "shard allocation" in setup
+        assert "回滚" in setup
+        assert "fail closed" in setup
+        assert "启动 `rag-security-materials`" not in setup
+        assert "docker compose down -v" not in setup
 
     assert "make docker-test SUITE=all" in testing_guide
+    assert "make docker-test SUITE=integration" in testing_guide
+    assert "make docker-test SUITE=eval" in testing_guide
     assert "Search Guard" in testing_guide
     assert "TLS" in testing_guide
+    assert "历史未受保护 ES 证据" in testing_guide
+    assert "不可作为 Search Guard 验收" in testing_guide
+    assert "仅描述 Search Guard 加固前的未受保护环境" in testing_guide
+    assert "bootstrap 失败" in testing_guide
+    assert "后续 suite 未运行" in testing_guide
+    assert "docker compose --profile test run" not in testing_guide
 
 
 def test_bootstrap_connect_allows_first_time_search_guard_initialization(monkeypatch) -> None:

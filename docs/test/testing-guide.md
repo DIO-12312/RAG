@@ -74,8 +74,8 @@ git config core.hooksPath .githooks
 | --- | --- |
 | 上传、Finalizer、Relay、Worker、检索主链 | `uv run pytest -vv tests/functional/test_mock_upload_ingest_retrieve.py` |
 | TXT、Markdown、Python、文本 PDF | `uv run pytest -vv tests/functional/test_mock_four_formats.py` |
-| 本地 44 页 PDF 真实用户链路 | `docker compose --profile test run --rm rag-test uv run pytest -m e2e tests/e2e/test_local_computer_architecture_pdf.py -q` |
-| 本地 44 页 PDF 五十问质量门禁 | `docker compose --profile test run --rm rag-test uv run pytest -m "eval and e2e" tests/eval/test_real_computer_architecture_pdf_quality.py -q -s`；每次运行在 `tests/eval/log/` 生成包含完整 query embedding 与实际 Top-K evidence 的 JSON 日志 |
+| 本地 44 页 PDF 真实用户链路 | `make docker-test SUITE=integration`；本地 PDF 存在时该公共 suite 运行 E2E 链路。 |
+| 本地 44 页 PDF 五十问质量门禁 | `make docker-test SUITE=eval`；本地 PDF 存在时公共 eval suite 写入 `tests/eval/log/` 的脱敏质量记录。 |
 | 幂等与重复投递 | `uv run pytest -vv tests/functional/test_mock_dedup_and_redelivery.py` |
 | Retry/Cancel/Delete | `uv run pytest -vv tests/functional/test_mock_retry_job.py tests/functional/test_mock_cancel_job.py tests/functional/test_mock_delete_document.py` |
 | 混合检索 | `uv run pytest -vv tests/unit/retrieval` |
@@ -153,9 +153,9 @@ make docker-down
 
 只有实际执行过的命令才能标记为通过；Mock 与真实基础设施结果必须分开记录。
 
-## 9. 统一构建入口验收（2026-08-25）
+## 9. 历史统一构建入口验收（2026-08-25，Search Guard 前）
 
-本次验收在 Windows + WSL2 Ubuntu 上使用统一 Make/Earthly 入口完成，未在命令输出或记录中展开运行时 `.env`、模型 URL、API Key、向量或完整 Compose 配置。
+本节是**历史未受保护 ES 证据**：它发生在 Search Guard 安全加固之前，**不可作为 Search Guard 验收**。本次验收在 Windows + WSL2 Ubuntu 上使用统一 Make/Earthly 入口完成，未在命令输出或记录中展开运行时 `.env`、模型 URL、API Key、向量或完整 Compose 配置。
 
 | 验收项 | 实际结果 |
 | --- | --- |
@@ -169,4 +169,8 @@ make docker-down
 | 安全停止 | `make docker-down` 的日志 Secret 扫描成功；停止后 Compose 无运行服务，未执行 `down -v` |
 | 数据持久性 | `rag-mvp_mysql-data`、`rag-mvp_elasticsearch-data`、`rag-mvp_nats-data`、`rag-mvp_object-data` 和 resilience failpoint 卷仍存在 |
 
-未单独执行 `make docker-test SUITE=all`，因为 integration、resilience、eval 已按相同固定顺序分别执行并全部通过。原生 Windows shell 下 Earthly `LOCALLY` 对 Windows 路径的转换不稳定；本次 Docker target 按本文推荐路径在 WSL2 中验收，离线 target 可在原生 Windows 运行。
+未单独执行 `make docker-test SUITE=all`；历史记录中 integration、resilience、eval 是在同一固定顺序下分别完成。这里的历史“通过”仅描述 Search Guard 加固前的未受保护环境，不能推断 TLS、权限最小化或当前安全 Docker 拓扑已验收。原生 Windows shell 下 Earthly `LOCALLY` 对 Windows 路径的转换不稳定；本次 Docker target 按本文推荐路径在 WSL2 中验收，离线 target 可在原生 Windows 运行。
+
+### 当前 Search Guard Docker 验收状态（2026-08-29）
+
+`make docker-test SUITE=all` 在 `rag-search-guard-bootstrap` bootstrap 失败（exit 1）时 fail closed；因此后续 suite 未运行，不能把历史 integration、resilience 或 eval 的成功表述为当前安全验收通过。已执行 `make docker-down`，服务和网络已停止且保留数据与 Search Guard 材料卷。修复 bootstrap 根因后，必须重新运行公共 Make suite，不得改用直接 Compose test 入口绕过该顺序。
