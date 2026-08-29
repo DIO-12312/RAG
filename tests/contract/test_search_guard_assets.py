@@ -101,6 +101,8 @@ def test_search_guard_operator_docs_preserve_private_tls_runbook() -> None:
     windows_setup = (ROOT / "docs" / "setup" / "setup-windows.md").read_text(encoding="utf-8")
     testing_guide = (ROOT / "docs" / "test" / "testing-guide.md").read_text(encoding="utf-8")
     security_spec = (ROOT / "SPEC.md").read_text(encoding="utf-8")
+    earthfile = (ROOT / "Earthfile").read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     security_design = (
         ROOT
         / "docs"
@@ -122,6 +124,10 @@ def test_search_guard_operator_docs_preserve_private_tls_runbook() -> None:
         assert "fail closed" in setup
         assert "启动 `rag-security-materials`" not in setup
         assert "docker compose down -v" not in setup
+        assert "新的受保护目标数据卷/集群" in setup
+        assert "已确认 snapshot restore" in setup
+        assert "预期索引、文档计数/完整性与 RAG 可检索性" in setup
+        assert "空新集群" in setup
 
     for document in (security_spec, security_design):
         assert "development/test" in document
@@ -133,6 +139,10 @@ def test_search_guard_operator_docs_preserve_private_tls_runbook() -> None:
         assert "fail closed" in document
         assert "阻断 ES、bootstrap 与下游服务启动" in document
         assert "后续工作" in document
+
+    assert "COPY SPEC.md PLAN.md ./" in earthfile
+    assert "docs/SPEC.md" not in agents
+    assert "`SPEC.md`" in agents
 
     assert "make docker-test SUITE=all" in testing_guide
     assert "make docker-test SUITE=integration" in testing_guide

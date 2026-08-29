@@ -275,7 +275,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | `test_search_guard_assets.py` | `test_development_material_generator_creates_separate_node_and_client_secrets` | development 材料生成器使用独立 node/admin 私钥，客户端密码不回显到进程输出。 |
 | 同上 | `test_production_material_generator_refuses_to_self_sign_missing_material` | production 缺失外部 Search Guard 材料时 fail closed，禁止生成自签名替代品。 |
 | 同上 | `test_search_guard_assets_pin_tls_and_least_privilege` | Search Guard 镜像固定 ES/插件校验和，TLS、节点 DN 和 `rag-chunks-v1*` 最小权限配置齐全。 |
-| 同上 | `test_search_guard_operator_docs_preserve_private_tls_runbook` | SPEC、安全设计和 Linux/Windows runbook 区分 development/test 材料拓扑与尚待平台化的生产编排：生产只读挂载外部材料、先 fail closed 验证，禁止定义/启动材料服务；测试指南只使用公共 Make 真实验收入口并区分历史未受保护证据。 |
+| 同上 | `test_search_guard_operator_docs_preserve_private_tls_runbook` | SPEC、安全设计、AGENTS、Earthfile 与 Linux/Windows runbook 一致区分 development/test 材料拓扑和尚待平台化的生产编排：生产只读挂载外部材料、先 fail closed 验证，禁止定义/启动材料服务；恢复必须在新受保护目标卷/集群上核验 snapshot、索引/文档完整性与 RAG 可检索性，不能验证空集群。 |
 | `test_container_artifacts.py` | `test_runtime_image_and_context_exclude_secrets_and_test_artifacts` | runtime/test 镜像目标、非 root 用户及 build context 排除规则正确。 |
 | 同上 | `test_compose_declares_migration_health_role_secrets_and_shared_storage` | Compose 固定迁移顺序、健康依赖、共享对象卷及模型密钥角色边界。 |
 | 同上 | `test_compose_keeps_infrastructure_private_and_orders_search_guard_bootstrap` | 默认 Compose 不发布 MySQL/NATS/ES，且安全材料、ES、Search Guard bootstrap 与下游服务按 fail-closed 顺序启动。 |

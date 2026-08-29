@@ -154,8 +154,9 @@ make docker-down
 3. 构建精确的 `elasticsearch:8.19.19` + Search Guard FLX `4.1.2` 镜像，核验插件 SHA-256、镜像 digest、TLS 配置和节点 DN；任一不符立即停止。
 4. 由 production manifest 从外部密钥管理系统预置 CA、节点证书/私钥、管理员客户端证书/私钥和 `rag_mvp` password。node/admin 材料挂入 `/node-secrets`，client CA/password 挂入 `/client-secrets`；RAG 运行时只能只读使用 `/run/secrets/ca.pem` 与 `/run/secrets/rag_mvp_password`。先以 `--environment production` 执行材料校验器或等效 fail closed 检查；缺少、权限错误或证书主体不匹配时必须停止，不得自签名替代。
 5. 外部材料校验成功后，按 `elasticsearch → rag-search-guard-bootstrap` 启动 production manifest 中的服务。bootstrap 在 ES `service_started` 后用管理员证书初始化；成功后 ES 才通过 CA + `rag_mvp` 对 `/_searchguard/health` 的 `status=UP` healthcheck。这一两阶段顺序避免首次启动时应用用户尚未创建。
-6. 然后启动 `rag-migrate`、`rag-server`、`rag-worker` 和 `rag-outbox`。在 Docker 私有网络中用 `rag_mvp` 验证 health、只能访问 `rag-chunks-v1*`，并完成一次 RAG 摄取/检索；同时验证其不能读其他索引或调用 Search Guard 管理 API。
-7. 验证全部成功才恢复 shard allocation 与业务流量，并保存脱敏审计记录。
+6. bootstrap/health 通过后、恢复业务与 shard allocation 前，创建新的受保护目标数据卷/集群，执行并验证已确认 snapshot restore。必须核对预期索引、文档计数/完整性与 RAG 可检索性；恢复、完整性或检索任一失败都保持停止，不能直接验证空新集群。
+7. 仅在恢复验证成功后，以维护模式启动 `rag-migrate`、`rag-server`、`rag-worker` 和 `rag-outbox`。在 Docker 私有网络中用 `rag_mvp` 复核 health、只能访问 `rag-chunks-v1*`，并完成一次 RAG 摄取/检索；同时验证其不能读其他索引或调用 Search Guard 管理 API。
+8. 验证全部成功才恢复 shard allocation 与业务流量，并保存脱敏审计记录。
 
 证书/密码错误、bootstrap 失败或插件校验异常都必须停止，而不是关闭安全或开放端口。回滚仅可在维护窗口中从已验证 snapshot 与旧镜像恢复，恢复后仍保持 ES 私有网络访问。若怀疑历史 9200 暴露，轮换密码和证书、检查操作日志，并重建可信索引。
 
