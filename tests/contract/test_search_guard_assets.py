@@ -97,9 +97,15 @@ def test_search_guard_assets_pin_tls_and_least_privilege() -> None:
 def test_search_guard_operator_docs_preserve_private_tls_runbook() -> None:
     """运维文档必须避免默认 ES 暴露，并说明完整受保护验收入口。"""
 
-    linux_setup = (ROOT / "docs" / "setup-linux.md").read_text(encoding="utf-8")
-    windows_setup = (ROOT / "docs" / "setup-windows.md").read_text(encoding="utf-8")
-    testing_guide = (ROOT / "docs" / "testing-guide.md").read_text(encoding="utf-8")
+    linux_setup = (ROOT / "docs" / "setup" / "setup-linux.md").read_text(
+        encoding="utf-8"
+    )
+    windows_setup = (ROOT / "docs" / "setup" / "setup-windows.md").read_text(
+        encoding="utf-8"
+    )
+    testing_guide = (ROOT / "docs" / "test" / "testing-guide.md").read_text(
+        encoding="utf-8"
+    )
 
     for setup in (linux_setup, windows_setup):
         assert "localhost:9200" not in setup

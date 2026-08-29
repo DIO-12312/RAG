@@ -2,7 +2,7 @@
 
 本文件是 `tests/` 的索引和维护清单。新增、删除、重命名测试文件或 `test_*` 函数时，必须在同一改动中更新本文件的目录树和对应职责表。参数化测试在表中按一个测试函数记录，pytest 的实际用例数可能更多。
 
-完整的执行命令、门禁和故障排查见 [`../docs/testing-guide.md`](../docs/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
+完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
 
 ## 目录树
 
@@ -454,5 +454,5 @@ Eval 测试负责防止检索排序和 evidence 定位质量回退。不得以 L
 1. 新增、删除、移动或重命名测试文件时，同步更新“目录树”。
 2. 新增、删除、重命名 `test_*` 函数或显著改变其断言职责时，同步更新对应类型的函数表。
 3. 修改 RPC、Port、状态机、Outbox、Worker、重试、取消或删除语义时，同时检查 Contract、Functional、Resilience 三类表是否仍准确。
-4. 新增 marker、fixture 或 Fake port 时，在本文件和 [`../docs/testing-guide.md`](../docs/testing-guide.md) 中补充运行边界；Fake 不得进入生产 bootstrap。
+4. 新增 marker、fixture 或 Fake port 时，在本文件和 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md) 中补充运行边界；Fake 不得进入生产 bootstrap。
 5. 测试文档与测试代码必须在同一提交中评审；缺少本文件同步的测试改动不视为完成。

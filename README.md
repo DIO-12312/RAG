@@ -2,8 +2,8 @@
 
 - 前置的中间件知识（过一遍了解概念）：[`docs/middleware-guide.md`](docs/middleware-guide.md)
 - 环境搭建指南：
-  - [Linux 从零搭建](docs/setup-linux.md)
-  - [Windows + WSL2 从零搭建](docs/setup-windows.md)
+  - [Linux 从零搭建](docs/setup/setup-linux.md)
+  - [Windows + WSL2 从零搭建](docs/setup/setup-windows.md)
 
 
 一个可靠、可恢复的 Python RAG 计算服务：通过版本化 gRPC(待定) 接收文档，异步完成解析、切块、向量化与索引，并返回可追溯的 evidence。
@@ -50,7 +50,7 @@ flowchart LR
 
 需要 Docker Engine、Docker Compose、GNU Make 和 Earthly v0.8.16。Windows 推荐在 WSL2 中执行以下命令。
 
-从零安装依赖： [Linux](docs/setup-linux.md) | [Windows + WSL2](docs/setup-windows.md)
+从零安装依赖： [Linux](docs/setup/setup-linux.md) | [Windows + WSL2](docs/setup/setup-windows.md)
 
 ```bash
 cp .env.example .env
@@ -120,7 +120,7 @@ git config core.hooksPath .githooks
 | Docker Resilience | KILL、停启、重投递、并发栅栏与恢复 | `make docker-test SUITE=resilience` |
 | Real Eval | 真实模型和 ES 上的固定 30 问 | `make docker-test SUITE=eval` |
 
-2026-08-25 的统一入口验收结果：离线 195 passed、9 deselected、核心覆盖率 88.01%；Integration/E2E 27 passed；Docker Resilience 8 passed；Real Eval 1 passed，Recall@6、MRR@6、locator accuracy 均为 1.0。分层边界、费用、安全与失败定位见 [`docs/testing-guide.md`](docs/testing-guide.md)。
+2026-08-25 的统一入口验收结果：离线 195 passed、9 deselected、核心覆盖率 88.01%；Integration/E2E 27 passed；Docker Resilience 8 passed；Real Eval 1 passed，Recall@6、MRR@6、locator accuracy 均为 1.0。分层边界、费用、安全与失败定位见 [`docs/test/testing-guide.md`](docs/test/testing-guide.md)。
 
 ## 目录结构
 
@@ -154,11 +154,11 @@ git config core.hooksPath .githooks
 
 ## 路线图与文档
 
-- [`docs/SPEC.md`](docs/SPEC.md)：权威架构、RPC、状态机、存储与可靠性不变量。
-- [`docs/PLAN.md`](docs/PLAN.md)：Milestone A～E 的交付路线；下一阶段是 Go 产品控制面。
-- [`docs/testing-guide.md`](docs/testing-guide.md)：测试分层、真实 Docker 验收、质量指标与故障定位。
-- [`docs/setup-linux.md`](docs/setup-linux.md)：Linux 主机从零安装 Docker、uv、Earthly 并运行项目。
-- [`docs/setup-windows.md`](docs/setup-windows.md)：Windows 使用 Docker Desktop + Ubuntu WSL2 的完整安装与排障流程。
+- [`SPEC.md`](SPEC.md)：权威架构、RPC、状态机、存储与可靠性不变量。
+- [`PLAN.md`](PLAN.md)：Milestone A～E 的交付路线；下一阶段是 Go 产品控制面。
+- [`docs/test/testing-guide.md`](docs/test/testing-guide.md)：测试分层、真实 Docker 验收、质量指标与故障定位。
+- [`docs/setup/setup-linux.md`](docs/setup/setup-linux.md)：Linux 主机从零安装 Docker、uv、Earthly 并运行项目。
+- [`docs/setup/setup-windows.md`](docs/setup/setup-windows.md)：Windows 使用 Docker Desktop + Ubuntu WSL2 的完整安装与排障流程。
 - [`docs/middleware-guide.md`](docs/middleware-guide.md)：项目涉及的 Docker、WSL、MySQL、ES、NATS 与 gRPC 中间件速览。
 - [`docs/MQ选择原因.md`](docs/MQ选择原因.md)：NATS JetStream、Kafka 与 RocketMQ 的选型依据。
 - [`tests/TEST.md`](tests/TEST.md)：每个测试文件与测试函数的职责清单。
