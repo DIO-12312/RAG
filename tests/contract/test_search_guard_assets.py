@@ -139,6 +139,10 @@ def test_search_guard_operator_docs_preserve_private_tls_runbook() -> None:
         assert "fail closed" in document
         assert "阻断 ES、bootstrap 与下游服务启动" in document
         assert "后续工作" in document
+        assert "新的受保护目标数据卷/集群" in document
+        assert "已确认 snapshot restore" in document
+        assert "预期索引、文档计数/完整性与一次 RAG 可检索性" in document
+        assert "失败必须保持停止" in document
 
     assert "COPY SPEC.md PLAN.md ./" in earthfile
     assert "docs/SPEC.md" not in agents

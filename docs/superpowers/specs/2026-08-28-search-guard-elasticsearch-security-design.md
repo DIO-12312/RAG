@@ -84,7 +84,9 @@ production 必须使用独立、尚待平台化的 deployment manifest/编排；
 2. 禁用 shard allocation，停止所有 ES 节点与依赖 RAG 服务，确认无写入后备份 data volume。备份不能替代已验证 snapshot。
 3. 构建精确 `elasticsearch:8.19.19` + Search Guard FLX `4.1.2` 镜像，校验插件 SHA-256、镜像 digest、TLS 配置和 node DN；不符即停止。
 4. 由目标平台的 production manifest 从生产密钥管理系统只读挂载 CA、node/admin 证书与私钥、`rag_mvp` password；先运行 `--environment production` 材料校验。生产材料缺失、权限过宽或证书主体错误必须 fail closed，不得自签名替代。
-5. 仅在上述校验成功后由 production 编排启动 ES 和 bootstrap；不得定义或启动 `rag-security-materials`。bootstrap 后以 `rag_mvp` 验证 `/_searchguard/health`、`rag-chunks-v1*` 访问限制和 RAG 摄取/检索闭环。验证成功后才恢复 allocation 与业务流量。
+5. 仅在上述校验成功后由 production 编排启动 ES 和 bootstrap；不得定义或启动 `rag-security-materials`。bootstrap/health 通过后、恢复 allocation/业务前，必须创建新的受保护目标数据卷/集群，执行并验证已确认 snapshot restore，核对预期索引、文档计数/完整性与一次 RAG 可检索性；restore 或核验失败必须保持停止。
+6. 仅在恢复验证成功后，以维护模式启动下游服务，并以 `rag_mvp` 复核 `/_searchguard/health`、`rag-chunks-v1*` 访问限制和一次 RAG 摄取/检索闭环。
+7. 只有上述恢复与安全验证完整通过后才恢复 shard allocation 与业务流量。
 
 失败只能 fail closed：证书、密码或 bootstrap 问题不得通过关闭 Search Guard、关闭 TLS 或重新发布宿主 9200 来“恢复”。回滚仅可在维护窗口使用验证过的 snapshot 与旧镜像，恢复后仍保持私网访问。若怀疑历史 9200 暴露，轮换全部密码/证书、检查索引和集群操作日志，并重建可信索引。
 

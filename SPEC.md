@@ -238,7 +238,7 @@ development/test 的 Compose 最终服务顺序固定为 `rag-security-materials
 
 production 必须使用独立、尚待平台化的 deployment manifest/编排；当前仓库不提供、也不得假称已有可执行的 production Compose 或 Helm 文件。该编排只能只读挂载外部 CA/node/admin/client Secret，禁止定义或启动 `rag-security-materials`。它必须先运行 `--environment production` 的材料校验或等效 fail closed 检查；任何材料缺失、权限不正确或证书主体不匹配都必须阻断 ES、bootstrap 与下游服务启动。生产 manifest 需按目标平台另行实现和测试，这是明确的后续工作边界，不得从 development/test Compose 推断其可部署性。
 
-生产升级是维护窗口中的全量重启 runbook：先创建并验证 snapshot、禁用 shard allocation、停止全部节点并备份 data volume；再校验精确 ES/插件镜像与 checksum，预置外部 CA/node/admin/client 密钥并完成上述生产材料校验；只在其成功后由 production 编排启动 ES、bootstrap 和下游服务，验证 health、`rag_mvp` 索引边界及一次 RAG 检索后才恢复 allocation。证书、密码或 bootstrap 失败立即停止；回滚仅使用已验证 snapshot 与旧镜像，始终保留私网端口策略。若怀疑历史 9200 暴露，必须轮换密码/证书、审查操作日志并重建可信索引。完整操作步骤见 Linux/Windows 安装手册。
+生产升级是维护窗口中的全量重启 runbook：先创建并验证 snapshot、禁用 shard allocation、停止全部节点并备份 data volume；再校验精确 ES/插件镜像与 checksum，预置外部 CA/node/admin/client 密钥并完成上述生产材料校验；只在其成功后由 production 编排启动 ES 和 bootstrap。bootstrap/health 通过后、恢复 allocation/业务前，必须创建新的受保护目标数据卷/集群，执行并验证已确认 snapshot restore，核对预期索引、文档计数/完整性与一次 RAG 可检索性；restore 或核验失败必须保持停止。只有这些恢复验证及 `rag_mvp` 索引边界通过后才启动下游服务并恢复 allocation。证书、密码或 bootstrap 失败立即停止；回滚仅使用已验证 snapshot 与旧镜像，始终保留私网端口策略。若怀疑历史 9200 暴露，必须轮换密码/证书、审查操作日志并重建可信索引。完整操作步骤见 Linux/Windows 安装手册。
 
 ### 3.5 不直接复制 RAGFlow 的部分
 
