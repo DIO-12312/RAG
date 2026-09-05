@@ -14,6 +14,7 @@ __pycache__/
 # Packaging and build outputs
 build/
 dist/
+node_modules/
 downloads/
 *.egg-info/
 .eggs/

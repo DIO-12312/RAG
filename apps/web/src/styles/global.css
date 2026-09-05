@@ -1,0 +1,9 @@
+@import "./tokens.css";
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; color: var(--text); background: var(--surface-muted); font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; }
+button { font: inherit; }
+.app-shell { min-height: 100vh; padding: 1.5rem; }
+.app-shell__header { display: flex; justify-content: space-between; max-width: 1120px; margin: 0 auto 1.5rem; }
+nav { display: flex; gap: 1rem; max-width: 1120px; margin: 0 auto 1.5rem; color: var(--text-muted); }
+main { max-width: 1120px; margin: 0 auto; }
