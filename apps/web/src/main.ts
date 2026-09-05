@@ -6,10 +6,19 @@ import { createAppRouter } from "./router";
 import { useAuthStore } from "./stores/auth";
 import "./styles/global.css";
 
-const app = createApp(App);
-const pinia = createPinia();
-const auth = useAuthStore(pinia);
+async function bootstrap(): Promise<void> {
+  if (import.meta.env.DEV) {
+    const { mockWorker } = await import("./mocks/browser");
+    await mockWorker.start({ onUnhandledRequest: "bypass" });
+  }
 
-app.use(pinia);
-app.use(createAppRouter(auth));
-app.mount("#app");
+  const app = createApp(App);
+  const pinia = createPinia();
+  const auth = useAuthStore(pinia);
+
+  app.use(pinia);
+  app.use(createAppRouter(auth));
+  app.mount("#app");
+}
+
+void bootstrap();
