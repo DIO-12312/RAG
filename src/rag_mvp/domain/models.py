@@ -49,6 +49,7 @@ class Dataset:
     tenant_id: str = "default_tenant"
     status: DatasetStatus = DatasetStatus.ACTIVE
     lifecycle_generation: int = 0
+    encrypted_embedding_profile: str = field(default="", repr=False)
 
     # 在构造完成后校验并固化领域不变式。
     def __post_init__(self) -> None:

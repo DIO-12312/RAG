@@ -11,7 +11,10 @@ describe("application shell", () => {
 
   it("shows Chinese navigation by default and English after switching", async () => {
     const wrapper = mount(AppShell, {
-      global: { plugins: [createPinia()] },
+      global: {
+        plugins: [createPinia()],
+        stubs: { RouterLink: { template: "<a><slot /></a>" } },
+      },
     });
 
     expect(wrapper.text()).toContain("知识库");

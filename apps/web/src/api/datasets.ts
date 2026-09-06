@@ -3,7 +3,6 @@ import type {
   DatasetDetail,
   DatasetSummary,
   Job,
-  UploadDocumentRequest,
 } from "./contracts";
 import { request } from "./http";
 
@@ -15,17 +14,20 @@ export function getDataset(datasetId: string): Promise<DatasetDetail> {
   return request<DatasetDetail>(`/datasets/${datasetId}`);
 }
 
-export function createDataset(payload: CreateDatasetRequest): Promise<DatasetSummary> {
+export function createDataset(payload: CreateDatasetRequest, key = crypto.randomUUID()): Promise<DatasetSummary> {
   return request<DatasetSummary>("/datasets", {
     method: "POST",
+    headers: { "Idempotency-Key": key },
     body: JSON.stringify(payload),
   });
 }
 
-export function uploadDocument(datasetId: string, payload: UploadDocumentRequest): Promise<Job> {
+export function uploadDocument(datasetId: string, file: File, key: string = crypto.randomUUID()): Promise<Job> {
+  const data = new FormData(); data.append("file", file);
   return request<Job>(`/datasets/${datasetId}/documents`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    headers: { "Idempotency-Key": key },
+    body: data,
   });
 }
 

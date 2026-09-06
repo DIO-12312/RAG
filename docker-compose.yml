@@ -118,13 +118,13 @@ services:
     environment:
       <<: *rag-environment
       RAG_ELASTICSEARCH_PASSWORD_FILE: /run/secrets/rag_mvp_password
-      EMBEDDING_MODEL_URL: ${EMBEDDING_MODEL_URL:?EMBEDDING_MODEL_URL is required}
-      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:?EMBEDDING_MODEL_NAME is required}
-      EMBEDDING_MODEL_API_KEY: ${EMBEDDING_MODEL_API_KEY:?EMBEDDING_MODEL_API_KEY is required}
-      EMBEDDING_MODEL_DIMENSION: ${EMBEDDING_MODEL_DIMENSION:?EMBEDDING_MODEL_DIMENSION is required}
+      RAG_MODEL_ENCRYPTION_KEY_FILE: /run/model-keys/encryption.key
+      RAG_MAX_UPLOAD_BYTES: 33554432
     ports:
       - "50051:50051"
+    group_add: ["10001"]
     volumes:
+      - product-model-keys:/run/model-keys:ro
       - object-data:/app/data/objects
       - search-guard-client-secrets:/run/secrets:ro
     depends_on:
@@ -153,11 +153,11 @@ services:
     environment:
       <<: *rag-environment
       RAG_ELASTICSEARCH_PASSWORD_FILE: /run/secrets/rag_mvp_password
-      EMBEDDING_MODEL_URL: ${EMBEDDING_MODEL_URL:?EMBEDDING_MODEL_URL is required}
-      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:?EMBEDDING_MODEL_NAME is required}
-      EMBEDDING_MODEL_API_KEY: ${EMBEDDING_MODEL_API_KEY:?EMBEDDING_MODEL_API_KEY is required}
-      EMBEDDING_MODEL_DIMENSION: ${EMBEDDING_MODEL_DIMENSION:?EMBEDDING_MODEL_DIMENSION is required}
+      RAG_MODEL_ENCRYPTION_KEY_FILE: /run/model-keys/encryption.key
+      RAG_MAX_UPLOAD_BYTES: 33554432
+    group_add: ["10001"]
     volumes:
+      - product-model-keys:/run/model-keys:ro
       - object-data:/app/data/objects
       - search-guard-client-secrets:/run/secrets:ro
     depends_on:
@@ -214,12 +214,15 @@ services:
     environment:
       <<: *rag-environment
       RAG_ELASTICSEARCH_PASSWORD_FILE: /run/secrets/rag_mvp_password
-      EMBEDDING_MODEL_URL: ${EMBEDDING_MODEL_URL:?EMBEDDING_MODEL_URL is required}
-      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:?EMBEDDING_MODEL_NAME is required}
-      EMBEDDING_MODEL_API_KEY: ${EMBEDDING_MODEL_API_KEY:?EMBEDDING_MODEL_API_KEY is required}
-      EMBEDDING_MODEL_DIMENSION: ${EMBEDDING_MODEL_DIMENSION:?EMBEDDING_MODEL_DIMENSION is required}
+      EMBEDDING_MODEL_URL: ${EMBEDDING_MODEL_URL:-}
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:-}
+      EMBEDDING_MODEL_API_KEY: ${EMBEDDING_MODEL_API_KEY:-}
+      EMBEDDING_MODEL_DIMENSION: ${EMBEDDING_MODEL_DIMENSION:-}
       RAG_GRPC_TARGET: rag-server:50051
+      RAG_MODEL_ENCRYPTION_KEY_FILE: /run/model-keys/encryption.key
+    group_add: ["10001"]
     volumes:
+      - product-model-keys:/run/model-keys:ro
       - ./tests:/app/tests:ro
       - ./tests/eval/log:/app/tests/eval/log:rw
       - ./proto:/app/proto:ro
@@ -243,3 +246,6 @@ volumes:
   object-data:
   search-guard-node-secrets:
   search-guard-client-secrets:
+  product-model-keys:
+    name: rag-product_product-keys
+    external: true

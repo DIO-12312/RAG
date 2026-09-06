@@ -15,3 +15,7 @@ export function login(payload: LoginRequest): Promise<CurrentUser> {
 export function logout(): Promise<void> {
   return request<void>("/auth/logout", { method: "POST" });
 }
+
+export function register(payload: LoginRequest): Promise<CurrentUser> {
+  return request<CurrentUser>("/auth/register", { method: "POST", body: JSON.stringify(payload) });
+}

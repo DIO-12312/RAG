@@ -28,6 +28,27 @@ def _dataset(now: datetime) -> Dataset:
     )
 
 
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_embedding_binding_is_first_write_only(
+    mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
+) -> None:
+    repository, _ = mysql_repository
+    await repository.create_dataset(_dataset(datetime.now(UTC)))
+    with pytest.raises(DomainError):
+        await repository.bind_embedding_profile("dataset-1", "wrong-model", 8, "wrong")
+    first, second = await asyncio.gather(
+        repository.bind_embedding_profile("dataset-1", "fake-embedding", 8, "snapshot-a"),
+        repository.bind_embedding_profile("dataset-1", "fake-embedding", 8, "snapshot-b"),
+    )
+    assert first.encrypted_embedding_profile == second.encrypted_embedding_profile
+    assert first.encrypted_embedding_profile in {"snapshot-a", "snapshot-b"}
+    preserved = await repository.bind_embedding_profile(
+        "dataset-1", "new-model", 1024, "replacement"
+    )
+    assert preserved.encrypted_embedding_profile == first.encrypted_embedding_profile
+
+
 def _submission(*, idempotency_key: str, staging_key: str, now: datetime) -> SubmitIngestion:
     """构造固定指纹的提交命令，便于验证去重与幂等语义。"""
     return SubmitIngestion(

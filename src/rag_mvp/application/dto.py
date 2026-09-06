@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from rag_mvp.domain.enums import JobStatus, JobType, TaskStatus
@@ -19,6 +19,7 @@ class CreateDatasetCommand:
     embedding_dimension: int
     now: datetime
     dataset_id: str | None = None
+    encrypted_embedding_profile: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True, slots=True)

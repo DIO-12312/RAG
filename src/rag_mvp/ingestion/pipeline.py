@@ -8,7 +8,7 @@ from rag_mvp.domain.models import Chunk
 from rag_mvp.ingestion.checkpoints import Checkpoint, Failpoint
 from rag_mvp.ports.chunker import Chunker
 from rag_mvp.ports.metadata import TaskClaim
-from rag_mvp.ports.model import ModelGateway
+from rag_mvp.ports.model import ModelGateway, model_for_dataset
 from rag_mvp.ports.parser import Parser
 from rag_mvp.ports.search_engine import IndexedChunk, SearchEngine
 from rag_mvp.ports.storage import ObjectStorage
@@ -62,7 +62,8 @@ class IngestionPipeline:
                 )
             )
 
-        vectors = await self._model.embed([draft.content_with_weight for draft in drafts])
+        model = model_for_dataset(self._model, claim.dataset)
+        vectors = await model.embed([draft.content_with_weight for draft in drafts])
         if len(vectors) != len(drafts):
             raise DomainError(
                 DomainFailure(

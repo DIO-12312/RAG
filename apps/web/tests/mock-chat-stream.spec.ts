@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { streamChat } from "../src/api/chat";
+import { createMockChatStream } from "../src/mocks/sse";
 
 describe("mock chat stream", () => {
   it("emits retrieval before tokens and final citations reference complete evidence", async () => {
-    const stream = streamChat({ datasetId: "dataset-ready", question: "兼容性变更有哪些？" });
+    const stream = createMockChatStream();
     const events = [];
 
     for await (const event of stream.events) {

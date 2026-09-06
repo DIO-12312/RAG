@@ -39,6 +39,11 @@ class RagServiceStub:
                 request_serializer=rag__service__pb2.CreateDatasetRequest.SerializeToString,
                 response_deserializer=rag__service__pb2.CreateDatasetResponse.FromString,
                 _registered_method=True)
+        self.BindEmbeddingProfile = channel.unary_unary(
+                '/rag.v1.RagService/BindEmbeddingProfile',
+                request_serializer=rag__service__pb2.BindEmbeddingProfileRequest.SerializeToString,
+                response_deserializer=rag__service__pb2.CreateDatasetResponse.FromString,
+                _registered_method=True)
         self.DeleteDataset = channel.unary_unary(
                 '/rag.v1.RagService/DeleteDataset',
                 request_serializer=rag__service__pb2.DeleteDatasetRequest.SerializeToString,
@@ -80,6 +85,12 @@ class RagServiceServicer:
     """Missing associated documentation comment in .proto file."""
 
     def CreateDataset(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def BindEmbeddingProfile(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -133,6 +144,11 @@ def add_RagServiceServicer_to_server(servicer, server):
             'CreateDataset': grpc.unary_unary_rpc_method_handler(
                     servicer.CreateDataset,
                     request_deserializer=rag__service__pb2.CreateDatasetRequest.FromString,
+                    response_serializer=rag__service__pb2.CreateDatasetResponse.SerializeToString,
+            ),
+            'BindEmbeddingProfile': grpc.unary_unary_rpc_method_handler(
+                    servicer.BindEmbeddingProfile,
+                    request_deserializer=rag__service__pb2.BindEmbeddingProfileRequest.FromString,
                     response_serializer=rag__service__pb2.CreateDatasetResponse.SerializeToString,
             ),
             'DeleteDataset': grpc.unary_unary_rpc_method_handler(
@@ -197,6 +213,33 @@ class RagService:
             target,
             '/rag.v1.RagService/CreateDataset',
             rag__service__pb2.CreateDatasetRequest.SerializeToString,
+            rag__service__pb2.CreateDatasetResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def BindEmbeddingProfile(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/rag.v1.RagService/BindEmbeddingProfile',
+            rag__service__pb2.BindEmbeddingProfileRequest.SerializeToString,
             rag__service__pb2.CreateDatasetResponse.FromString,
             options,
             channel_credentials,

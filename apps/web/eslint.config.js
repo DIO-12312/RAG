@@ -11,6 +11,7 @@ export default tseslint.config(
   ...pluginVue.configs["flat/recommended"],
   {
     files: ["**/*.vue"],
+    rules: { "no-undef": "off" },
     languageOptions: {
       parserOptions: {
         parser: tseslint.parser,

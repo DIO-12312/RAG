@@ -32,7 +32,7 @@ export interface LoginRequest {
 }
 
 export type JobStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
-export type DatasetStatus = "READY" | "PROCESSING" | "FAILED";
+export type DatasetStatus = "READY" | "PROCESSING" | "FAILED" | "EMPTY";
 
 export interface DatasetSummary {
   id: string;
@@ -113,6 +113,7 @@ export interface Citation {
 }
 
 export interface ChatRequest {
+  conversationId?: string;
   datasetId: string;
   question: string;
 }
@@ -120,7 +121,7 @@ export interface ChatRequest {
 export type ChatEvent =
   | { type: "retrieval"; hits: Evidence[] }
   | { type: "token"; text: string }
-  | { type: "final"; answer: string; citations: Citation[] }
+  | { type: "final"; answer: string; citations: Citation[]; conversationId?: string }
   | { type: "error"; code: string; message: string };
 
 export interface ModelConfigResponse {

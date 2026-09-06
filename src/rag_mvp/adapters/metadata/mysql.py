@@ -119,6 +119,7 @@ class MySQLMetadataRepository:
                 tenant_id=dataset.tenant_id,
                 name=dataset.name,
                 embedding_model=dataset.embedding_model,
+                encrypted_embedding_profile=dataset.encrypted_embedding_profile or None,
                 embedding_dimension=dataset.embedding_dimension,
                 search_schema_version=dataset.search_schema_version,
                 status=dataset.status,
@@ -139,6 +140,30 @@ class MySQLMetadataRepository:
                 )
             )
             return dataset_from_table(row) if row is not None else None
+
+    async def bind_embedding_profile(
+        self, dataset_id: str, model: str, dimension: int, encrypted_profile: str
+    ) -> Dataset:
+        async with self._session_factory() as session, session.begin():
+            row = await session.scalar(
+                select(DatasetTable)
+                .where(
+                    DatasetTable.id == dataset_id, DatasetTable.tenant_id == self._default_tenant_id
+                )
+                .with_for_update()
+            )
+            if row is None or row.status != "ACTIVE":
+                raise DomainError(DomainFailure("DATASET_NOT_FOUND", "dataset unavailable"))
+            if not row.encrypted_embedding_profile:
+                if row.embedding_model != model or row.embedding_dimension != dimension:
+                    raise DomainError(
+                        DomainFailure(
+                            "EMBEDDING_CONFIG_MISMATCH",
+                            "legacy dataset requires its original model and dimension",
+                        )
+                    )
+                row.encrypted_embedding_profile = encrypted_profile
+            return dataset_from_table(row)
 
     # 提交该方法负责的领域数据或基础设施状态。
     async def submit_ingestion(self, command: SubmitIngestion) -> SubmitResult:

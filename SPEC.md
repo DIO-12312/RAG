@@ -126,6 +126,7 @@ package rag.v1;
 
 service RagService {
   rpc CreateDataset(CreateDatasetRequest) returns (CreateDatasetResponse);
+  rpc BindEmbeddingProfile(BindEmbeddingProfileRequest) returns (CreateDatasetResponse);
   rpc DeleteDataset(DeleteDatasetRequest) returns (DeleteDatasetResponse);
   rpc SubmitDocument(stream UploadDocumentRequest) returns (SubmitDocumentResponse);
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
@@ -222,7 +223,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 | Rerank | 默认关闭、可选开启 | `rerank_top_n=6`，输入最多 20 个候选。 |
 | 上下文预算 | Evidence 截断器 | `max_context_tokens=4_000`，预留模型回答 token。 |
 
-MVP 的一个运行实例只配置一个 Embedding 模型、一个声明维度和一套 ES vector mapping。`CreateDataset` 仍保存 `embedding_model` 与 `embedding_dimension`，但二者必须与当前运行实例的 ModelGateway 配置一致；不一致时返回稳定 `EMBEDDING_CONFIG_MISMATCH`，不得创建 Dataset。真实 API 返回的每个向量都必须与声明维度一致。若需要使用不同模型或维度，应启动使用独立 ES index/schema 的另一部署；同一 index 不得混写不同维度。
+原始独立 Python MVP 模式的一个运行实例只配置一个 Embedding 模型、一个声明维度和一套 ES vector mapping。产品模式（§5.6）改为每 Dataset 固定模型快照，同一 ES 索引仍统一 1024 维；下面的实例模型一致性检查仅适用于独立旧模式。`CreateDataset` 仍保存 `embedding_model` 与 `embedding_dimension`，但二者必须与当前运行实例的 ModelGateway 配置一致；不一致时返回稳定 `EMBEDDING_CONFIG_MISMATCH`，不得创建 Dataset。真实 API 返回的每个向量都必须与声明维度一致。若需要使用不同模型或维度，应启动使用独立 ES index/schema 的另一部署；同一 index 不得混写不同维度。
 
 ### 3.4 Elasticsearch 安全边界
 
@@ -655,6 +656,10 @@ sequenceDiagram
 `RetryJob` 不把失败 Task 或 Job 从 `FAILED` 改回 `PENDING`：它创建带 `retry_of_job_id`、与原 Job 相同 `type` 的新 Job、对应 Task 与 OutboxEvent；旧 Job 永远保持原终态。重试摄取只能复用已存在的正式 `object_key`，因此其 OutboxEvent 直接为 `READY_TO_PUBLISH`；没有正式对象的初始上传失败不可通过 RetryJob 恢复，调用方必须重新上传。删除清理失败重建 `CLEANUP_DOCUMENT` Task，也直接 READY。若失败的是一次已有 `READY` Document 的重建，旧 `active_version` 在新版本完整写入并切换前持续可见；若没有旧成功版本，Document 状态为 `FAILED`。`DeleteDocument` 先在事务内将 Document 标记为 `DELETED`、创建 `DELETE_DOCUMENT` Job/`CLEANUP_DOCUMENT` Task/`READY_TO_PUBLISH` OutboxEvent，因而即使 Relay 或 Worker 暂停，检索也会立即被 MySQL 复核挡住。`DeleteDataset` 使用同一可靠路径，但因成功的最终状态是物理删除整个聚合，不能复用 `RetryJob`，也不能依赖保留的成功 Job 作为完成标记。
 
 ### 5.6 目标态：Go 后端 / Agent Harness 的问答执行流程
+
+2026-09-06 后续迭代：Embedding URL/模型/API Key/超时/Top-K 由个人设置写入 Go MySQL，API Key 加密存储，不再要求运行环境提供模型凭据。创建 Dataset 时 Go 将配置加密快照经 gRPC 传给 Python，Python MySQL 随 Dataset 持久化，Worker 与 Retrieve 使用同一快照。仅基础设施加密密钥通过只读 secret 提供给 Python，不将 API Key 放入 NATS/日志或返回前端。已有 Dataset 的模型与维度不变；空快照可经 BindEmbeddingProfile 在行锁下首次绑定匹配配置，已绑定快照不可被该 RPC 覆盖。当前 ES 索引为 1024 维，前端清楚标明并校验维度。修改个人配置影响之后创建的知识库，避免不同模型的向量混用。批量上传按单文件调用已有上传 RPC、每文件独立幂等键；目录仅展开文件，不改变 Python Task/Outbox 语义。Go 历史会话返回创建/最近消息时间并稳定倒序；前端右侧模态抽屉展示。回答 Markdown 禁止原始 HTML并清洗输出，引用证据保留原文。
+
+2026-09-06 产品控制面迭代开始实施：`backend/go-api` 使用独立 MySQL 保存个人用户、模型配置、资源所有权索引和会话，单用户拥有多个 Dataset，无租户角色。网络 API 使用根路径与 24 小时 JWT cookie。Go Agent 通过现有 `Retrieve` RPC 执行只读工具调用，绑定已鉴权 Dataset，限制轮数/时间并支持取消。知识库创建和文档管理仍经 Python RPC；Go 不读写 Python 表。Embedding 已改为用户配置及 Dataset 加密快照；用户级 Rerank 仍只保存配置，暂不参与检索。实施与验收跟踪见 `docs/superpowers/plans/2026-09-06-live-product-plane.md`。
 
 本节描述最终产品路径，不是 Python RAG Worker 的职责。Python 只经 gRPC 执行 `Retrieve` 并返回 evidence；Go 负责会话、Agent 决策、Prompt、Chat Model 调用和向浏览器发送 SSE。
 

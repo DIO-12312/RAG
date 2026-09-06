@@ -96,6 +96,7 @@ class DocumentService:
                 embedding_dimension=command.embedding_dimension,
                 created_at=command.now,
                 tenant_id=self._default_tenant_id,
+                encrypted_embedding_profile=command.encrypted_embedding_profile,
             )
         )
         result = CreateDatasetResult(
@@ -112,6 +113,18 @@ class DocumentService:
             duration_ms=(perf_counter() - started_at) * 1000,
         )
         return result
+
+    async def bind_embedding_profile(
+        self, dataset_id: str, model: str, dimension: int, encrypted_profile: str
+    ) -> CreateDatasetResult:
+        if not encrypted_profile or len(encrypted_profile) > 32768:
+            raise DomainError(DomainFailure("INVALID_EMBEDDING_CONFIG", "profile is required"))
+        dataset = await self._metadata.bind_embedding_profile(
+            dataset_id, model, dimension, encrypted_profile
+        )
+        return CreateDatasetResult(
+            dataset.id, dataset.name, dataset.embedding_model, dataset.embedding_dimension
+        )
 
     @staticmethod
     # 实现 staging_key 对应的局部职责。

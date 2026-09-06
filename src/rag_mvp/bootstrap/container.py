@@ -17,6 +17,7 @@ from rag_mvp.adapters.chunkers.recursive import RecursiveChunker
 from rag_mvp.adapters.message_queue.nats_jetstream import NatsJetStreamTaskQueue
 from rag_mvp.adapters.metadata.database import create_mysql_engine, create_session_factory
 from rag_mvp.adapters.metadata.mysql import MySQLMetadataRepository
+from rag_mvp.adapters.model.dataset_profile import DatasetProfileGateway
 from rag_mvp.adapters.model.openai_compatible import OpenAICompatibleModelGateway
 from rag_mvp.adapters.parsers.router import SourceParserRouter
 from rag_mvp.adapters.search_engine.elasticsearch import ElasticsearchSearchEngine
@@ -145,7 +146,9 @@ async def build_server_container(
         storage = container.register(await selected.storage(settings))
         search = container.register(await selected.search(settings))
         model = container.register(await selected.model(settings))
-        profile = settings.require_embedding_profile()
+        profile = (
+            None if settings.model_encryption_key_file else settings.require_embedding_profile()
+        )
         container.metadata = metadata
         container.storage = storage
         container.search = search
@@ -155,8 +158,8 @@ async def build_server_container(
             storage,
             max_upload_bytes=settings.max_upload_bytes,
             default_tenant_id=settings.default_tenant_id,
-            embedding_model=profile.model,
-            embedding_dimension=profile.dimension,
+            embedding_model=profile.model if profile else None,
+            embedding_dimension=profile.dimension if profile else None,
         )
         container.rag_service = RagService(
             documents=documents,
@@ -165,7 +168,7 @@ async def build_server_container(
             parser_version=settings.parser_version,
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
-            embedding_model=profile.model,
+            embedding_model=profile.model if profile else None,
         )
         return container
     except BaseException:
@@ -258,7 +261,11 @@ async def _storage_resource(settings: Settings) -> ManagedResource[ObjectStorage
 
 # 内部辅助：完成 search_resource 所需的局部转换或校验。
 async def _search_resource(settings: Settings) -> ManagedResource[SearchEngine]:
-    profile = settings.require_embedding_profile()
+    dimension = (
+        settings.search_embedding_dimension
+        if settings.model_encryption_key_file
+        else settings.require_embedding_profile().dimension
+    )
     elasticsearch = settings.require_elasticsearch_profile()
     client = AsyncElasticsearch(
         elasticsearch.endpoint,
@@ -269,7 +276,7 @@ async def _search_resource(settings: Settings) -> ManagedResource[SearchEngine]:
     search = ElasticsearchSearchEngine(
         client,
         settings.elasticsearch_index,
-        profile.dimension,
+        dimension,
     )
     try:
         await search.ensure_index()
@@ -281,6 +288,8 @@ async def _search_resource(settings: Settings) -> ManagedResource[SearchEngine]:
 
 # 内部辅助：完成 model_resource 所需的局部转换或校验。
 async def _model_resource(settings: Settings) -> ManagedResource[ModelGateway]:
+    if settings.model_encryption_key_file:
+        return ManagedResource(DatasetProfileGateway(settings.model_encryption_key_file))
     profile = settings.require_embedding_profile()
     client = httpx.AsyncClient(
         headers={"Authorization": f"Bearer {profile.api_key.get_secret_value()}"},

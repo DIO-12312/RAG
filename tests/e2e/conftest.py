@@ -16,6 +16,7 @@ import pytest
 import pytest_asyncio
 
 from rag_mvp.rpc.generated import rag_service_pb2, rag_service_pb2_grpc
+from tests.embedding_profile import encrypted_test_profile
 
 DOCUMENTS = Path(__file__).resolve().parents[1] / "fixtures" / "documents"
 UPLOAD_FRAME_BYTES = 64 * 1024
@@ -78,6 +79,7 @@ async def create_dataset(stub: Any, runtime: EmbeddingRuntime, case_name: str) -
             name=f"E2E {case_name} {uuid4().hex}",
             embedding_model=runtime.model,
             embedding_dimension=runtime.dimension,
+            encrypted_embedding_profile=encrypted_test_profile(runtime.model, runtime.dimension),
             retrieval_config=rag_service_pb2.RetrievalConfig(
                 dense_top_k=20,
                 sparse_top_k=20,

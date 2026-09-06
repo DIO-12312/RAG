@@ -6,10 +6,25 @@
 
 ## 目录树
 
+### 2026-09-06 产品体验与模型配置补充
+
+| 文件 | 用例 / 职责 | 运行边界 |
+|---|---|---|
+| `unit/adapters/test_dataset_profile.py` | `test_profiles_keep_provider_keys_isolated`、`test_invalid_profile_fails_without_exposing_secret`：快照选模型、密钥隔离及错误脱敏 | 离线，HTTP 传输替身 |
+| `unit/adapters/test_dataset_profile.py` | `test_endpoint_blocks_private_resolution`、`test_fake_ip_resolution_uses_public_dns_before_connecting`：私网拒绝、Fake-IP 公网重解析后固定连接地址 | 离线，DNS/传输替身 |
+| `fakes/metadata.py` | Fake Metadata 新增首次绑定模型快照，保留已有快照，拒绝原模型/维度不匹配 | 仅测试，不代表真实 MySQL 锁验收 |
+| `contract/test_container_artifacts.py` | Runtime 不再注入 Embedding 凭据，只读共享基础设施密钥；旧模型环境变量只用于显式模型测试 | `make ci` |
+| `integration/test_mysql_migrations.py` | 升级至 0003，加密快照列可空以兼容旧 Dataset | 必须隔离测试库，fixture 会清空业务表 |
+| `integration/test_mysql_submission.py` | `test_embedding_binding_is_first_write_only`：原模型不匹配拒绝、并发首次绑定收敛、后续配置不能覆盖快照 | 真实隔离 MySQL |
+| `embedding_profile.py`、`e2e/conftest.py`、`resilience/docker/conftest.py` | `encrypted_test_profile` 使用测试专用凭据和共享加密密钥组装创建请求；无密钥路径则保持独立旧模式 | 显式真实模型测试；不打印密钥 |
+
+前端测试位于 `apps/web/tests/`：原 `upload-panel.spec.ts` 替换为 `batch-upload.spec.ts`（两项：独立失败重试/固定幂等键、文件夹展开与过滤）；新增 `markdown-content.spec.ts`（结构化渲染/流式更新、XSS与远程图片防护）。它们经 `npm test -- --run` 执行，不包含在 Python 门禁中。Go `TestLiveProductFlow` 通过真实 MySQL/gRPC/Worker/Embedding 验证保存配置、摄取、检索、会话时间与用户隔离；Chat 使用确定性测试供应商，除非显式启用真实 Chat。
+
 ```text
 tests/
 ├─ TEST.md                                 # 本目录的测试索引与职责清单
 ├─ __init__.py
+├─ embedding_profile.py                    # E2E/真实韧性套件生成加密 RPC 快照；测试专用 env 凭据不进入运行服务
 ├─ conftest.py                              # 共享 pytest 配置与 fixture
 ├─ contract/                                # gRPC、protobuf 与 Port 语义契约
 │  ├─ test_build_entrypoints.py
@@ -95,6 +110,7 @@ tests/
 │  └─ test_spec_invariant_matrix.py
 └─ unit/                                    # 领域纯规则和单组件行为
    ├─ adapters/
+   │  ├─ test_dataset_profile.py             # 数据集加密模型快照及 SSRF 边界
    │  ├─ test_elasticsearch_mapping.py
    │  ├─ test_mysql_schema.py
    │  ├─ test_nats_delivery_mapping.py

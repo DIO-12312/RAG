@@ -64,6 +64,7 @@ def dataset_from_table(row: DatasetTable) -> Dataset:
         tenant_id=row.tenant_id,
         name=row.name,
         embedding_model=row.embedding_model,
+        encrypted_embedding_profile=row.encrypted_embedding_profile or "",
         embedding_dimension=row.embedding_dimension,
         search_schema_version=row.search_schema_version,
         status=DatasetStatus(row.status),

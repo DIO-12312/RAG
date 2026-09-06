@@ -4,6 +4,7 @@ package rag.v1;
 
 service RagService {
   rpc CreateDataset(CreateDatasetRequest) returns (CreateDatasetResponse);
+  rpc BindEmbeddingProfile(BindEmbeddingProfileRequest) returns (CreateDatasetResponse);
   rpc DeleteDataset(DeleteDatasetRequest) returns (DeleteDatasetResponse);
   rpc SubmitDocument(stream UploadDocumentRequest) returns (SubmitDocumentResponse);
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
@@ -74,6 +75,16 @@ message CreateDatasetRequest {
   string embedding_model = 3;
   uint32 embedding_dimension = 4;
   RetrievalConfig retrieval_config = 5;
+  string encrypted_embedding_profile = 6;
+}
+
+// Private control-plane command. Binds a legacy dataset once; never replaces a snapshot.
+message BindEmbeddingProfileRequest {
+  RequestContext context = 1;
+  string dataset_id = 2;
+  string embedding_model = 3;
+  uint32 embedding_dimension = 4;
+  string encrypted_embedding_profile = 5;
 }
 
 message CreateDatasetResult {

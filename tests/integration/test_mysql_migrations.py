@@ -91,7 +91,8 @@ def test_upgrade_head_is_idempotent_and_creates_innodb_schema(
     snapshot = asyncio.run(_schema_snapshot(mysql_dsn))
 
     assert snapshot.tables >= EXPECTED_TABLES
-    assert snapshot.revision == "0002_delete_dataset"
+    assert snapshot.revision == "0003_embedding_profile"
+    assert snapshot.columns["datasets"]["encrypted_embedding_profile"] is True
     assert snapshot.tenant_ids == ("default_tenant",)
     assert all(snapshot.engines[table_name] == "InnoDB" for table_name in EXPECTED_TABLES)
     assert snapshot.unique_constraints["ingestion_fingerprints"] == {

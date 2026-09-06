@@ -229,8 +229,37 @@ class RagService:
                     name=request.name,
                     embedding_model=request.embedding_model,
                     embedding_dimension=request.embedding_dimension,
+                    encrypted_embedding_profile=request.encrypted_embedding_profile,
                     now=self._now(),
                 )
+            )
+            return rag_service_pb2.CreateDatasetResponse(
+                result=rag_service_pb2.CreateDatasetResult(
+                    dataset_id=result.dataset_id,
+                    name=result.name,
+                    embedding_model=result.embedding_model,
+                    embedding_dimension=result.embedding_dimension,
+                )
+            )
+        except Exception as error:
+            return rag_service_pb2.CreateDatasetResponse(
+                error=_unexpected(error, request.context.request_id)
+            )
+
+    async def BindEmbeddingProfile(
+        self, request: rag_service_pb2.BindEmbeddingProfileRequest, context: object
+    ) -> rag_service_pb2.CreateDatasetResponse:
+        del context
+        if self._documents is None:
+            return rag_service_pb2.CreateDatasetResponse(
+                error=_unavailable(request.context.request_id)
+            )
+        try:
+            result = await self._documents.bind_embedding_profile(
+                request.dataset_id,
+                request.embedding_model,
+                request.embedding_dimension,
+                request.encrypted_embedding_profile,
             )
             return rag_service_pb2.CreateDatasetResponse(
                 result=rag_service_pb2.CreateDatasetResult(

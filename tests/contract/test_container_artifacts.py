@@ -99,7 +99,11 @@ def test_compose_declares_migration_health_role_secrets_and_shared_storage() -> 
     assert 'profiles: ["test"]' in blocks["rag-test"]
     assert "./tests:/app/tests:ro" in blocks["rag-test"]
 
-    for role in ("rag-server", "rag-worker", "rag-test"):
+    for role in ("rag-server", "rag-worker"):
+        assert "EMBEDDING_MODEL_API_KEY" not in blocks[role]
+        assert "RAG_MODEL_ENCRYPTION_KEY_FILE" in blocks[role]
+        assert "product-model-keys:/run/model-keys:ro" in blocks[role]
+    for role in ("rag-test",):
         assert "EMBEDDING_MODEL_API_KEY" in blocks[role]
         assert "EMBEDDING_MODEL_DIMENSION" in blocks[role]
     for role in ("rag-migrate", "rag-outbox"):

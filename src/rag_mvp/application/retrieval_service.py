@@ -12,7 +12,7 @@ from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.models import Evidence
 from rag_mvp.observability import emit_event
 from rag_mvp.ports.metadata import MetadataRepository
-from rag_mvp.ports.model import ModelGateway
+from rag_mvp.ports.model import ModelGateway, model_for_dataset
 from rag_mvp.ports.search_engine import SearchCandidate, SearchEngine, SearchRequest
 from rag_mvp.retrieval.context_builder import ContextPlan, build_context_plan
 from rag_mvp.retrieval.hybrid import HybridCandidate, reciprocal_rank_fusion
@@ -48,7 +48,7 @@ class RetrievalService:
             raise DomainError(DomainFailure("DATASET_NOT_FOUND", "dataset does not exist"))
         if dataset.status is not DatasetStatus.ACTIVE:
             raise DomainError(DomainFailure("DATASET_DELETING", "dataset is being deleted"))
-        vectors = await self._model.embed([query.query])
+        vectors = await model_for_dataset(self._model, dataset).embed([query.query])
         if len(vectors) != 1 or len(vectors[0]) != dataset.embedding_dimension:
             raise DomainError(
                 DomainFailure(

@@ -24,6 +24,7 @@ from rag_mvp.adapters.metadata.database import create_session_factory
 from rag_mvp.adapters.metadata.mysql import MySQLMetadataRepository
 from rag_mvp.ingestion.checkpoints import Checkpoint
 from rag_mvp.rpc.generated import rag_service_pb2, rag_service_pb2_grpc
+from tests.embedding_profile import encrypted_test_profile
 
 UPLOAD_FRAME_BYTES = 64 * 1024
 
@@ -304,6 +305,7 @@ async def create_dataset(stub: Any, runtime: EmbeddingRuntime, name: str) -> str
             name=f"Docker resilience {name} {uuid4().hex}",
             embedding_model=runtime.model,
             embedding_dimension=runtime.dimension,
+            encrypted_embedding_profile=encrypted_test_profile(runtime.model, runtime.dimension),
             retrieval_config=rag_service_pb2.RetrievalConfig(
                 dense_top_k=20,
                 sparse_top_k=20,

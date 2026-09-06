@@ -1,5 +1,7 @@
 # 个人 RAG 产品壳设计
 
+> 2026-09-06 迭代说明：用户已将原“仅骨架/Mock”范围扩展为 Go 真实网络后端与 Agent。当前实现、运行方式与明确限制以 `docs/development/live-product-plane.md` 和 `docs/superpowers/plans/2026-09-06-live-product-plane.md` 为准；下文保留原产品壳设计记录，不代表当前全部功能仍为占位。
+
 **日期：** 2026-09-05  
 **状态：** 已确认，待实施计划评审  
 **关联规划：** `docs/superpowers/plans/2026-09-03-product-plane-agent-and-rag-enhancement-outline.md`

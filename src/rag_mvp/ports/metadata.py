@@ -107,6 +107,10 @@ class MetadataRepository(Protocol):
     # 读取该方法负责的领域数据或基础设施状态。
     async def get_dataset(self, dataset_id: str) -> Dataset | None: ...
 
+    async def bind_embedding_profile(
+        self, dataset_id: str, model: str, dimension: int, encrypted_profile: str
+    ) -> Dataset: ...
+
     # 提交该方法负责的领域数据或基础设施状态。
     async def submit_ingestion(self, command: SubmitIngestion) -> SubmitResult: ...
 

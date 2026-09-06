@@ -1,0 +1,48 @@
+name: rag-product
+services:
+  product-mysql:
+    image: mysql:8.4.6
+    environment:
+      MYSQL_DATABASE: rag_product
+      MYSQL_USER: product
+      MYSQL_PASSWORD: product-local-dev
+      MYSQL_ROOT_PASSWORD: product-root-local-dev
+    volumes:
+      - product-mysql:/var/lib/mysql
+    ports:
+      - 127.0.0.1:3307:3306
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+  api:
+    build: backend/go-api
+    environment:
+      PRODUCT_MYSQL_DSN: product:product-local-dev@tcp(product-mysql:3306)/rag_product?parseTime=true
+      PRODUCT_HTTP_ADDR: 0.0.0.0:8080
+      PRODUCT_ORIGIN: http://127.0.0.1:5173
+      PRODUCT_RAG_TARGET: rag-server:50051
+      PRODUCT_KEY_DIR: /var/lib/product
+      PRODUCT_COOKIE_SECURE: "false"
+    volumes:
+      - product-keys:/var/lib/product
+    ports:
+      - 127.0.0.1:8080:8080
+    depends_on:
+      product-mysql:
+        condition: service_healthy
+    networks:
+      - default
+      - rag
+    restart: unless-stopped
+networks:
+  rag:
+    external: true
+    name: rag-mvp_default
+volumes:
+  product-mysql:
+  product-keys:
+    name: rag-product_product-keys
+    external: true

@@ -100,18 +100,34 @@ class RetrievalConfig(_message.Message):
     def __init__(self, dense_top_k: _Optional[int] = ..., sparse_top_k: _Optional[int] = ..., rrf_k: _Optional[int] = ..., rerank_enabled: _Optional[bool] = ..., rerank_top_n: _Optional[int] = ..., max_context_tokens: _Optional[int] = ...) -> None: ...
 
 class CreateDatasetRequest(_message.Message):
-    __slots__ = ("context", "name", "embedding_model", "embedding_dimension", "retrieval_config")
+    __slots__ = ("context", "name", "embedding_model", "embedding_dimension", "retrieval_config", "encrypted_embedding_profile")
     CONTEXT_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     EMBEDDING_MODEL_FIELD_NUMBER: _ClassVar[int]
     EMBEDDING_DIMENSION_FIELD_NUMBER: _ClassVar[int]
     RETRIEVAL_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    ENCRYPTED_EMBEDDING_PROFILE_FIELD_NUMBER: _ClassVar[int]
     context: RequestContext
     name: str
     embedding_model: str
     embedding_dimension: int
     retrieval_config: RetrievalConfig
-    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., name: _Optional[str] = ..., embedding_model: _Optional[str] = ..., embedding_dimension: _Optional[int] = ..., retrieval_config: _Optional[_Union[RetrievalConfig, _Mapping]] = ...) -> None: ...
+    encrypted_embedding_profile: str
+    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., name: _Optional[str] = ..., embedding_model: _Optional[str] = ..., embedding_dimension: _Optional[int] = ..., retrieval_config: _Optional[_Union[RetrievalConfig, _Mapping]] = ..., encrypted_embedding_profile: _Optional[str] = ...) -> None: ...
+
+class BindEmbeddingProfileRequest(_message.Message):
+    __slots__ = ("context", "dataset_id", "embedding_model", "embedding_dimension", "encrypted_embedding_profile")
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    DATASET_ID_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_MODEL_FIELD_NUMBER: _ClassVar[int]
+    EMBEDDING_DIMENSION_FIELD_NUMBER: _ClassVar[int]
+    ENCRYPTED_EMBEDDING_PROFILE_FIELD_NUMBER: _ClassVar[int]
+    context: RequestContext
+    dataset_id: str
+    embedding_model: str
+    embedding_dimension: int
+    encrypted_embedding_profile: str
+    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., dataset_id: _Optional[str] = ..., embedding_model: _Optional[str] = ..., embedding_dimension: _Optional[int] = ..., encrypted_embedding_profile: _Optional[str] = ...) -> None: ...
 
 class CreateDatasetResult(_message.Message):
     __slots__ = ("dataset_id", "name", "embedding_model", "embedding_dimension")

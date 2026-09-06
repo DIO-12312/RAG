@@ -18,6 +18,7 @@ def test_rag_service_defines_the_complete_rpc_surface() -> None:
 
     assert set(methods) == {
         "CreateDataset",
+        "BindEmbeddingProfile",
         "DeleteDataset",
         "SubmitDocument",
         "GetJob",

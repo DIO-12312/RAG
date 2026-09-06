@@ -95,6 +95,8 @@ class Settings(BaseSettings):
     failpoint_checkpoints: str = ""
 
     default_tenant_id: str = "default_tenant"
+    model_encryption_key_file: Path | None = None
+    search_embedding_dimension: int = Field(default=1024, ge=1)
     embedding_model_url: str | None = Field(
         default=None,
         validation_alias="EMBEDDING_MODEL_URL",

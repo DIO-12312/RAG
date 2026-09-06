@@ -17,6 +17,7 @@ from sqlalchemy import (
     MetaData,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     text,
 )
@@ -90,6 +91,7 @@ class DatasetTable(TimestampMixin, Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     embedding_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    encrypted_embedding_profile: Mapped[str | None] = mapped_column(Text, nullable=True)
     embedding_dimension: Mapped[int] = mapped_column(Integer, nullable=False)
     search_schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ACTIVE")
