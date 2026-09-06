@@ -39,7 +39,7 @@ docker-down:
 
 # 一键启动 RAG、Go 产品后端、产品 MySQL 与 Vue 前端开发服务器
 run:
-	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-dev.ps1
+	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +run
 
 # 查找 tests/**/log 目录下的所有文件并删除
 clear:

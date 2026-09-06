@@ -27,7 +27,7 @@ def test_makefile_offline_targets_are_commented_earthly_only_entrypoints() -> No
     assert "EARTHLY_ENV_FILE ?= .earthly.env" in makefile
     assert "EARTHLY_FLAGS ?=" in makefile
     assert (ROOT / ".earthly.env").read_text(encoding="utf-8").startswith("# Intentionally empty")
-    earthfile_targets = {"proto", "lint", "test", "ci", "docker-up", "docker-test", "docker-down"}
+    earthfile_targets = {"proto", "lint", "test", "ci", "docker-up", "docker-test", "docker-down", "run"}
     execution_recipes = [
         match.group("recipe")
         for match in re.finditer(
@@ -109,11 +109,18 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
 
     assert _make_targets(makefile) == public
     assert re.search(r"^# .+\nrun:\n", makefile, re.MULTILINE)
-    run_script = _text("scripts/run-dev.ps1")
-    assert 'ArgumentList "docker-up"' in run_script
-    assert 'docker volume create $volume' in run_script
-    assert "compose.product.yml up -d --build" in run_script
-    assert "npm --prefix apps/web run dev" in run_script
+    run_target = earthfile.split("\nrun:\n", 1)[1].split("\n#", 1)[0]
+    assert "LOCALLY" in run_target
+    steps = [
+        "docker volume create rag-product_product-keys",
+        "DO +DOCKER_START",
+        "docker compose -f compose.product.yml up -d --build --wait --wait-timeout 240",
+        "npm --prefix apps/web run dev -- --host 127.0.0.1 --strictPort",
+    ]
+    positions = [run_target.index(step) for step in steps]
+    assert positions == sorted(positions)
+    assert "powershell" not in run_target.lower()
+    assert "volume rm" not in run_target
     assert "SUITE ?= all" in makefile
     assert "EVAL_FIXTURE ?= rephrased" in makefile
     assert "+docker-test --SUITE=$(SUITE)" in makefile
@@ -122,7 +129,7 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
     assert "ARG EVAL_FIXTURE=rephrased" in earthfile
     assert 'case "$EVAL_FIXTURE" in original|rephrased)' in earthfile
     assert '-e EVAL_FIXTURE="$EVAL_FIXTURE"' in earthfile
-    assert earthfile.count("DO +DOCKER_START") == 2
+    assert earthfile.count("DO +DOCKER_START") == 3
     assert "docker-start:\n    FUNCTION" not in earthfile
     for target in ("docker-up", "docker-test", "docker-down"):
         assert re.search(rf"^# .+\n{re.escape(target)}:", makefile, re.MULTILINE)

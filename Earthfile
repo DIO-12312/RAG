@@ -112,6 +112,16 @@ docker-up:
     LOCALLY
     DO +DOCKER_START
 
+# Start the development stack sequentially and keep the local Vue server attached.
+run:
+    LOCALLY
+    RUN docker compose config --quiet
+    RUN docker compose -f compose.product.yml config --quiet
+    RUN docker volume create rag-product_product-keys
+    DO +DOCKER_START
+    RUN docker compose -f compose.product.yml up -d --build --wait --wait-timeout 240
+    RUN npm --prefix apps/web run dev -- --host 127.0.0.1 --strictPort
+
 # Run a selected real Docker suite and preserve the service state for diagnosis after failure.
 docker-test:
     LOCALLY

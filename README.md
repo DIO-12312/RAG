@@ -62,6 +62,16 @@ flowchart LR
 
 ## Docker 快速启动
 
+### 一键启动产品开发环境
+
+在仓库根目录执行 `make run`，统一转发到 `earthly --env-file-path .earthly.env +run`。Windows 推荐在 WSL2 中运行，与 Linux 使用相同命令；入口不再依赖 PowerShell 脚本。
+
+前置条件：Docker/Compose、GNU Make、Earthly，以及同一执行环境中的 Node.js/npm。首次运行先执行 `npm --prefix apps/web ci`，并按下文准备 RAG 的 `.env`。不要在 Windows 与 WSL 之间共用安装出的 `node_modules`。
+
+Earthfile 顺序准备共享密钥卷、等待 RAG 服务就绪、启动产品 MySQL 与 Go API，最后在前台运行 Vue 开发服务器。任一步失败不继续启动后续步骤；产品 Compose 的 `--wait` 对无 healthcheck 的 Go API 只保证容器已运行，不代表业务 API 探针验收。
+
+前端地址为 `http://127.0.0.1:5173/`，Go API 为 `http://127.0.0.1:8080/`。端口占用时前端报错，不自动切换端口。Ctrl+C 停止前台开发命令，已启动的 Docker 服务保留；停止产品服务使用 `docker compose -f compose.product.yml down`，RAG 使用 `make docker-down`，均不删除持久卷。`make docker-up` 仍仅启动 RAG。
+
 需要 Docker Engine、Docker Compose、GNU Make 和 Earthly v0.8.16。Windows 推荐在 WSL2 中执行以下命令。
 
 ```bash
