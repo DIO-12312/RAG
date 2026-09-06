@@ -2,7 +2,7 @@
 
 ## 当前运行方式
 
-首次安装先创建共享基础设施密钥卷：`docker volume create rag-product_product-keys`，然后启动 Python 栈（`make docker-up`）。现有安装保留该卷。在仓库根目录运行：
+首次安装先创建共享基础设施密钥卷：`docker volume create rag-product_product-keys`。完整本地开发可直接运行 `make run`，它会启动 Python RAG 栈、Go API、产品 MySQL 和 Vue 开发服务器；也可以按下面的命令分开启动：
 
 ```powershell
 docker compose -f compose.product.yml up -d --build

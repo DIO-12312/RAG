@@ -102,11 +102,18 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
         "docker-up",
         "docker-test",
         "docker-down",
+        "run",
         "clear",
         "help",
     }
 
     assert _make_targets(makefile) == public
+    assert re.search(r"^# .+\nrun:\n", makefile, re.MULTILINE)
+    run_script = _text("scripts/run-dev.ps1")
+    assert 'ArgumentList "docker-up"' in run_script
+    assert 'docker volume create $volume' in run_script
+    assert "compose.product.yml up -d --build" in run_script
+    assert "npm --prefix apps/web run dev" in run_script
     assert "SUITE ?= all" in makefile
     assert "EVAL_FIXTURE ?= rephrased" in makefile
     assert "+docker-test --SUITE=$(SUITE)" in makefile
