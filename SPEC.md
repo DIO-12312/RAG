@@ -23,7 +23,7 @@
 
 ## 1. 项目概述
 
-本项目基于 Python 实现一个可运行、可测试、可恢复的最小 RAG 计算服务：用户上传 PDF、Markdown、TXT 或代码文本；系统异步解析、切块、向量化并建立全文/向量索引；调用方提问时，系统执行混合检索、可选重排和上下文预算建议，返回可追溯 evidence。最终答案生成、会话和 SSE 由后续 Go 产品后端负责。
+本项目基于 Python 实现一个可运行、可测试、可恢复的最小 RAG 计算服务：用户上传 PDF、Markdown、TXT、代码文本、CHM 或 CHI；系统异步解析、切块、向量化并建立全文/向量索引；调用方提问时，系统执行混合检索、可选重排和上下文预算建议，返回可追溯 evidence。最终答案生成、会话和 SSE 由后续 Go 产品后端负责。
 
 ### 设计理念
 
@@ -73,7 +73,13 @@ Python MVP 的唯一入口是 gRPC；本地调试也调用同一 gRPC 服务。P
   → 返回带来源、分数和上下文预算建议的 evidence
 ```
 
-必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java` 与文本型 PDF。扫描 PDF 和复杂表格 PDF 在 MVP 中仅仅返回文字部分。
+必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java`、文本型 PDF、`.chm` 与 `.chi`。扫描 PDF 和复杂表格 PDF 在 MVP 中仅仅返回文字部分。
+
+一个上传的 CHM 对应一个既有 `Document`，不为 Topic 新建数据库 Document。CHM 内每个 HTML Topic 是逻辑子文档和不可跨越的切块硬边界；Topic 内先按 `h1`～`h6` 标题层级形成段落，超长标题段再依次优先选择段落、句子和词法 token 边界，单个不可分 token 才允许按字符硬截断。Topic 顺序优先采用 `.hhc` 目录，未列入目录的 HTML 按规范化路径稳定追加。每个 CHM Chunk 的 `content_with_weight` 必须在正文前稳定加入 `topic_title`、`heading_path` 与 locator `symbol` 上下文，使同一 Topic 的所有分块均可按页面标题、标题路径和接口符号检索；正文切分上限不包含该检索权重前缀。权重文本参与 Embedding、内容摘要和 `chunk_id` 计算，因此修改前缀规则必须提升 parser/chunker 配置版本并重建索引。Chunk 与 Evidence 必须同时保留原 CHM `source_name`，并在 metadata/locator metadata 中返回 `topic_path`、`topic_title`、`topic_order`、`heading_path` 和可选 `anchor`；行号仍表示 Topic 规范化正文中的行范围，不计算检索权重前缀。
+
+CHM 只解析本地解包后的 HTML 文本，不执行脚本、样式、ActiveX 或外部资源。生产 Worker 使用 `extract_chmLib`，并对签名、路径、符号链接、解包超时、文件数、Topic 数和展开总字节执行 fail-closed 限制；缺少运行时返回 `CHM_EXTRACTOR_UNAVAILABLE`，损坏、越界或无可读 Topic 返回不可重试 `INVALID_CHM`。
+
+`.chi` 是可选的 CHM 关键词索引侧车，作为同一 Dataset 中单独上传的辅助文档参与检索，不创建或替代 CHM 的 Domain Document。生产 Worker 使用同一 `extract_chmLib` 解包，按 `$WWKeywordLinks/BTree` 的 listing-block 结构读取 UTF-16LE 关键词及其 `#TOPICS` 索引，再通过 `#TOPICS → #URLTBL → #URLSTR` 恢复目标 HTML Topic 路径/锚点，并用 `#STRINGS` 恢复 Topic 标题；禁止把 BTree 控制字节误判成关键词。关键词按目标 Topic 形成有界分段，每个分段的检索权重前缀稳定加入索引关键词、Topic 标题、Topic 路径/URL 和关联 CHM 名称；metadata 必须包含 `source_type=chi`、`logical_document_type=chm_index`、`chi_stream=$WWKeywordLinks/BTree`、`associated_chm_source_name`、`chi_topic_index`、`topic_path`、`topic_title`、`topic_url` 和可选 `anchor`。缺少任一必需映射流、无可读 Topic 链接、偏移/块链越界或解包失败返回不可重试 `INVALID_CHI`；CHI 不执行脚本、HTML 或外部资源。调用方应把同名 CHM 与 CHI 上传到同一 Dataset，检索会在同一 Dense/BM25/RRF 流程中同时考虑两者。
 
 ### 2.2 可恢复的异步摄取
 
@@ -111,7 +117,7 @@ PENDING → RUNNING → SUCCEEDED
 | 任务队列 | `TaskQueue` | NATS JetStream | 无 |
 | 检索引擎 | `SearchEngine` | Elasticsearch | 无 |
 | Embedding / Rerank | `ModelGateway` | OpenAI-compatible 的 API 调用 | 本地 Ollama |
-| 文档解析 | `Parser` | Text / Markdown / Code / (Docling) PDF parser | DeepDoc、OCR |
+| 文档解析 | `Parser` | Text / Markdown / Code / 文本 PDF / CHM HTML Topic / CHI keyword-index parser | DeepDoc、OCR |
 | 切块 | `Chunker` | Recursive Markdown/Text Chunker | 语义、父子、代码 AST Chunker |
 
 > 直接使用 Elasticsearch 负责MVP的向量语义索引和关键词索引。
@@ -216,7 +222,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 | 能力 | MVP 策略 | 默认参数（可配置） |
 |---|---|---|
 | Embedding | OpenAI-compatible `/embeddings` | `batch_size=32`；多输入批次收到 HTTP 400 时按输入顺序二分并重试，单条仍被拒绝则返回 `EMBEDDING_REQUEST_REJECTED`；维度由模型返回后校验并固定 Elasticsearch index mapping。 |
-| Chunking | Markdown/文本递归切分 | `chunk_size=800` 字符，`overlap=120`；代码按函数/类优先，回退到行边界。 |
+| Chunking | 多格式递归切分 | `chunk_size=800` 字符，`overlap=120`；代码按函数/类优先；CHM 固定 Topic/标题硬边界，超长标题段按段落→句子→词法 token 递归切分。 |
 | Dense 召回 | Cosine KNN | `dense_top_k=20` |
 | Sparse 召回 | Elasticsearch `match` / `multi_match` BM25 | `sparse_top_k=20` |
 | 融合 | Reciprocal Rank Fusion | `rrf_k=60` |
@@ -364,7 +370,7 @@ after_relay_publish_before_mark
 - `make ci` 是 `make lint` 与 `make test` 的完整无 Secret 门禁，也是 Git Hook 和快速 GitHub Actions 的唯一公共入口。真实基础设施验收必须另行使用 `make docker-test SUITE=integration|resilience|eval|all`。
 - `domain/`、`application/`、`ingestion/`、`retrieval/` 的 line coverage 不低于 85%；新增代码不低于 90%。
 - `ports/` 所有抽象方法必须至少有一个 contract 测试覆盖。
-- 发布前 E2E 必须覆盖 `.md`、`.txt`、代码文件和文本 PDF 各一例。
+- 发布前 E2E 必须覆盖 `.md`、`.txt`、代码文件和文本 PDF 各一例；CHM/CHI 使用本地提供且被 Git 忽略的真实手册进行验收，不得把真实手册提交到仓库，也不得把注入 extractor 的 Functional 测试表述为真实解包验收。
 - 离线评测集初始至少 30 个问题，每题提供 `relevant_chunk_ids`；真实评测还必须把固定语料经 gRPC 摄取到真实 ES，并使用真实模型执行 30 问。两者发布门槛均为 `Recall@6 ≥ 0.85`、`MRR@6 ≥ 0.70`、locator accuracy `= 1.0`；不得通过修改向量 snapshot、自由文本 snapshot 或降低阈值消除失败。
 
 ### 4.7 本地提交质量门禁（Git Hook）
@@ -560,7 +566,7 @@ application/retrieval_service.py
 | 实体 | 关键字段 | 职责 |
 |---|---|---|
 | `Dataset` | `id, name, embedding_model, embedding_dimension, search_schema_version, created_at` | 一组可检索文档的逻辑边界；由 `CreateDataset` 创建；`search_schema_version` 仅表示 ES mapping/schema，不表示文档内容版本。 |
-| `Document` | `id, dataset_id, source_name, object_key, file_sha256, status, active_version, next_index_version, lifecycle_generation` | 原文件及其当前可见索引版本；`next_index_version` 在行锁内递增分配；删除递增 `lifecycle_generation` 形成 tombstone fence；状态为 `PENDING/READY/FAILED/DELETED`。 |
+| `Document` | `id, dataset_id, source_name, object_key, file_sha256, status, active_version, next_index_version, lifecycle_generation` | 原文件及其当前可见索引版本；一个 CHM 仍只对应一个 Document，HTML Topic 仅作为 Chunk metadata 中的逻辑子文档；`next_index_version` 在行锁内递增分配；删除递增 `lifecycle_generation` 形成 tombstone fence；状态为 `PENDING/READY/FAILED/DELETED`。 |
 | `IngestionFingerprint` | `dataset_id, file_sha256, config_digest, document_id, job_id, state` | 以唯一键串行化同内容/配置的新文档上传；`PENDING/RUNNING/SUCCEEDED/FAILED_RETRYABLE` 指向 canonical Job；无正式对象的不可恢复失败或已删除 Document 为 `RELEASED`，可被下一次上传重新占用。 |
 | `Job` | `id, type, document_id, config_digest, index_version, document_generation, status, progress, error, retryable, retry_count, cancel_requested_at, retry_of_job_id, is_system` | 用户可查询的一次摄取或删除聚合；`document_generation` 是提交时的 fence 快照；系统清理 Job 标记 `is_system=true`，不保存 NATS delivery lease。 |
 | `Task` | `id, job_id, type, status, attempt, last_delivery_sequence, checkpoint, error` | Worker 最小调度单元；`last_delivery_sequence` 用于条件认领与 attempt 去重；NATS 消息只携带 `task_id`。MVP 类型为 `INGEST_DOCUMENT`、`CLEANUP_DOCUMENT` 或 `CLEANUP_INDEX_VERSION`。 |
@@ -581,7 +587,7 @@ es_record_id = f"{document_id}:{index_version}:{chunk_id}"
 
 `canonical_json` 指字段名排序、无多余空白、UTF-8 编码的 JSON 序列化，避免直接字符串拼接产生边界歧义。`file_sha256` 是原始上传字节的 SHA-256，用于文件去重；`content_sha256` 是单个 Chunk 的 `content_with_weight` UTF-8 字节的 SHA-256，用于变更审计；`config_digest` 是 parser/chunker/embedding 配置的 SHA-256。`content_with_weight` 是完成解析、规范化、切块和必要元数据增强后的最终可检索正文；它与 `document_id` 拼接时不插入分隔符，按 UTF-8 编码后计算 64 位 xxHash，输出 `chunk_id` 的 16 位十六进制字符串。这与 RAGFlow 当前 Python Task Executor 的普通 Chunk 规则一致：`xxhash.xxh64((content_with_weight + str(doc_id)).encode("utf-8", "surrogatepass")).hexdigest()`。[RAGFlow Chunk ID 生成（task_executor.py:407）](vscode://file/D:/AI/github/ragflow/rag/svr/task_executor.py:407:1)
 
-该规则的语义是：同一 `document_id` 内，最终文本完全相同的 Chunk 会得到相同 ID；文本或所属 Document 任一变化，ID 都会变化。它天然支持至少一次任务重投后的幂等 upsert，但也意味着**同一文档中内容完全相同的重复 Chunk 会折叠为同一索引记录**。MVP 必须在切块测试中明确接受该语义；若业务要求保留相同文本的两个不同位置，应有意偏离 RAGFlow，改为把 `ordinal` 或位置范围纳入 hash 输入。
+该规则的语义是：同一 `document_id` 内，最终文本完全相同的 Chunk 会得到相同 ID；文本或所属 Document 任一变化，ID 都会变化。它天然支持至少一次任务重投后的幂等 upsert，但也意味着**同一文档中内容完全相同的重复 Chunk 会折叠为同一索引记录**。Pipeline 必须在调用 Embedding 前按最终 `chunk_id` 稳定去重并保留首次出现的正文、ordinal 和来源定位，使向量、ES 记录与 MySQL manifest 保持一一对应。MVP 必须在切块测试中明确接受该语义；若业务要求保留相同文本的两个不同位置，应有意偏离 RAGFlow，改为把 `ordinal` 或位置范围纳入 hash 输入。
 
 `index_version` 仍用于控制“哪一轮索引对用户可见”，但不参与 `chunk_id` 计算：文件内容或解析/切块配置变化时新建版本；`target_document_id` 的重建在 Document 行锁内递增 `next_index_version` 并创建 `IndexBuild(BUILDING)`，数据库以 `(document_id, index_version)` 唯一约束兜底。ES 以 `es_record_id` 保留新旧版本，避免相同 Chunk 覆盖。全部新版本 Chunk 写入后，Worker 只在 Document generation fence 仍匹配时于 MySQL 事务内写 Chunk manifest、将 IndexBuild 置为 `ACTIVE` 并更新 `Document.active_version`。检索先从 ES 过量召回候选，再批量读取 MySQL 的 `Document.active_version` 并剔除不匹配版本；因此切换前只见旧版本，切换后只见完整新版本，旧 ES 记录由清理 Task 异步删除。若 Job 终态失败或被删除 fence 拦截，IndexBuild 置为 `ABANDONED`，并创建 `is_system=true` 的 `CLEANUP_INDEX_VERSION` Job/Task 删除该不可见 ES 版本；重投同一摄取 Task 仍可对同一 `BUILDING` 版本做幂等 upsert。
 
@@ -610,7 +616,11 @@ class ModelGateway(Protocol):
 
 `SearchEngine` 不能只暴露 `similarity_search`。它必须从接口层支持 metadata filter、全文/稠密多路匹配与删除；`retrieval/hybrid.py` 是 Dense/BM25 候选的唯一 RRF 融合和稳定排序位置，避免适配器和算法层重复融合。这是从 RAGFlow `DocStoreConnection` 的成熟检索抽象中借鉴的关键点。
 
-`RetrievalService` 必须向 ES 请求大于最终 Top-K 的候选，再经 `MetadataRepository` 批量读取候选 Document 的 `active_version` 与删除状态，剔除版本不匹配或已删除的候选后才执行 RRF。若启用重排，由 `RetrievalService` 调用 `ModelGateway.rerank`，把返回分数交给纯函数 `retrieval/rerank.py` 稳定排序；模型不可用且错误可降级时只返回 RRF 排序。最后由 `ContextBuilder` 输出 `ContextPlan(selected_evidence, estimated_tokens, omitted_chunk_ids)`，而不是 Prompt 字符串。这个 MySQL 复核步骤是索引版本切换的可见性保障，不能下沉到 ES adapter。
+`RetrievalService` 必须向 ES 请求大于最终 Top-K 的候选，再经 `MetadataRepository` 批量读取候选 Document 的 `active_version` 与删除状态，剔除版本不匹配或已删除的候选后才执行 RRF。若启用重排，由 `RetrievalService` 调用 `ModelGateway.rerank`，把返回分数交给纯函数 `retrieval/rerank.py` 稳定排序；模型不可用且错误可降级时只返回 RRF 排序。查询中出现 C API/枚举形式的显式标识符时，应用层可在不修改各路原始分数的前提下，对大小写不敏感的完整标识符命中执行稳定优先级调整。
+
+最终 Top-K 中的 CHI 锚点若包含 `associated_chm_source_name` 和 `topic_path`，`RetrievalService` 必须通过 `SearchEngine.topic_references` 在同一 Dataset 中定位关联 CHM 的对应 Topic；查询必须同时约束原 filters、CHM `source_name`、`source_type=chm` 和 `topic_path`，并优先使用 CHI `anchor` 与原查询选择最相关 Chunk。返回结果仍须经 MySQL active-version 复核；若关联正文不在直接检索结果中，新增的 Evidence 标记 `retrieval_role=chi_topic_reference`、`anchor_chunk_id` 和 `chi_topic_url`，且不伪造 Dense/BM25/RRF/Rerank 分数；若同一 CHM Chunk 已由普通混合检索直接命中，则保留其原始位置和真实分数，仅增加 `chi_reference_anchor_chunk_id` 与 `chi_topic_url`，不得复制同一正文。找不到同名 CHM 时保留 CHI Evidence 并正常降级。
+
+对最终 Top-K 中的 CHM 直接检索锚点及 CHI 定位出的 CHM Topic 锚点，`RetrievalService` 必须通过 `SearchEngine.topic_neighbors` 批量补充 ordinal 前后各一个 Chunk，并同时约束 `dataset_id`、原 filters、`document_id`、`index_version` 和 `topic_path`，不得跨 Document、版本或 Topic。直接锚点必须优先进入预算；邻接 Evidence 在 metadata 中标记 `retrieval_role=topic_neighbor`、`anchor_chunk_id` 和 `neighbor_distance`，且不伪造 Dense/BM25/RRF/Rerank 分数。这里的 Top-K 是直接检索锚点数量，CHI Topic 关联和邻接扩展后响应 Evidence 可以多于 Top-K，但最终仍由 `ContextBuilder` 按 `max_context_tokens` 选择完整 Evidence 并输出 `ContextPlan(selected_evidence, estimated_tokens, omitted_chunk_ids)`，而不是 Prompt 字符串。关联和邻接查询不可替代 MySQL active-version 复核；这个复核步骤是索引版本切换的可见性保障，不能下沉到 ES adapter。
 
 ### 5.5 摄取执行流程
 
@@ -801,7 +811,7 @@ Python RAG: 给定合法 Dataset 和 Query，返回可靠、可解释、可引�
 
 ## 附录 A：MVP 发布验收清单
 
-- [x] 支持 Markdown、TXT、代码文件、文本 PDF 上传与解析；不支持的类型返回确定错误。
+- [x] 支持 Markdown、TXT、代码文件、文本 PDF、CHM 和 CHI 上传与解析；CHM 以 Topic/标题为硬边界并返回路径/锚点来源，CHI 关键词索引可作为同 Dataset 的辅助检索文档；不支持的类型返回确定错误。
 - [x] 上传立即返回 `document_id`/`job_id`；摄取在后台执行并能查询进度。
 - [x] 相同 `idempotency_key` 的提交返回同一 Job；相同内容和配置的不同提交不产生重复索引；配置/内容变化产生新版本。
 - [x] Task 与 OutboxEvent 在一个 MySQL 事务中创建；NATS 短暂不可用后，Relay 能补发且不丢摄取任务。

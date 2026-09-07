@@ -5,7 +5,13 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
-from rag_mvp.ports.search_engine import IndexedChunk, SearchCandidate, SearchRequest
+from rag_mvp.ports.search_engine import (
+    IndexedChunk,
+    SearchCandidate,
+    SearchRequest,
+    TopicNeighborRequest,
+    TopicReferenceRequest,
+)
 
 
 def _cosine(left: tuple[float, ...], right: tuple[float, ...]) -> float:
@@ -107,4 +113,82 @@ class FakeSearchEngine:
         # 稀疏召回同样保持确定的排序，方便精确断言融合结果。
         return tuple(
             sorted(candidates, key=lambda item: (-item.score, item.record_id))[: request.top_k]
+        )
+
+    async def topic_neighbors(self, request: TopicNeighborRequest) -> Sequence[SearchCandidate]:
+        """返回同文档、版本和 CHM Topic 内的确定性相邻 Chunk。"""
+
+        candidates: list[SearchCandidate] = []
+        filter_request = SearchRequest(request.dataset_id, 1, filters=request.filters)
+        for indexed in self.records.values():
+            if not self._matches(indexed, filter_request):
+                continue
+            chunk = indexed.chunk
+            if not any(
+                chunk.document_id == anchor.document_id
+                and chunk.index_version == anchor.index_version
+                and chunk.metadata.get("topic_path") == anchor.topic_path
+                and abs(chunk.ordinal - anchor.ordinal) <= request.radius
+                for anchor in request.anchors
+            ):
+                continue
+            candidates.append(
+                SearchCandidate(
+                    record_id=indexed.record_id,
+                    dataset_id=indexed.dataset_id,
+                    chunk=chunk,
+                    score=0.0,
+                )
+            )
+        return tuple(
+            sorted(
+                candidates,
+                key=lambda item: (
+                    item.chunk.document_id,
+                    item.chunk.index_version,
+                    item.chunk.ordinal,
+                    item.record_id,
+                ),
+            )
+        )
+
+    async def topic_references(self, request: TopicReferenceRequest) -> Sequence[SearchCandidate]:
+        """Resolve CHI references to matching CHM records in deterministic score order."""
+
+        filter_request = SearchRequest(request.dataset_id, 1, filters=request.filters)
+        candidates: list[SearchCandidate] = []
+        query = request.query.casefold()
+        for indexed in self.records.values():
+            if not self._matches(indexed, filter_request):
+                continue
+            chunk = indexed.chunk
+            matching_anchors = [
+                anchor
+                for anchor in request.anchors
+                if chunk.source_name == anchor.associated_source_name
+                and chunk.metadata.get("source_type") == "chm"
+                and chunk.metadata.get("topic_path") == anchor.topic_path
+            ]
+            if not matching_anchors:
+                continue
+            anchor_match = any(
+                anchor.anchor and chunk.locator.metadata.get("anchor") == anchor.anchor
+                for anchor in matching_anchors
+            )
+            score = float(anchor_match) * 10.0 + float(
+                query in chunk.content_with_weight.casefold()
+            )
+            candidates.append(
+                SearchCandidate(
+                    record_id=indexed.record_id,
+                    dataset_id=indexed.dataset_id,
+                    chunk=chunk,
+                    score=score,
+                )
+            )
+        return tuple(
+            sorted(
+                candidates,
+                key=lambda item: (-item.score, item.chunk.ordinal, item.record_id),
+            )[: min(len(request.anchors) * 12, 100)]
         )

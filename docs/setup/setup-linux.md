@@ -10,7 +10,7 @@
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl git make
+sudo apt-get install -y ca-certificates curl git make libchm-bin
 ```
 
 确认工具可用：

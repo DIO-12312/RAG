@@ -15,7 +15,13 @@ from rag_mvp.adapters.search_engine.mapping import (
     index_definition,
 )
 from rag_mvp.domain.errors import DomainError, DomainFailure
-from rag_mvp.ports.search_engine import IndexedChunk, SearchCandidate, SearchRequest
+from rag_mvp.ports.search_engine import (
+    IndexedChunk,
+    SearchCandidate,
+    SearchRequest,
+    TopicNeighborRequest,
+    TopicReferenceRequest,
+)
 
 FILTER_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -159,6 +165,18 @@ class ElasticsearchSearchEngine:
                 query={
                     "bool": {
                         "must": [{"match": {"content_with_weight": request.query}}],
+                        # CHM 前缀包含 Topic/Heading/Symbol；短语命中这些
+                        # 标识时给予额外 BM25 权重，避免概览页压过精确 Topic。
+                        "should": [
+                            {
+                                "match_phrase": {
+                                    "content_with_weight": {
+                                        "query": request.query,
+                                        "boost": 10.0,
+                                    }
+                                }
+                            }
+                        ],
                         "filter": filters,
                     }
                 },
@@ -168,6 +186,139 @@ class ElasticsearchSearchEngine:
             )
         except (ApiError, TransportError) as exc:
             raise self._unavailable("BM25 search failed") from exc
+        return self._candidates(cast(Mapping[str, Any], response.body))
+
+    async def topic_neighbors(self, request: TopicNeighborRequest) -> Sequence[SearchCandidate]:
+        """Fetch physical neighbors without assigning them retrieval-route scores."""
+
+        if not request.anchors:
+            return ()
+        filters = self._request_filters(
+            SearchRequest(
+                dataset_id=request.dataset_id,
+                top_k=1,
+                filters=request.filters,
+            )
+        )
+        neighborhoods = [
+            {
+                "bool": {
+                    "filter": [
+                        {"term": {"document_id": anchor.document_id}},
+                        {"term": {"index_version": anchor.index_version}},
+                        {"term": {"metadata.topic_path": anchor.topic_path}},
+                        {
+                            "range": {
+                                "ordinal": {
+                                    "gte": max(0, anchor.ordinal - request.radius),
+                                    "lte": anchor.ordinal + request.radius,
+                                }
+                            }
+                        },
+                    ]
+                }
+            }
+            for anchor in request.anchors
+        ]
+        try:
+            response = await self._client.search(
+                index=self._index_name,
+                query={
+                    "bool": {
+                        "must": [
+                            {"match_all": {}},
+                            {
+                                "bool": {
+                                    "should": neighborhoods,
+                                    "minimum_should_match": 1,
+                                }
+                            },
+                        ],
+                        "filter": filters,
+                    }
+                },
+                size=min(len(request.anchors) * (request.radius * 2 + 1), 1000),
+                sort=[
+                    {"document_id": {"order": "asc"}},
+                    {"index_version": {"order": "asc"}},
+                    {"ordinal": {"order": "asc"}},
+                    {"record_id": {"order": "asc"}},
+                ],
+                track_scores=True,
+            )
+        except (ApiError, TransportError) as exc:
+            raise self._unavailable("topic neighbor lookup failed") from exc
+        return self._candidates(cast(Mapping[str, Any], response.body))
+
+    async def topic_references(self, request: TopicReferenceRequest) -> Sequence[SearchCandidate]:
+        """Resolve CHI Topic links to the associated CHM's most relevant chunks."""
+
+        if not request.anchors:
+            return ()
+        filters = self._request_filters(
+            SearchRequest(
+                dataset_id=request.dataset_id,
+                top_k=1,
+                filters=request.filters,
+            )
+        )
+        topic_queries: list[dict[str, Any]] = []
+        for anchor in request.anchors:
+            score_hints: list[dict[str, Any]] = [
+                {
+                    "match_phrase": {
+                        "content_with_weight": {
+                            "query": request.query,
+                            "boost": 12.0,
+                        }
+                    }
+                },
+                {
+                    "match": {
+                        "content_with_weight": {
+                            "query": request.query,
+                            "boost": 4.0,
+                        }
+                    }
+                },
+            ]
+            if anchor.anchor:
+                score_hints.append(
+                    {"term": {"locator.metadata.anchor": {"value": anchor.anchor, "boost": 25.0}}}
+                )
+            topic_queries.append(
+                {
+                    "bool": {
+                        "must": [{"match_all": {}}],
+                        "filter": [
+                            {"term": {"source_name": anchor.associated_source_name}},
+                            {"term": {"metadata.source_type": "chm"}},
+                            {"term": {"metadata.topic_path": anchor.topic_path}},
+                        ],
+                        "should": score_hints,
+                    }
+                }
+            )
+        try:
+            response = await self._client.search(
+                index=self._index_name,
+                query={
+                    "bool": {
+                        "should": topic_queries,
+                        "minimum_should_match": 1,
+                        "filter": filters,
+                    }
+                },
+                size=min(len(request.anchors) * 12, 100),
+                sort=[
+                    {"_score": {"order": "desc"}},
+                    {"ordinal": {"order": "asc"}},
+                    {"record_id": {"order": "asc"}},
+                ],
+                track_scores=True,
+            )
+        except (ApiError, TransportError) as exc:
+            raise self._unavailable("CHI Topic reference lookup failed") from exc
         return self._candidates(cast(Mapping[str, Any], response.body))
 
     # 内部辅助：完成 delete_by_filters 所需的局部转换或校验。

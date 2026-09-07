@@ -27,7 +27,16 @@ def test_makefile_offline_targets_are_commented_earthly_only_entrypoints() -> No
     assert "EARTHLY_ENV_FILE ?= .earthly.env" in makefile
     assert "EARTHLY_FLAGS ?=" in makefile
     assert (ROOT / ".earthly.env").read_text(encoding="utf-8").startswith("# Intentionally empty")
-    earthfile_targets = {"proto", "lint", "test", "ci", "docker-up", "docker-test", "docker-down", "run"}
+    earthfile_targets = {
+        "proto",
+        "lint",
+        "test",
+        "ci",
+        "docker-up",
+        "docker-test",
+        "docker-down",
+        "run",
+    }
     execution_recipes = [
         match.group("recipe")
         for match in re.finditer(

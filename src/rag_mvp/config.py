@@ -81,9 +81,14 @@ class Settings(BaseSettings):
     object_root: Path = Path("data/objects")
 
     max_upload_bytes: int = Field(default=16 * 1024 * 1024, ge=1)
-    parser_version: str = "source-router-v1"
+    parser_version: str = "source-router-v5"
     chunk_size: int = Field(default=800, ge=1)
     chunk_overlap: int = Field(default=120, ge=0)
+    chm_extractor_path: str = "extract_chmLib"
+    chm_extract_timeout_seconds: float = Field(default=30.0, gt=0)
+    chm_max_files: int = Field(default=8192, ge=1)
+    chm_max_topics: int = Field(default=4096, ge=1)
+    chm_max_expanded_bytes: int = Field(default=128 * 1024 * 1024, ge=1)
     max_user_retries: int = Field(default=3, ge=1)
     worker_idle_interval_seconds: float = Field(default=0.1, gt=0)
     outbox_poll_interval_seconds: float = Field(default=0.25, gt=0)
@@ -213,6 +218,8 @@ class Settings(BaseSettings):
 
         if not self.parser_version.strip():
             raise ValueError("parser_version must not be empty")
+        if not self.chm_extractor_path.strip():
+            raise ValueError("chm_extractor_path must not be empty")
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap must be smaller than chunk_size")
         checkpoint_names = self.failpoint_checkpoint_names

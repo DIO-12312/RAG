@@ -32,6 +32,70 @@ class SearchRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class TopicNeighborAnchor:
+    document_id: str
+    index_version: int
+    ordinal: int
+    topic_path: str
+
+    def __post_init__(self) -> None:
+        if not self.document_id.strip():
+            raise ValueError("document_id must not be empty")
+        if self.index_version < 1:
+            raise ValueError("index_version must be at least 1")
+        if self.ordinal < 0:
+            raise ValueError("ordinal must not be negative")
+        if not self.topic_path.strip():
+            raise ValueError("topic_path must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class TopicNeighborRequest:
+    dataset_id: str
+    anchors: tuple[TopicNeighborAnchor, ...]
+    radius: int = 1
+    filters: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.dataset_id.strip():
+            raise ValueError("dataset_id must not be empty")
+        if self.radius < 1:
+            raise ValueError("radius must be at least 1")
+
+
+@dataclass(frozen=True, slots=True)
+class TopicReferenceAnchor:
+    """A CHI hit that points to one Topic in its associated CHM document."""
+
+    anchor_chunk_id: str
+    associated_source_name: str
+    topic_path: str
+    anchor: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.anchor_chunk_id.strip():
+            raise ValueError("anchor_chunk_id must not be empty")
+        if not self.associated_source_name.strip():
+            raise ValueError("associated_source_name must not be empty")
+        if not self.topic_path.strip():
+            raise ValueError("topic_path must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class TopicReferenceRequest:
+    dataset_id: str
+    query: str
+    anchors: tuple[TopicReferenceAnchor, ...]
+    filters: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.dataset_id.strip():
+            raise ValueError("dataset_id must not be empty")
+        if not self.query.strip():
+            raise ValueError("query must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
 class SearchCandidate:
     record_id: str
     dataset_id: str
@@ -59,3 +123,11 @@ class SearchEngine(Protocol):
 
     # 执行稀疏检索该方法负责的领域数据或基础设施状态。
     async def sparse_search(self, request: SearchRequest) -> Sequence[SearchCandidate]: ...
+
+    # 读取 CHM 锚点同 Topic 内的相邻物理 Chunk，供应用层进行上下文扩展。
+    async def topic_neighbors(self, request: TopicNeighborRequest) -> Sequence[SearchCandidate]: ...
+
+    # 按 CHI 的 Topic 路径定位同 Dataset 内关联 CHM 的正文 Chunk。
+    async def topic_references(
+        self, request: TopicReferenceRequest
+    ) -> Sequence[SearchCandidate]: ...

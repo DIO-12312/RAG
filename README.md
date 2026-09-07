@@ -12,7 +12,7 @@
 ## 能做什么
 
 - 通过 gRPC 创建 Dataset、流式上传文档、查询/重试/取消 Job、检索和删除文档。
-- 解析 TXT、Markdown、代码和文本型 PDF，保留文件名、页码、行号、代码符号等来源定位。
+- 解析 TXT、Markdown、代码、文本型 PDF、CHM 和 CHI；一个 CHM 是一个 Domain Document，每个 HTML Topic 是带标题层级、路径和锚点定位的逻辑子文档。
 - 执行 `parse → normalize → chunk → embed → index`，以稳定 `chunk_id` 和索引版本保证重放幂等。
 - 使用 Elasticsearch Dense KNN 与 BM25 双路召回，由纯算法层执行 RRF 融合、可选 Rerank 和上下文预算裁剪。
 - 使用 MySQL 事务、Transactional Outbox、NATS ACK/NAK/redelivery、generation fence 和异步清理处理重复请求与进程崩溃。
@@ -113,6 +113,15 @@ uv run rag-dev submit-document --request-id demo-upload-1 --idempotency-key demo
 uv run rag-dev get-job --request-id demo-job-1 --job-id JOB_ID
 uv run rag-dev retrieve --request-id demo-query-1 --dataset-id DATASET_ID --query "文档讲了什么？"
 ```
+
+CHM 文件使用相同的上传命令，只需将 `--file` 指向 `.chm`。Docker 镜像已经安装解包运行时；若直接在 Debian/Ubuntu 主机启动 `rag-worker`，需先安装 `libchm-bin`。CHM 按 Topic 硬边界、Topic 内 `h1`～`h6` 标题切分，超长标题段再按段落、句子和词法 token 边界递归切分。检索结果的 `metadata`/`locator.metadata` 会返回 `topic_path`、`topic_title`、`topic_order`、`heading_path` 和可选 `anchor`。
+
+`.chi` 是 CHM 的关键词索引侧车。将与 CHM 同名的 `.chi` 作为第二个文档上传到同一个 Dataset（例如先上传
+`ZRDDS_C_UserManual.chm`，再上传 `ZRDDS_C_UserManual.chi`），系统会按 `$WWKeywordLinks/BTree` 的二进制 listing block
+读取关键词和 Topic index，再通过 `#TOPICS/#URLTBL/#URLSTR/#STRINGS` 恢复 Topic 标题、HTML 路径和锚点。CHI 作为
+`logical_document_type=chm_index` 的辅助文档参与 Dense/BM25/RRF；命中后，检索服务还会在同一 Dataset 内按同名 CHM
+和 `topic_path` 回查正文，并继续补充同 Topic 邻居。返回 evidence 可通过 `source_type=chi`、`chi_stream`、
+`associated_chm_source_name`、`topic_url` 和 `retrieval_role=chi_topic_reference` 区分索引命中与关联正文。
 
 完整命令面见 `uv run rag-dev --help`；protobuf 的唯一权威来源是 [`proto/rag/v1/rag_service.proto`](proto/rag/v1/rag_service.proto)。Server Reflection 只允许在开发环境启用。
 

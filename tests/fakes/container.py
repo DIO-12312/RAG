@@ -18,6 +18,7 @@ from rag_mvp.ingestion.pipeline import IngestionPipeline
 from rag_mvp.ingestion.worker import worker_once
 from rag_mvp.outbox.finalizer import finalize_once
 from rag_mvp.outbox.relay import relay_once
+from rag_mvp.ports.parser import Parser
 from rag_mvp.rpc.rag_service import RagService
 from tests.fakes.metadata import FakeMetadataRepository
 from tests.fakes.model import FakeModelGateway
@@ -38,7 +39,13 @@ class MockFunctionalHarness:
     rpc: RagService
 
     @classmethod
-    def build(cls, object_root: Path, now: datetime) -> MockFunctionalHarness:
+    def build(
+        cls,
+        object_root: Path,
+        now: datetime,
+        *,
+        parser: Parser | None = None,
+    ) -> MockFunctionalHarness:
         """构造可用于功能测试的完整模拟容器。"""
         metadata = FakeMetadataRepository()
         storage = LocalObjectStorage(object_root)
@@ -57,7 +64,7 @@ class MockFunctionalHarness:
             metadata,
             IngestionPipeline(
                 storage,
-                SourceParserRouter(),
+                parser or SourceParserRouter(),
                 RecursiveChunker(800, 120),
                 model,
                 search,

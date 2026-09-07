@@ -59,7 +59,7 @@ docker run --rm hello-world
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl git make
+sudo apt-get install -y ca-certificates curl git make libchm-bin
 ```
 
 安装 uv 和 Python 3.12：

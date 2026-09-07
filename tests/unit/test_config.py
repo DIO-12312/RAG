@@ -57,6 +57,8 @@ def test_settings_can_be_constructed_explicitly_for_tests(tmp_path: Path) -> Non
     assert settings.object_root == tmp_path
     assert settings.migrations_root == Path(".")
     assert settings.grpc_address == "127.0.0.1:50052"
+    assert settings.parser_version == "source-router-v5"
+    assert settings.chm_extractor_path == "extract_chmLib"
 
 
 def test_settings_builds_a_normalized_secret_embedding_profile() -> None:
@@ -140,6 +142,7 @@ def test_embedding_profile_rejects_missing_or_partial_configuration() -> None:
     "overrides,error",
     [
         ({"parser_version": " "}, "parser_version"),
+        ({"chm_extractor_path": " "}, "chm_extractor_path"),
         ({"chunk_size": 100, "chunk_overlap": 100}, "chunk_overlap"),
         ({"chunk_size": 100, "chunk_overlap": 101}, "chunk_overlap"),
     ],

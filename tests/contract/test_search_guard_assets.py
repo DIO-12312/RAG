@@ -134,6 +134,7 @@ def test_search_guard_assets_pin_tls_and_least_privilege() -> None:
     assert '"rag-chunks-v1*"' in roles
     assert "indices:admin/get" in roles
     assert "indices:data/write/bulk*" in roles
+    assert '"indices:admin/refresh[s]"' in roles
 
 
 def test_first_bootstrap_declares_search_guard_principals_in_extractor_order() -> None:

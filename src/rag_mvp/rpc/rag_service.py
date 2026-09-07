@@ -190,7 +190,7 @@ class RagService:
         jobs: JobService | None = None,
         retrieval: RetrievalService | None = None,
         now: Callable[[], datetime] | None = None,
-        parser_version: str = "source-router-v1",
+        parser_version: str = "source-router-v5",
         chunk_size: int = 800,
         chunk_overlap: int = 120,
         embedding_model: str | None = None,

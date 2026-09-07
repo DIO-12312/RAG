@@ -6,7 +6,7 @@ from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.ids import chunk_id, content_sha256, es_record_id
 from rag_mvp.domain.models import Chunk
 from rag_mvp.ingestion.checkpoints import Checkpoint, Failpoint
-from rag_mvp.ports.chunker import Chunker
+from rag_mvp.ports.chunker import ChunkDraft, Chunker
 from rag_mvp.ports.metadata import TaskClaim
 from rag_mvp.ports.model import ModelGateway, model_for_dataset
 from rag_mvp.ports.parser import Parser
@@ -62,9 +62,18 @@ class IngestionPipeline:
                 )
             )
 
+        # RAGFlow 的逻辑 Chunk ID 只取决于最终正文和 document_id。同一文档中
+        # 完全相同的正文因此必须折叠为一个逻辑 Chunk，否则 ES 会覆盖同一物理
+        # 记录，而 MySQL manifest 会因唯一键重复而在完成阶段失败。按首次出现
+        # 顺序去重也能避免为注定折叠的内容重复调用 Embedding。
+        unique_drafts: dict[str, ChunkDraft] = {}
+        for draft in drafts:
+            logical_id = chunk_id(draft.content_with_weight, document.id)
+            unique_drafts.setdefault(logical_id, draft)
+
         model = model_for_dataset(self._model, claim.dataset)
-        vectors = await model.embed([draft.content_with_weight for draft in drafts])
-        if len(vectors) != len(drafts):
+        vectors = await model.embed([draft.content_with_weight for draft in unique_drafts.values()])
+        if len(vectors) != len(unique_drafts):
             raise DomainError(
                 DomainFailure(
                     code="EMBEDDING_COUNT_MISMATCH",
@@ -75,7 +84,7 @@ class IngestionPipeline:
 
         chunks = tuple(
             Chunk(
-                id=chunk_id(draft.content_with_weight, document.id),
+                id=logical_id,
                 document_id=document.id,
                 index_version=claim.job.index_version,
                 ordinal=draft.ordinal,
@@ -85,7 +94,7 @@ class IngestionPipeline:
                 locator=draft.locator,
                 metadata=draft.metadata,
             )
-            for draft in drafts
+            for logical_id, draft in unique_drafts.items()
         )
         indexed = tuple(
             IndexedChunk(

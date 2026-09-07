@@ -34,7 +34,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN addgroup --system rag && \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libchm-bin && \
+    rm -rf /var/lib/apt/lists/* && \
+    addgroup --system rag && \
     adduser --system --ingroup rag rag && \
     mkdir -p /app/data/objects && \
     chown rag:rag /app /app/data /app/data/objects

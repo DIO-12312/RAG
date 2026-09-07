@@ -201,7 +201,13 @@ async def build_worker_container(
         container.failpoint = failpoint
         pipeline = IngestionPipeline(
             storage,
-            SourceParserRouter(),
+            SourceParserRouter(
+                chm_extractor_path=settings.chm_extractor_path,
+                chm_extract_timeout_seconds=settings.chm_extract_timeout_seconds,
+                chm_max_files=settings.chm_max_files,
+                chm_max_topics=settings.chm_max_topics,
+                chm_max_expanded_bytes=settings.chm_max_expanded_bytes,
+            ),
             RecursiveChunker(settings.chunk_size, settings.chunk_overlap),
             model,
             search,

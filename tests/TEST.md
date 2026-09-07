@@ -44,6 +44,8 @@ tests/
 ├─ e2e/                                     # 真实 Compose 与模型的 gRPC 业务闭环
 │  ├─ conftest.py                            # generated gRPC client、真实运行配置、Job 与 Dataset purge 轮询 helpers
 │  ├─ test_local_computer_architecture_pdf.py # 可选本地真实 PDF 的长文档用户场景
+│  ├─ test_real_chm_extended_retrieval.py     # 复用已有 CHM 知识库的 20 问扩展检索与 JSON 报告
+│  ├─ test_real_chm_upload_ingest_retrieve.py # 本地真实 CHM 摄取、Topic 来源和 Recall/MRR 验收
 │  └─ test_real_upload_ingest_retrieve.py
 ├─ eval/                                    # 固定问题集的检索质量评测
 │  ├─ conftest.py                            # 复用真实 E2E gRPC client 与模型运行配置
@@ -78,6 +80,7 @@ tests/
 │  └─ reliability_matrix.json
 ├─ functional/                              # 无 Docker 的真实调用链闭环
 │  ├─ test_mock_cancel_job.py
+│  ├─ test_mock_chm_ingestion.py
 │  ├─ test_mock_dedup_and_redelivery.py
 │  ├─ test_mock_delete_document.py
 │  ├─ test_mock_four_formats.py
@@ -125,6 +128,7 @@ tests/
    │  ├─ test_models.py
    │  └─ test_state_machines.py
    ├─ ingestion/
+   │  ├─ test_chm_parser.py
    │  ├─ test_failpoints.py
    │  ├─ test_multiformat_parsers.py
    │  ├─ test_pipeline.py
@@ -202,6 +206,10 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | `application/test_retrieval_service.py` | `test_dense_retrieve_filters_stale_versions_and_preserves_scores` | 过滤已删除或非 active version 命中，同时保留阶段分数。 |
 | 同上 | `test_retrieve_rejects_invalid_or_unavailable_requests` | 非法请求、数据集不可用等场景返回稳定失败。 |
 | 同上 | `test_rerank_failure_degrades_to_rrf_evidence` | Rerank 不可用时降级为 RRF evidence。 |
+| 同上 | `test_chm_retrieve_appends_same_topic_neighbors_before_context_budget` | CHM Top-K 锚点在预算裁剪前补充同 Document/version/Topic 的前后相邻 Chunk，邻接 evidence 标明角色、锚点和距离且不伪造检索分数。 |
+| 同上 | `test_chi_hit_resolves_associated_chm_topic_and_then_expands_neighbors` | CHI 命中按同 Dataset、同名 CHM 和 Topic/anchor 回查正文，经 MySQL active-version 复核后继续扩展同 Topic 邻居，并区分两类辅助 Evidence。 |
+| 同上 | `test_chi_reference_replaces_duplicate_direct_chm_anchor` | CHI 回指与普通混合检索命中同一 CHM Chunk 时不复制正文：保留直接锚点位置和真实分数，并附加 CHI 桥接审计字段。 |
+| 同上 | `test_identifier_priority_supports_mixed_case_c_api_names` | 显式混合大小写 C API 名完整命中优先于更高 RRF 的无关候选，覆盖 `DDS_DomainParticipantFactory_create_participant` 形式。 |
 | `domain/test_ids.py` | `test_new_id_is_uuid7_compatible` | 新 ID 符合 UUIDv7 兼容格式。 |
 | 同上 | `test_canonical_json_and_digests_are_stable` | 规范 JSON 与 digest 在相同输入下稳定。 |
 | 同上 | `test_chunk_id_matches_ragflow_xxhash64_rule` | `chunk_id` 遵循 RAGFlow xxHash64 规则。 |
@@ -226,7 +234,21 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_router_selects_supported_parser` | Router 为各受支持后缀选择正确 parser。 |
 | 同上 | `test_router_rejects_unsupported_source_type` | 不支持的类型返回稳定错误。 |
 | 同上 | `test_pdf_parser_rejects_corrupt_bytes` | 损坏 PDF 返回稳定错误。 |
+| `ingestion/test_chm_parser.py` | `test_chm_parser_orders_topics_and_preserves_heading_provenance` | CHM 按 HHC 目录稳定排列 Topic，按标题层级分段，过滤脚本/样式并保留 Topic、标题路径与锚点。 |
+| 同上 | `test_chm_topic_and_heading_segments_are_hard_chunk_boundaries` | Topic 与标题段均为不可跨越的切块边界；正文切分保持上限与全局稳定 ordinal，每个 CHM Chunk 的检索文本稳定加入 Topic、Heading 与 Symbol 前缀。 |
+| 同上 | `test_chm_parser_decodes_declared_legacy_charset` | CHM HTML Topic 按声明的旧编码解码中文正文和标题。 |
+| 同上 | `test_chm_parser_recovers_isolated_invalid_declared_charset_bytes` | 对声明了有效编码但包含孤立损坏字节的旧式 HTML Topic 使用替换字符恢复，避免单个坏字节导致整个 CHM 摄取失败。 |
+| 同上 | `test_router_selects_injected_chm_parser` | ParserRouter 对大小写不敏感的 `.chm` 后缀选择 CHM parser。 |
+| 同上 | `test_chi_parser_extracts_keyword_records_with_sidecar_provenance` | CHI 按 `$WWKeywordLinks/BTree` listing block 结构读取 UTF-16LE 关键词和 Topic index，并经 `#TOPICS/#URLTBL/#URLSTR/#STRINGS` 恢复标题、HTML 路径及锚点。 |
+| 同上 | `test_chi_chunks_weight_keyword_topic_url_and_associated_chm` | CHI Chunk 的检索文本稳定加入索引关键词、Topic 标题/路径/URL 与关联 CHM 名称，正文切分仍保持独立。 |
+| 同上 | `test_router_selects_chi_parser` | ParserRouter 对 `.chi` 后缀选择 CHI 关键词索引 parser。 |
+| 同上 | `test_chi_parser_maps_malformed_archive_to_invalid_chi` | CHI 解包层报告的损坏归档错误在 parser 边界转换为稳定、不可重试的 `INVALID_CHI`。 |
+| 同上 | `test_chi_parser_rejects_keyword_topic_index_outside_topics_stream` | BTree 引用越出 `#TOPICS` 范围时 fail closed 返回 `INVALID_CHI`，不索引错误来源。 |
+| 同上 | `test_chm_parser_rejects_unsafe_topic_path` | Topic 路径穿越被 fail closed 拒绝。 |
+| 同上 | `test_chm_parser_rejects_absolute_topic_path` | 绝对 Topic 路径在进入 HTML 解析前被 fail closed 拒绝。 |
+| 同上 | `test_chmlib_extractor_rejects_non_chm_before_starting_process` | 非 CHM 签名字节在启动外部解包进程前返回稳定 `INVALID_CHM`。 |
 | `ingestion/test_pipeline.py` | `test_pipeline_builds_stable_versioned_chunks_and_upserts_search` | Pipeline 生成稳定的版本化 chunk 并幂等写入检索端。 |
+| 同上 | `test_pipeline_collapses_duplicate_chunk_ids_before_embedding` | 同一 Document 内相同逻辑 Chunk 在 Embedding 前稳定折叠，保留首次来源，避免重复向量化及 manifest 唯一键冲突。 |
 | `ingestion/test_recursive_chunker.py` | `test_recursive_chunker_is_stable_bounded_and_overlapping` | 切块边界稳定、长度受限且 overlap 正确。 |
 | 同上 | `test_recursive_chunker_rejects_invalid_overlap` | 非法 overlap 参数被拒绝。 |
 | 同上 | `test_recursive_chunker_matches_txt_golden_fixture` | TXT 切块结果与 golden fixture 一致。 |
@@ -292,7 +314,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_development_material_generator_writes_certificate_key_identifiers` | development CA 与节点证书生成 SKI/AKI，保证运行时 TLS 链校验可用。 |
 | 同上 | `test_development_material_validator_rejects_malformed_existing_files` | 开发命名卷中的畸形或不完整 TLS 材料不得仅因文件齐全而被复用。 |
 | 同上 | `test_production_material_generator_refuses_to_self_sign_missing_material` | production 缺失外部 Search Guard 材料时 fail closed，禁止生成自签名替代品。 |
-| 同上 | `test_search_guard_assets_pin_tls_and_least_privilege` | Search Guard 镜像固定 ES/插件校验和，TLS、节点 DN、`rag-chunks-v1*` 最小权限及 `indices.exists()` 所需的 `indices:admin/get` 齐全。 |
+| 同上 | `test_search_guard_assets_pin_tls_and_least_privilege` | Search Guard 镜像固定 ES/插件校验和，TLS、节点 DN、`rag-chunks-v1*` 最小权限及 index/ping/bulk/refresh 的必要主与 shard action 齐全，且不开放独立测试索引前缀。 |
 | 同上 | `test_first_bootstrap_declares_search_guard_principals_in_extractor_order` | 首次 SG11 初始化时，`admin_dn` 与 `nodes_dn` 必须使用 Search Guard principal extractor 的逆序 RDN。 |
 | 同上 | `test_first_bootstrap_uploads_all_required_search_guard_config_types` | bootstrap 必须上传 internal users、action groups、authc、roles、roles mapping 与 tenants 所需的配置文件。 |
 | 同上 | `test_bootstrap_retries_config_upload_until_elasticsearch_is_ready` | ES 进程已启动但尚未接受 SG 配置时，bootstrap 重试 `update-config`，而非立即阻断下游服务。 |
@@ -340,6 +362,8 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_retry_enforces_user_retry_limit` | Retry 强制执行用户重试上限。 |
 | `test_search_engine_contract.py` | `test_search_upsert_is_idempotent_and_dense_sparse_are_separate` | Search upsert 幂等，Dense 与 Sparse 候选分离，并共同遵守 Dataset/metadata 过滤。 |
 | 同上 | `test_search_can_delete_an_entire_dataset_idempotently` | Search Port 可按 Dataset 幂等删除全部索引记录。 |
+| 同上 | `test_search_topic_neighbors_stay_inside_document_version_and_topic` | Topic 邻接 Port 同时约束 Dataset、filters、Document、index version、topic_path 与 ordinal 半径。 |
+| 同上 | `test_search_resolves_chi_topic_reference_inside_dataset_and_source` | CHI Topic 回指只返回同 Dataset、同关联 source_name、同 CHM Topic 且满足 metadata filter 的正文。 |
 | `test_task_queue_contract.py` | `test_queue_preserves_at_least_once_delivery_and_explicit_ack_nak` | Queue 保持至少一次投递、重复 publish 和显式 ACK/NAK。 |
 | 同上 | `test_unacked_delivery_can_be_redelivered` | 未 ACK delivery 可重新投递。 |
 
@@ -349,9 +373,11 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
-| `test_elasticsearch_adapter.py` | `test_real_es_upsert_dense_bm25_isolation_and_metadata_filters` | 真实 ES 验证 Bulk 幂等、KNN/BM25 召回、稳定排序、Dataset 隔离和 metadata 过滤。 |
+| `test_elasticsearch_adapter.py` | `test_real_es_upsert_dense_bm25_isolation_and_metadata_filters` | 在最小权限允许的 `rag-chunks-v1-test-*` 隔离索引中，验证真实 ES Bulk 幂等、KNN/BM25 召回、稳定排序、Dataset 隔离和 metadata 过滤。 |
 | 同上 | `test_real_es_version_and_document_delete_are_idempotent` | 真实 ES 按版本和整文档删除均可重复执行并收敛到正确记录数。 |
 | 同上 | `test_real_es_dataset_delete_is_idempotent_and_isolated` | 真实 ES 按 Dataset 幂等删除且不影响其他 Dataset。 |
+| 同上 | `test_real_es_topic_neighbors_do_not_cross_topic_boundary` | 真实 ES 以批量邻接查询返回锚点 ordinal 前后 Chunk，并拒绝跨 CHM Topic 扩展。 |
+| 同上 | `test_real_es_chi_topic_reference_prefers_anchor_and_stays_in_associated_chm` | 真实 ES 以 CHI Topic 路径、关联 CHM 名和可选 anchor 定位正文，锚点/查询命中优先且不串到同路径的其他 CHM。 |
 | `test_nats_jetstream_adapter.py` | `test_real_jetstream_preserves_duplicate_publish_and_ack_removes_deliveries` | 真实 JetStream 保留重复 task_id 消息，PubAck 后可消费，显式 ACK 后移除。 |
 | 同上 | `test_real_jetstream_redelivers_after_ack_wait_and_honors_delayed_nak` | 真实 durable consumer 在 ACK 超时后重投，并遵守 NAK delay。 |
 | 同上 | `test_real_jetstream_provisioning_is_idempotent_and_rejects_incompatible_consumer` | stream/consumer 同配置装配幂等，不兼容 consumer 参数 fail fast。 |
@@ -387,6 +413,9 @@ E2E 测试只从 generated gRPC client 驱动已启动的 Compose 服务，不�
 | --- | --- | --- |
 | `test_real_upload_ingest_retrieve.py` | `test_real_upload_ingest_and_hybrid_retrieve_preserves_provenance` | 分别上传 TXT、Markdown、Python 和 PDF，等待真实异步摄取成功，再验证 Dense/BM25/RRF evidence、active index version 与 line/symbol/language/page provenance。 |
 | `test_local_computer_architecture_pdf.py` | `test_local_user_uploads_review_pdf_and_retrieves_distant_topics` | 从 generated gRPC client 上传 Git 忽略的 44 页本地 PDF，等待真实摄取后检索前部“计算机基本功能”和后部“DMA 传送方式”，验证中文正文、页码、分数及来源血缘。 |
+| `test_real_chm_upload_ingest_retrieve.py` | `test_real_chm_ingestion_topic_boundaries_and_retrieval_quality` | 上传 Git 忽略的本地 ZRDDS CHM，默认验证 1200 秒内摄取、canonical 复用、Topic 硬边界、HTML provenance，以及 Recall@6 = 1.0、MRR@6 >= 0.65，并报告关键短语命中率作为诊断指标。每题保留一个首选 Topic，同时把确实可独立回答该问题的用户指南、结构体参考或枚举页列为相关 Topic，避免把语义正确的第一名误判为次优；逐题 Top-6、相关 Topic 与短语命中结果写入 Git 忽略的 `tests/eval/log/chm_baseline_retrieval_report.json`。可用 `RAG_E2E_CHM_INGESTION_TIMEOUT_SECONDS` 临时覆盖摄取等待时间。测试不自动删除 Dataset，结束时打印知识库标识；同时设置 `RAG_E2E_CHM_REUSE_DATASET_ID` 与 `RAG_E2E_CHM_REUSE_DOCUMENT_ID` 可跳过重复摄取并复用已有知识库，删除仍由人工执行。 |
+| 同上 | `test_real_chi_sidecar_participates_in_same_dataset_retrieval` | 将 Git 忽略的同名 CHI 上传到已有 CHM Dataset，以真实索引中的 13 个 Domain/Publication/Subscription/WaitSet/ReturnCode/QoS 接口与枚举执行固定评测；验证 CHI Recall@6、MRR@6、完整短语、Topic 映射、provenance，以及 CHI 命中后回查同 Topic CHM 正文的成功率，并把逐题 Evidence 写入 `tests/eval/log/chm_chi_extended_retrieval_report.json`；不自动删除知识库。 |
+| `test_real_chm_extended_retrieval.py` | `test_existing_chm_knowledge_base_extended_retrieval_quality` | 复用显式指定的 CHM Dataset/Document，以 20 个覆盖接口、配置、日志、FAQ、传输、QoS、Topic、Condition、Listener、Domain 与 Status 的问题验证 Recall@6 = 1.0、MRR@6 >= 0.65；关键短语命中率仅作诊断，并把每题 Top-6 chunk、Topic、标题路径、行号、分数和内容预览写入 Git 忽略的 `tests/eval/log/chm_extended_retrieval_report.json`。 |
 
 ## Functional 测试函数
 
@@ -397,6 +426,7 @@ Functional 测试负责验证跨层调用链。它们使用真实 gRPC、applica
 | `test_mock_upload_ingest_retrieve.py` | `test_mock_grpc_upload_async_ingest_and_dense_retrieve` | 通过 gRPC 完成上传、异步摄取、Job 查询和 Dense evidence 检索。 |
 | 同上 | `test_deleted_dataset_is_rejected_before_cleanup_worker_runs` | Dataset 删除 RPC 受理后、清理 Worker 执行前，检索已立即被拒绝。 |
 | `test_mock_four_formats.py` | `test_four_supported_formats_return_precise_provenance` | 四种支持格式均能摄取、检索并返回精确 provenance。 |
+| `test_mock_chm_ingestion.py` | `test_chm_upload_ingest_retrieve_returns_topic_provenance` | CHM 经真实 gRPC/application/Outbox/Worker/Fake 基础设施闭环完成摄取检索，并返回原文件、Topic、标题路径和锚点 provenance；extractor 为测试注入，不冒充真实 CHM 解包验收。 |
 | `test_mock_dedup_and_redelivery.py` | `test_mock_dedup_and_relay_duplicate_delivery_converge` | 内容去重与 Relay 重复投递最终收敛为一份可见索引。 |
 | `test_mock_retry_job.py` | `test_retry_rpc_creates_new_job_and_worker_completes_it` | Retry RPC 创建新任务，Worker 可完成该重试任务。 |
 | `test_mock_cancel_job.py` | `test_cancel_rpc_stops_pending_ingestion_and_is_idempotent` | Cancel RPC 停止 PENDING 摄取且重复取消幂等。 |
