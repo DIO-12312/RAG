@@ -21,6 +21,15 @@ STATIC_CONFIGS = (
     "sg_roles_mapping.yml",
     "sg_tenants.yml",
 )
+# Search Guard rewrites config on download (version headers, YAML reflow), so the
+# byte-for-byte comparison is unreliable. These markers are the security-critical
+# invariants that must survive in the running cluster.
+_REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
+    "sg_roles.yml": ("rag_mvp_search", "rag-chunks-v1*"),
+    "sg_roles_mapping.yml": ("rag_mvp_search", "rag_mvp_runtime"),
+    "sg_authc.yml": ("basic/internal_users_db",),
+    "sg_internal_users.yml": ("rag_mvp:", "rag_mvp_runtime"),
+}
 
 
 def _run(*arguments: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -83,27 +92,32 @@ def _initialize(config_dir: Path, client_dir: Path, work_dir: Path) -> None:
     if added.returncode != 0:
         raise RuntimeError("could not create Search Guard internal user")
     # Docker marks Elasticsearch as started before its HTTPS endpoint accepts SG config.
+    # Both non-zero exit codes and Java process timeouts are transient during ES warm-up.
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
-        uploaded = _run("update-config", str(work_dir), "--skip-connection-check")
-        if uploaded.returncode == 0:
-            return
+        try:
+            uploaded = _run("update-config", str(work_dir), "--skip-connection-check")
+            if uploaded.returncode == 0:
+                return
+        except subprocess.TimeoutExpired:
+            pass
         time.sleep(2)
     raise RuntimeError("could not initialize Search Guard configuration")
 
 
-def _verify_existing(config_dir: Path, work_dir: Path) -> bool:
-    downloaded = _run("get-config", str(work_dir))
+def _verify_existing(work_dir: Path) -> bool:
+    try:
+        downloaded = _run("get-config", "--output", str(work_dir))
+    except subprocess.TimeoutExpired:
+        return False
     if downloaded.returncode != 0:
         return False
-    for name in STATIC_CONFIGS:
-        if (config_dir / name).read_bytes() != (work_dir / name).read_bytes():
+    for name, markers in _REQUIRED_MARKERS.items():
+        content = (work_dir / name).read_text(encoding="utf-8")
+        if any(marker not in content for marker in markers):
             raise RuntimeError(
-                "existing Search Guard configuration differs from the declared baseline"
+                f"existing Search Guard {name} differs from the declared baseline"
             )
-    internal_users = (work_dir / "sg_internal_users.yml").read_text(encoding="utf-8")
-    if "rag_mvp:" not in internal_users or "rag_mvp_runtime" not in internal_users:
-        raise RuntimeError("existing Search Guard user is missing the required backend role")
     return True
 
 
@@ -135,7 +149,7 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> int:
     arguments = _parser().parse_args()
     _connect(arguments.host, arguments.port, arguments.node_dir)
-    if not _verify_existing(arguments.config_dir, arguments.work_dir):
+    if not _verify_existing(arguments.work_dir):
         _initialize(arguments.config_dir, arguments.client_dir, arguments.work_dir)
     _verify_runtime_user(arguments.host, arguments.port, arguments.client_dir)
     return 0

@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from cryptography import x509
 
 from scripts.search_guard import bootstrap, materials
@@ -305,3 +306,112 @@ def test_bootstrap_retries_config_upload_until_elasticsearch_is_ready(
 
     assert update_attempts == 2
     assert sum(call[0] == "add-user-local" for call in calls) == 1
+
+
+def _write_matching_config(work_dir: Path) -> None:
+    """写入满足全部安全 marker 的已下载 Search Guard 配置。"""
+
+    work_dir.mkdir()
+    (work_dir / "sg_roles.yml").write_text(
+        'rag_mvp_search:\n  index_permissions:\n    - index_patterns: ["rag-chunks-v1*"]\n',
+        encoding="utf-8",
+    )
+    (work_dir / "sg_roles_mapping.yml").write_text(
+        "rag_mvp_search:\n  backend_roles:\n    - rag_mvp_runtime\n", encoding="utf-8"
+    )
+    (work_dir / "sg_authc.yml").write_text(
+        "auth_domains:\n  - type: basic/internal_users_db\n", encoding="utf-8"
+    )
+    (work_dir / "sg_internal_users.yml").write_text(
+        "rag_mvp:\n  backend_roles:\n    - rag_mvp_runtime\n", encoding="utf-8"
+    )
+
+
+def test_verify_existing_uses_output_flag_for_sgctl_get_config(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """sgctl 4.x get-config 必须使用 --output 选项；位置参数会被 sgctl 拒绝。"""
+
+    work_dir = tmp_path / "work"
+    _write_matching_config(work_dir)
+    calls: list[tuple[str, ...]] = []
+
+    def capture_run(
+        *arguments: str, input_text: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(bootstrap, "_run", capture_run)
+
+    result = bootstrap._verify_existing(work_dir)
+
+    assert result is True
+    get_config_call = calls[0]
+    assert get_config_call[0] == "get-config"
+    assert "--output" in get_config_call
+
+
+def test_verify_existing_rejects_missing_security_marker(monkeypatch, tmp_path: Path) -> None:
+    """已下载配置缺少关键安全 marker 时必须 fail closed，而非静默接受。"""
+
+    work_dir = tmp_path / "work"
+    _write_matching_config(work_dir)
+    (work_dir / "sg_roles.yml").write_text("some_other_role: {}\n", encoding="utf-8")
+
+    def capture_run(
+        *arguments: str, input_text: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(bootstrap, "_run", capture_run)
+
+    with pytest.raises(RuntimeError, match="sg_roles.yml"):
+        bootstrap._verify_existing(work_dir)
+
+
+def test_verify_existing_returns_false_on_timeout(monkeypatch, tmp_path: Path) -> None:
+    """ES 未就绪导致 get-config 超时时安全回退到首次初始化路径。"""
+
+    def timeout_run(
+        *arguments: str, input_text: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd="sgctl", timeout=10)
+
+    monkeypatch.setattr(bootstrap, "_run", timeout_run)
+
+    result = bootstrap._verify_existing(tmp_path / "work")
+
+    assert result is False
+
+
+def test_initialize_retries_on_timeout_instead_of_aborting(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """update-config 超时属于瞬态故障，必须继续重试而非终止 bootstrap。"""
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    for name in bootstrap.STATIC_CONFIGS:
+        (config_dir / name).write_text("{}\n", encoding="utf-8")
+    client_dir = tmp_path / "client"
+    client_dir.mkdir()
+    (client_dir / "rag_mvp_password").write_text("not-logged\n", encoding="utf-8")
+    update_attempts = 0
+
+    def timeout_then_succeed(
+        *arguments: str, input_text: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal update_attempts
+        if arguments[0] == "update-config":
+            update_attempts += 1
+            if update_attempts == 1:
+                raise subprocess.TimeoutExpired(cmd="sgctl", timeout=10)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(bootstrap, "_run", timeout_then_succeed)
+    monkeypatch.setattr(bootstrap.time, "sleep", lambda _: None)
+
+    bootstrap._initialize(config_dir, client_dir, tmp_path / "work")
+
+    assert update_attempts == 2
