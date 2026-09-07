@@ -4,12 +4,13 @@ import DatasetCard from "@/components/DatasetCard.vue";
 import { useDatasetStore } from "@/stores/datasets";
 import { createDataset } from "@/api/datasets";
 import AppIcon from "@/components/AppIcon.vue";
+import { randomUUID } from "@/utils/id";
 const datasets = useDatasetStore(); const name = ref(""); const error = ref(""); const busy = ref(false);
-let requestKey = crypto.randomUUID();
+let requestKey = randomUUID();
 onMounted(() => void datasets.load());
 async function create(): Promise<void> {
   if (!name.value.trim() || busy.value) return; busy.value = true; error.value = "";
-  try { await createDataset({name:name.value.trim()},requestKey); name.value = ""; requestKey = crypto.randomUUID(); await datasets.load(); }
+  try { await createDataset({name:name.value.trim()},requestKey); name.value = ""; requestKey = randomUUID(); await datasets.load(); }
   catch(e) { error.value = e instanceof Error ? e.message : "创建失败"; } finally { busy.value = false; }
 }
 </script>

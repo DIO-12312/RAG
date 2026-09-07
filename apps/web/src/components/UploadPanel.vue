@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from "vue";
 import AppIcon from "@/components/AppIcon.vue";
+import { randomUUID } from "@/utils/id";
 const props = defineProps<{ uploadFile: (file: File, key: string) => Promise<void> }>();
 const emit = defineEmits<{ changed: [] }>();
 type Entry = { id: string; file: File; status: "等待上传" | "上传中" | "已提交" | "上传失败" | "已跳过"; error: string };
@@ -21,7 +22,7 @@ function selected(event: Event): void {
     known.add(fingerprint);
     if (entries.value.length >= 1000) { notice.value = "单批最多选择 1000 个文件，请分批上传。"; break; }
     const error = !/\.(pdf|md|txt|py|go|js|ts|java)$/i.test(file.name) ? "不支持的文件格式" : file.size > 32*1024*1024 ? "文件超过 32 MB" : file.size === 0 ? "空文件" : "";
-    entries.value.push({ id: crypto.randomUUID(), file, status: error ? "已跳过" : "等待上传", error });
+    entries.value.push({ id: randomUUID(), file, status: error ? "已跳过" : "等待上传", error });
   }
   input.value = "";
 }

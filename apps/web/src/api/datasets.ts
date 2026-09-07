@@ -5,6 +5,7 @@ import type {
   Job,
 } from "./contracts";
 import { request } from "./http";
+import { randomUUID } from "../utils/id";
 
 export function listDatasets(): Promise<DatasetSummary[]> {
   return request<DatasetSummary[]>("/datasets");
@@ -14,7 +15,7 @@ export function getDataset(datasetId: string): Promise<DatasetDetail> {
   return request<DatasetDetail>(`/datasets/${datasetId}`);
 }
 
-export function createDataset(payload: CreateDatasetRequest, key = crypto.randomUUID()): Promise<DatasetSummary> {
+export function createDataset(payload: CreateDatasetRequest, key = randomUUID()): Promise<DatasetSummary> {
   return request<DatasetSummary>("/datasets", {
     method: "POST",
     headers: { "Idempotency-Key": key },
@@ -22,7 +23,7 @@ export function createDataset(payload: CreateDatasetRequest, key = crypto.random
   });
 }
 
-export function uploadDocument(datasetId: string, file: File, key: string = crypto.randomUUID()): Promise<Job> {
+export function uploadDocument(datasetId: string, file: File, key: string = randomUUID()): Promise<Job> {
   const data = new FormData(); data.append("file", file);
   return request<Job>(`/datasets/${datasetId}/documents`, {
     method: "POST",
