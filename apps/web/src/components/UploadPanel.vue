@@ -39,6 +39,18 @@ async function submit(): Promise<void> {
     }
   } finally { running.value = false; }
 }
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / 1048576).toFixed(1) + " MB";
+}
+function fileIcon(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "pdf") return "file";
+  if (ext === "md") return "file";
+  if (["py", "go", "js", "ts", "java"].includes(ext)) return "file";
+  return "file";
+}
 </script>
 <template>
   <section class="upload-panel">
@@ -68,14 +80,19 @@ async function submit(): Promise<void> {
       <p role="status">
         已选择 {{ entries.length }} 个文件 · 已提交 {{ completed }} 个（索引进度见下方任务）
       </p>
-      <ul class="upload-queue">
-        <li
+      <div class="upload-file-grid">
+        <div
           v-for="entry in entries"
           :key="entry.id"
+          class="upload-file-card"
+          :class="{ 'upload-file-card--error': entry.error, 'upload-file-card--done': entry.status === '已提交' }"
         >
-          <span>{{ entry.file.webkitRelativePath || entry.file.name }}</span><small :class="{ 'upload-error': entry.error }">{{ entry.status }}{{ entry.error ? '：'+entry.error : '' }}</small>
-        </li>
-      </ul>
+          <span class="upload-file-icon"><AppIcon :name="fileIcon(entry.file.name)" /></span>
+          <span class="upload-file-name">{{ entry.file.webkitRelativePath || entry.file.name }}</span>
+          <span class="upload-file-size">{{ formatSize(entry.file.size) }}</span>
+          <small class="upload-file-status" :class="{ 'upload-error': entry.error }">{{ entry.status }}{{ entry.error ? '：' + entry.error : '' }}</small>
+        </div>
+      </div>
       <div class="upload-actions">
         <button
           :disabled="running || !pending.length"
