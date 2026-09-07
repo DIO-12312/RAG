@@ -46,23 +46,28 @@ func (s *Server) chat(c *gin.Context) {
 	if timeout < 1 {
 		timeout = 60
 	}
+	title := []rune(p.Question)
+	if len(title) > 60 {
+		title = title[:60]
+	}
 	if p.ConversationID == "" {
 		p.ConversationID = security.ID()
-		title := []rune(p.Question)
-		if len(title) > 60 {
-			title = title[:60]
-		}
+	}
+	var dataset string
+	e = s.Store.DB.QueryRowContext(ctx, "SELECT dataset_id FROM conversations WHERE id=? AND user_id=?", p.ConversationID, uid(c)).Scan(&dataset)
+	if e != nil {
 		_, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversations(id,user_id,dataset_id,title) VALUES(?,?,?,?)", p.ConversationID, uid(c), p.DatasetID, string(title))
-	} else {
-		var dataset string
-		e = s.Store.DB.QueryRowContext(ctx, "SELECT dataset_id FROM conversations WHERE id=? AND user_id=?", p.ConversationID, uid(c)).Scan(&dataset)
-		if e != nil || dataset != p.DatasetID {
-			fail(c, 404, "NOT_FOUND", "会话不存在或知识库不匹配。")
-			return
-		}
+	} else if dataset != p.DatasetID {
+		fail(c, 404, "NOT_FOUND", "会话不存在或知识库不匹配。")
+		return
 	}
 	if e != nil {
 		fail(c, 503, "SAVE_FAILED", "会话创建失败。")
+		return
+	}
+	// 立即持久化用户提问：即使回答流尚未完成，历史记录也能完整恢复该会话。
+	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,role,content,citations_json) VALUES(?,'user',?,'[]')", p.ConversationID, p.Question); e != nil {
+		fail(c, 503, "SAVE_FAILED", "会话保存失败。")
 		return
 	}
 	s.mu.Lock()
@@ -129,15 +134,7 @@ func (s *Server) chat(c *gin.Context) {
 		return
 	}
 	b, _ := json.Marshal(citations)
-	tx, e := s.Store.DB.BeginTx(ctx, nil)
-	if e == nil {
-		defer tx.Rollback()
-		_, e = tx.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,role,content,citations_json) VALUES(?,'user',?,'[]'),(?,'assistant',?,?)", p.ConversationID, p.Question, p.ConversationID, answer, b)
-		if e == nil {
-			e = tx.Commit()
-		}
-	}
-	if e != nil {
+	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,role,content,citations_json) VALUES(?,'assistant',?,?)", p.ConversationID, answer, b); e != nil {
 		_ = emit("error", gin.H{"code": "SAVE_FAILED", "message": "回答生成成功，但会话保存失败。"})
 		return
 	}
