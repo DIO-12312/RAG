@@ -285,7 +285,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | --- | --- | --- |
 | `test_build_entrypoints.py` | `test_makefile_offline_targets_are_commented_earthly_only_entrypoints` | Makefile 的离线公共入口均有说明，并且只负责转发 Earthly target。 |
 | 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界。 |
-| 同上 | `test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes` | Docker 公共入口复用 Function；run 统一由 Earthfile 顺序准备共享卷、等待 RAG、启动产品服务与本机 Vue；验证 suite、静默校验 Compose、扫描日志和持久卷保护。eval 同时收集既有 30 问与 PDF 五十问。此离线静态契约不替代 Windows/WSL/Linux 的实际启动验收。 |
+| 同上 | `test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes` | Docker 公共入口复用 Function；run 统一由 Earthfile 顺序准备共享卷、等待 RAG、启动产品服务与容器化 Vue 前端；验证 suite、静默校验 Compose、扫描日志和持久卷保护。eval 同时收集既有 30 问与 PDF 五十问。此离线静态契约不替代 Windows/WSL/Linux 的实际启动验收。 |
 | 同上 | `test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths` | Docker 入口构建安全材料/ES/bootstrap 服务，并仅向测试容器传递 ES password file 与 CA path。 |
 | `test_container_artifacts.py` | `test_package_and_container_use_canonical_root_readme` | GitHub 首页、Python package、Docker 镜像与 Earthly 依赖安装统一使用仓库根 README，禁止保留重复入口。 |
 | `test_search_guard_assets.py` | `test_development_material_generator_creates_separate_node_and_client_secrets` | development 材料生成器使用独立 node/admin 私钥，客户端密码不回显到进程输出。 |
@@ -296,6 +296,10 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_first_bootstrap_declares_search_guard_principals_in_extractor_order` | 首次 SG11 初始化时，`admin_dn` 与 `nodes_dn` 必须使用 Search Guard principal extractor 的逆序 RDN。 |
 | 同上 | `test_first_bootstrap_uploads_all_required_search_guard_config_types` | bootstrap 必须上传 internal users、action groups、authc、roles、roles mapping 与 tenants 所需的配置文件。 |
 | 同上 | `test_bootstrap_retries_config_upload_until_elasticsearch_is_ready` | ES 进程已启动但尚未接受 SG 配置时，bootstrap 重试 `update-config`，而非立即阻断下游服务。 |
+| 同上 | `test_verify_existing_uses_output_flag_for_sgctl_get_config` | sgctl 4.x `get-config` 必须使用 `--output` 选项；位置参数会被 sgctl 拒绝。 |
+| 同上 | `test_verify_existing_rejects_missing_security_marker` | 已下载配置缺少关键安全 marker（角色、权限、映射、认证域）时必须 fail closed，而非静默接受。 |
+| 同上 | `test_verify_existing_returns_false_on_timeout` | ES 未就绪导致 `get-config` 超时时安全回退到首次初始化路径。 |
+| 同上 | `test_initialize_retries_on_timeout_instead_of_aborting` | `update-config` 超时属于瞬态故障，必须继续重试而非终止 bootstrap。 |
 | 同上 | `test_search_guard_operator_docs_preserve_private_tls_runbook` | SPEC、安全设计、AGENTS、Earthfile 与 Linux/Windows runbook 一致区分 development/test 材料拓扑和尚待平台化的生产编排：生产只读挂载外部材料、先 fail closed 验证，禁止定义/启动材料服务；bootstrap/health 后必须在新受保护目标卷/集群恢复已确认 snapshot，核验索引/文档完整性与一次 RAG 可检索性，失败保持停止，不能验证空集群。 |
 | `test_container_artifacts.py` | `test_runtime_image_and_context_exclude_secrets_and_test_artifacts` | runtime/test 镜像目标、非 root 用户及 build context 排除规则正确。 |
 | 同上 | `test_compose_declares_migration_health_role_secrets_and_shared_storage` | Compose 固定迁移顺序、健康依赖、共享对象卷及模型密钥角色边界。 |

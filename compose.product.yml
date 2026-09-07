@@ -37,6 +37,13 @@ services:
       - default
       - rag
     restart: unless-stopped
+  web:
+    build: apps/web
+    ports:
+      - 127.0.0.1:5173:80
+    depends_on:
+      - api
+    restart: unless-stopped
 networks:
   rag:
     external: true

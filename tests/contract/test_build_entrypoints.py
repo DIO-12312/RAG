@@ -115,10 +115,13 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
         "docker volume create rag-product_product-keys",
         "DO +DOCKER_START",
         "docker compose -f compose.product.yml up -d --build --wait --wait-timeout 240",
-        "npm --prefix apps/web run dev -- --host 127.0.0.1 --strictPort",
     ]
     positions = [run_target.index(step) for step in steps]
     assert positions == sorted(positions)
+    assert "npm" not in run_target, "frontend must be containerized, not started via npm dev"
+    product_compose = _text("compose.product.yml")
+    assert "web:" in product_compose
+    assert "apps/web" in product_compose
     assert "powershell" not in run_target.lower()
     assert "volume rm" not in run_target
     assert "SUITE ?= all" in makefile

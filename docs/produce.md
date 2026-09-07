@@ -1,10 +1,5 @@
 # 公网生产部署差距分析（对照 RAGFlow）
 
-> 分析日期：2026-09-07
-> 对照对象：`references/ragflow`（源码基线 `main`）
-> 结论：当前项目在 RAG 计算正确性与可靠性上已经扎实（事务 Outbox、generation fence、幂等 digest、RRF 融合、稳定排序），但在“生产化外壳”上接近空白；RAGFlow 是面向公网多租户的完整产品。
-> 差距分两类：**公网部署硬门槛（必须补）** 与 **规模化/产品化软差距（MVP 可后补）**。
-
 ---
 
 ## 一、核心判断
@@ -31,9 +26,9 @@ RAGFlow 有完整 nginx 层：`docker/nginx/nginx.conf`、`proxy.conf`、`ragflo
 
 当前项目**没有任何反代配置**，这是公网部署的第一硬缺口。
 
-### 2. 前端没有生产产物
+### 2. 前端已容器化（✅ 已完成）
 
-RAGFlow 前端构建成 `dist/` 由 nginx 托管（`root /ragflow/web/dist`）。当前 `apps/web` 只有 `vite dev`，没有 Dockerfile、没有生产构建、没有静态托管。
+`apps/web` 已有多阶段 Dockerfile（Node 22 构建 + nginx 1.27 alpine 托管）和 `nginx.conf`（SPA fallback + 8 条 API 路径反代到 Go 后端，含 SSE 长连接支持）。`compose.product.yml` 的 `web` 服务将 nginx 容器映射到 `127.0.0.1:5173`，`make run` 一键启动全栈（含前端容器）。
 
 ### 3. 对象存储仍用本地卷
 
@@ -60,7 +55,7 @@ RAGFlow 有完整用户/团队、OAuth（OIDC/GitHub）、权限开关、API key
 
 本项目 Go 控制面是“未来”状态，`compose.product.yml` 里的 `api` 只是骨架。**没有认证就上公网等于裸奔**，任何能访问域名的人都能调 RAG。
 
-> 注：`backend/go-api` 已实现 Argon2id 密码哈希、JWT、CSRF、所有权校验（见 `docs/development/live-product-plane.md`），这是好的起点，但尚未构成完整的多租户/权限闭环，也未接入公网部署链路。
+> * [ ]  注：`backend/go-api` 已实现 Argon2id 密码哈希、JWT、CSRF、所有权校验（见 `docs/development/live-product-plane.md`），这是好的起点，但尚未构成完整的多租户/权限闭环，也未接入公网部署链路。
 
 ### 7. 配置与 Secret 的隐患
 
@@ -71,14 +66,15 @@ RAGFlow 有完整用户/团队、OAuth（OIDC/GitHub）、权限开关、API key
 
 ## 三、生产加固差距（公网必看）
 
-| 项 | 现状 | 公网要求 |
-|---|---|---|
-| gRPC Reflection | `RAG_GRPC_REFLECTION=true` | 必须 `false` |
-| gRPC 端口 | `50051` 绑 `0.0.0.0` | 绑内网，只给 Go API 用 |
-| Cookie | `PRODUCT_COOKIE_SECURE=false` | 必须 `true`，`PRODUCT_ORIGIN` 指向公网域名 |
-| 可观测性 | 仅 healthcheck + JSON 日志 | RAGFlow 有 OTEL + Jaeger + ClickHouse 追踪、日志轮转 |
-| 备份/恢复 | 持久卷已声明但无备份 | RAGFlow MySQL 开 binlog、ES snapshot；本项目还需保留加密密钥卷（见 `live-product-plane.md`） |
-| 依赖/容器安全扫描 | 有 secret leak 扫描脚本 | RAGFlow 有 CodeQL、`.trivyignore`、SECURITY.md |
+
+| 项                | 现状                          | 公网要求                                                                                    |
+| ------------------- | ------------------------------- | --------------------------------------------------------------------------------------------- |
+| gRPC Reflection   | `RAG_GRPC_REFLECTION=true`    | 必须`false`                                                                                 |
+| gRPC 端口         | `50051` 绑 `0.0.0.0`          | 绑内网，只给 Go API 用                                                                      |
+| Cookie            | `PRODUCT_COOKIE_SECURE=false` | 必须`true`，`PRODUCT_ORIGIN` 指向公网域名                                                   |
+| 可观测性          | 仅 healthcheck + JSON 日志    | RAGFlow 有 OTEL + Jaeger + ClickHouse 追踪、日志轮转                                        |
+| 备份/恢复         | 持久卷已声明但无备份          | RAGFlow MySQL 开 binlog、ES snapshot；本项目还需保留加密密钥卷（见`live-product-plane.md`） |
+| 依赖/容器安全扫描 | 有 secret leak 扫描脚本       | RAGFlow 有 CodeQL、`.trivyignore`、SECURITY.md                                              |
 
 ---
 
@@ -97,7 +93,7 @@ RAGFlow 有完整用户/团队、OAuth（OIDC/GitHub）、权限开关、API key
 按优先级，要“真正可公网部署”最少补 5 件事：
 
 ```
-① 前端生产化        apps/web Dockerfile + nginx 托管 dist
+① 前端生产化        ✅ apps/web Dockerfile + nginx 托管 dist（已完成）
 ② 反向代理 + TLS     入口 Caddy/nginx（参考 RAGFlow 的 proxy.conf 关键头）
 ③ 对象存储           MinIO/S3 替换本地卷
 ④ 认证 + Secret      至少一个登录门槛 + 轮换泄漏的 key + secret 注入
