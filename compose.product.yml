@@ -22,7 +22,7 @@ services:
     environment:
       PRODUCT_MYSQL_DSN: product:product-local-dev@tcp(product-mysql:3306)/rag_product?parseTime=true
       PRODUCT_HTTP_ADDR: 0.0.0.0:8080
-      PRODUCT_ORIGIN: http://127.0.0.1:5173
+      PRODUCT_ORIGIN: ${PRODUCT_ORIGIN:-http://127.0.0.1:5173}
       PRODUCT_RAG_TARGET: rag-server:50051
       PRODUCT_KEY_DIR: /var/lib/product
       PRODUCT_COOKIE_SECURE: "false"
@@ -40,7 +40,7 @@ services:
   web:
     build: apps/web
     ports:
-      - 127.0.0.1:5173:80
+      - 0.0.0.0:5173:80
     depends_on:
       - api
     restart: unless-stopped
