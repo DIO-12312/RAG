@@ -13,10 +13,12 @@ const route = useRoute();
         name="page"
         mode="out-in"
       >
-        <component
-          :is="Component"
-          :key="route.path"
-        />
+        <KeepAlive include="ChatView">
+          <component
+            :is="Component"
+            :key="route.path"
+          />
+        </KeepAlive>
       </Transition>
     </RouterView>
   </AppShell>

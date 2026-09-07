@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import {onMounted,onBeforeUnmount,ref,watch} from "vue";import {streamChat,type ChatStream} from "@/api/chat";import {useDatasetStore} from "@/stores/datasets";import type {Citation} from "@/api/contracts";import {request} from "@/api/http";
+import {onMounted,onActivated,onBeforeUnmount,ref,watch,nextTick} from "vue";import {streamChat,type ChatStream} from "@/api/chat";import {useDatasetStore} from "@/stores/datasets";import type {Citation} from "@/api/contracts";import {request} from "@/api/http";
 import AppIcon from "@/components/AppIcon.vue";
 import KnowledgeOrb from "@/components/KnowledgeOrb.vue";
 import MarkdownContent from "@/components/MarkdownContent.vue";
 import HistoryDrawer from "@/components/HistoryDrawer.vue";
+defineOptions({name:'ChatView'});
 const datasets=useDatasetStore();const selectedId=ref("");const question=ref("");const answer=ref("");const citations=ref<Citation[]>([]);const error=ref("");const phase=ref("");const busy=ref(false);const conversationId=ref("");const transcript=ref<{role:string;content:string;citations:Citation[]}[]>([]);const conversations=ref<{id:string;datasetId:string;title:string;updatedAt:string}[]>([]);
 async function refreshHistory():Promise<void>{try{conversations.value=await request('/conversations');}catch(e){error.value=e instanceof Error?e.message:'历史会话加载失败';}}
 function newChat():void{if(busy.value)return;conversationId.value='';transcript.value=[];answer.value='';citations.value=[];question.value='';error.value='';}
-let active:ChatStream|undefined;
+let active:ChatStream|undefined;let resuming=false;
 onMounted(async()=>{await datasets.load();selectedId.value=datasets.readyDatasets[0]?.id??"";try{conversations.value=await request("/conversations");}catch{error.value="会话列表加载失败";}});
-onBeforeUnmount(()=>active?.cancel());watch(selectedId,()=>{active?.cancel();conversationId.value="";transcript.value=[];answer.value="";citations.value=[];});
-async function resume(id:string):Promise<void>{const row=conversations.value.find(c=>c.id===id);if(!row||busy.value)return;selectedId.value=row.datasetId;await Promise.resolve();conversationId.value=id;try{transcript.value=await request("/conversations/"+id+"/messages");}catch(e){error.value=e instanceof Error?e.message:"会话加载失败";}}
+onActivated(async()=>{try{conversations.value=await request("/conversations");}catch{/* keep stale list */}});
+onBeforeUnmount(()=>active?.cancel());watch(selectedId,()=>{if(resuming)return;active?.cancel();conversationId.value="";transcript.value=[];answer.value="";citations.value=[];});
+async function resume(id:string):Promise<void>{const row=conversations.value.find(c=>c.id===id);if(!row||busy.value)return;resuming=true;selectedId.value=row.datasetId;await nextTick();resuming=false;conversationId.value=id;try{transcript.value=await request("/conversations/"+id+"/messages");}catch(e){error.value=e instanceof Error?e.message:"会话加载失败";}}
 async function ask():Promise<void>{if(!selectedId.value||!question.value.trim()||busy.value)return;busy.value=true;error.value="";answer.value="";citations.value=[];phase.value="正在思考并检索…";const q=question.value;active=streamChat({datasetId:selectedId.value,question:q,conversationId:conversationId.value||undefined});let final=false;try{for await(const event of active.events){if(event.type==="retrieval")phase.value="已检索到 "+event.hits.length+" 条证据，正在生成回答…";if(event.type==="token")answer.value+=event.text;if(event.type==="error")throw new Error(event.message);if(event.type==="final"){answer.value=event.answer;citations.value=event.citations;conversationId.value=event.conversationId??"";transcript.value.push({role:"user",content:q,citations:[]},{role:"assistant",content:answer.value,citations:citations.value});question.value="";answer.value="";citations.value=[];final=true;}}if(final)conversations.value=await request("/conversations");}catch(e){error.value=e instanceof Error&&e.name==="AbortError"?"已停止生成":e instanceof Error?e.message:"问答失败";}finally{busy.value=false;phase.value="";active=undefined;}}
 </script>
 <template>
