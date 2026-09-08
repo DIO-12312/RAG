@@ -440,6 +440,8 @@ flowchart LR
 
 Go 是唯一公网入口和 Agent 决策者；Python 是私网 RAG 服务。Go 通过 RPC 调用 Python，并维护用户侧资源映射；Python 始终是 RAG Document/Job/Task/索引状态的唯一写入方。
 
+Web 文件选择器与 Go 上传入口必须共同放行 Python RAG 已支持的 `.pdf`、`.md`、`.txt`、`.py`、`.go`、`.js`、`.ts`、`.java`、`.chm` 和 `.chi`，避免产品入口与计算服务能力不一致。反向代理的请求体上限必须略高于 Python 的 `RAG_MAX_UPLOAD_BYTES`，为 multipart framing 预留开销；文件大小的权威业务上限仍由产品前端与 Python RAG 服务共同执行。
+
 ### 5.2 建议目录树
 
 ```text

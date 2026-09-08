@@ -124,7 +124,7 @@ func (s *Server) upload(c *gin.Context) {
 	defer part.Close()
 	name := filepath.Base(part.FileName())
 	ext := strings.ToLower(filepath.Ext(name))
-	if !strings.Contains("|.pdf|.md|.txt|.py|.go|.js|.ts|.java|", "|"+ext+"|") {
+	if !strings.Contains("|.pdf|.md|.txt|.py|.go|.js|.ts|.java|.chm|.chi|", "|"+ext+"|") {
 		fail(c, 400, "UNSUPPORTED_FILE", "暂不支持此文件格式。")
 		return
 	}

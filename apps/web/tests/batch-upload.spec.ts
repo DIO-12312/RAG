@@ -23,4 +23,12 @@ describe("batch upload", () => {
     await input.trigger('change');expect(wrapper.text()).toContain('folder/note.md');
     await wrapper.get('.upload-actions button').trigger('click');await flushPromises();expect(names).toEqual(['note.md']);expect(wrapper.text()).toContain('已跳过');
   });
+  it("accepts CHM and CHI knowledge files",async()=>{
+    const names:string[]=[];const wrapper=mount(UploadPanel,{props:{uploadFile:async(file)=>{names.push(file.name);}}});
+    const input=wrapper.get('input[type="file"]');
+    expect(input.attributes('accept')).toContain('.chm');expect(input.attributes('accept')).toContain('.chi');
+    Object.defineProperty(input.element,'files',{value:[new File(['chm'],'manual.chm'),new File(['chi'],'manual.chi')],configurable:true});
+    await input.trigger('change');await wrapper.get('.upload-actions button').trigger('click');await flushPromises();
+    expect(names).toEqual(['manual.chm','manual.chi']);expect(wrapper.text()).toContain('已提交 2 个');
+  });
 });

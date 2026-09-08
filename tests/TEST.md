@@ -18,7 +18,7 @@
 | `integration/test_mysql_submission.py` | `test_embedding_binding_is_first_write_only`：原模型不匹配拒绝、并发首次绑定收敛、后续配置不能覆盖快照 | 真实隔离 MySQL |
 | `embedding_profile.py`、`e2e/conftest.py`、`resilience/docker/conftest.py` | `encrypted_test_profile` 使用测试专用凭据和共享加密密钥组装创建请求；无密钥路径则保持独立旧模式 | 显式真实模型测试；不打印密钥 |
 
-前端测试位于 `apps/web/tests/`：原 `upload-panel.spec.ts` 替换为 `batch-upload.spec.ts`（两项：独立失败重试/固定幂等键、文件夹展开与过滤）；新增 `markdown-content.spec.ts`（结构化渲染/流式更新、XSS与远程图片防护）。它们经 `npm test -- --run` 执行，不包含在 Python 门禁中。Go `TestLiveProductFlow` 通过真实 MySQL/gRPC/Worker/Embedding 验证保存配置、摄取、检索、会话时间与用户隔离；Chat 使用确定性测试供应商，除非显式启用真实 Chat。
+前端测试位于 `apps/web/tests/`：原 `upload-panel.spec.ts` 替换为 `batch-upload.spec.ts`（三项：独立失败重试/固定幂等键、文件夹展开与过滤、CHM/CHI 文件接纳）；新增 `markdown-content.spec.ts`（结构化渲染/流式更新、XSS与远程图片防护）。它们经 `npm test -- --run` 执行，不包含在 Python 门禁中。Go `TestLiveProductFlow` 通过真实 MySQL/gRPC/Worker/Embedding 验证保存配置、摄取、检索、会话时间与用户隔离；Chat 使用确定性测试供应商，除非显式启用真实 Chat。
 
 ```text
 tests/
@@ -309,6 +309,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界。 |
 | 同上 | `test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes` | Docker 公共入口复用 Function；run 统一由 Earthfile 顺序准备共享卷、等待 RAG、启动产品服务与容器化 Vue 前端；验证 suite、静默校验 Compose、扫描日志和持久卷保护。eval 同时收集既有 30 问与 PDF 五十问。此离线静态契约不替代 Windows/WSL/Linux 的实际启动验收。 |
 | 同上 | `test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths` | Docker 入口构建安全材料/ES/bootstrap 服务，并仅向测试容器传递 ES password file 与 CA path。 |
+| 同上 | `test_containerized_web_upload_limits_match_supported_rag_sources` | 前端与 Go 白名单一致接纳 PDF、CHM/CHI、Markdown、文本和代码；Nginx 为 32 MiB 文件及 multipart 开销设置 34 MiB 请求上限。 |
 | `test_container_artifacts.py` | `test_package_and_container_use_canonical_root_readme` | GitHub 首页、Python package、Docker 镜像与 Earthly 依赖安装统一使用仓库根 README，禁止保留重复入口。 |
 | `test_search_guard_assets.py` | `test_development_material_generator_creates_separate_node_and_client_secrets` | development 材料生成器使用独立 node/admin 私钥，客户端密码不回显到进程输出。 |
 | 同上 | `test_development_material_generator_writes_certificate_key_identifiers` | development CA 与节点证书生成 SKI/AKI，保证运行时 TLS 链校验可用。 |

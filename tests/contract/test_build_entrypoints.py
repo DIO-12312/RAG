@@ -178,3 +178,18 @@ def test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths() -> N
     assert "RAG_TEST_ELASTICSEARCH_CA_CERT=/run/secrets/ca.pem" in earthfile
     assert "docker compose config --quiet" in earthfile
     assert "docker compose config >" not in earthfile
+
+
+def test_containerized_web_upload_limits_match_supported_rag_sources() -> None:
+    """Web、Nginx 与 Go 上传入口必须共同接纳 32 MiB 的 CHM/CHI 等 RAG 文件。"""
+
+    upload_panel = _text("apps/web/src/components/UploadPanel.vue")
+    nginx = _text("apps/web/nginx.conf")
+    resources = _text("backend/go-api/internal/httpapi/resources.go")
+
+    expected_extensions = ("pdf", "md", "txt", "py", "go", "js", "ts", "java", "chm", "chi")
+    for extension in expected_extensions:
+        assert f".{extension}" in upload_panel
+        assert f".{extension}" in resources
+    assert "file.size > 32*1024*1024" in upload_panel
+    assert "client_max_body_size 34m;" in nginx
