@@ -72,6 +72,8 @@ Earthfile 顺序准备共享密钥卷、等待 RAG 服务就绪、启动产品 M
 
 前端地址为 `http://127.0.0.1:5173/`，Go API 为 `http://127.0.0.1:8080/`。端口占用时前端报错，不自动切换端口。Ctrl+C 停止前台开发命令，已启动的 Docker 服务保留；停止产品服务使用 `docker compose -f compose.product.yml down`，RAG 使用 `make docker-down`，均不删除持久卷。`make docker-up` 仍仅启动 RAG。
 
+前端代码改动后，执行 `make web-restart`，通过 Earthfile 重新构建镜像并重建前端 `web` 容器，使最新静态资源生效。该入口不启动或重启 Go API、MySQL、RAG 等依赖，也不删除数据卷；请先用 `make run` 启动完整环境。
+
 需要 Docker Engine、Docker Compose、GNU Make 和 Earthly v0.8.16。Windows 推荐在 WSL2 中执行以下命令。
 
 ```bash

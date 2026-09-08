@@ -4,6 +4,24 @@
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
 
+### 2026-09-08 聊天行内来源引用
+
+```text
+apps/web/tests/
+├─ markdown-content.spec.ts  # Markdown、安全清洗、行内引用与来源卡片 Markdown
+└─ copy-source.spec.ts       # 来源原文复制与普通 HTTP 兼容回退
+```
+
+| 文件 | 用例 / 职责 | 运行边界 |
+|---|---|---|
+| `apps/web/tests/copy-source.spec.ts` | `copies raw source with ... clipboard support and reports the actual result`：覆盖现代 Clipboard API、API 缺失、权限拒绝、选区复制失败与异常，并验证原文、清理及焦点恢复 | Vitest/jsdom，离线组件测试 |
+| `apps/web/tests/markdown-content.spec.ts` | `renders only mapped prose citations as inline circular controls`：已映射正文编号转圆形控件，未知编号、代码和链接保持原样 | Vitest/jsdom，离线组件测试 |
+| 同上 | `previews source on hover and expands full evidence on click with Escape focus return`：悬停文件与位置、点击完整原文、安全文本展示、Esc / 按钮 / 遮罩关闭及焦点返回，关闭不重开预览 | 同上 |
+| 同上 | `supports keyboard opening and clears stale sources when message changes`：键盘打开，切换消息清除旧卡片及来源映射 | 同上 |
+| 同上 | `renders expanded source Markdown safely without turning source numbers into citations`：展开来源支持标题、强调、列表、表格、代码块；防止脚本执行、远程图片请求及来源内部编号误映射 | 同上 |
+
+运行 `npm --prefix apps/web test -- --run`；不纳入 Python 门禁，不替代真实浏览器布局、真实 Chat 或后端集成验收。
+
 ## 目录树
 
 ### 2026-09-06 产品体验与模型配置补充
@@ -13,6 +31,7 @@
 | `unit/adapters/test_dataset_profile.py` | `test_profiles_keep_provider_keys_isolated`、`test_invalid_profile_fails_without_exposing_secret`：快照选模型、密钥隔离及错误脱敏 | 离线，HTTP 传输替身 |
 | `unit/adapters/test_dataset_profile.py` | `test_endpoint_blocks_private_resolution`、`test_fake_ip_resolution_uses_public_dns_before_connecting`：私网拒绝、Fake-IP 公网重解析后固定连接地址 | 离线，DNS/传输替身 |
 | `fakes/metadata.py` | Fake Metadata 新增首次绑定模型快照，保留已有快照，拒绝原模型/维度不匹配 | 仅测试，不代表真实 MySQL 锁验收 |
+| `contract/test_build_entrypoints.py` | `test_web_restart_only_rebuilds_web_through_earthly`：执行 Make recipe 与 Earthfile RUN 的命令替身，验证仅重新构建/重建 web、静默校验 Compose、不启动依赖或删除卷 | 离线 sh；GNU Make 转发另用 make -n 检查；不实际重启 Docker，不替代真实容器验收 |
 | `contract/test_container_artifacts.py` | Runtime 不再注入 Embedding 凭据，只读共享基础设施密钥；旧模型环境变量只用于显式模型测试 | `make ci` |
 | `integration/test_mysql_migrations.py` | 升级至 0003，加密快照列可空以兼容旧 Dataset | 必须隔离测试库，fixture 会清空业务表 |
 | `integration/test_mysql_submission.py` | `test_embedding_binding_is_first_write_only`：原模型不匹配拒绝、并发首次绑定收敛、后续配置不能覆盖快照 | 真实隔离 MySQL |
@@ -27,7 +46,7 @@ tests/
 ├─ embedding_profile.py                    # E2E/真实韧性套件生成加密 RPC 快照；测试专用 env 凭据不进入运行服务
 ├─ conftest.py                              # 共享 pytest 配置与 fixture
 ├─ contract/                                # gRPC、protobuf 与 Port 语义契约
-│  ├─ test_build_entrypoints.py
+│  ├─ test_build_entrypoints.py          # Make/Earthly 公共入口与仅前端重启边界
 │  ├─ test_container_artifacts.py
 │  ├─ test_delete_document_contract.py
 │  ├─ test_generated_code.py

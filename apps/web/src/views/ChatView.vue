@@ -85,19 +85,13 @@ async function ask():Promise<void>{if(!selectedId.value||!question.value.trim()|
         <h2><span class="message-avatar"><AppIcon :name="message.role==='user'?'chat':'spark'" /></span>{{ message.role==="user"?"你":"知识助手" }}</h2><MarkdownContent
           v-if="message.role==='assistant'"
           :content="message.content"
+          :citations="message.citations"
         /><p
           v-else
           class="answer-content"
         >
           {{ message.content }}
-        </p><details
-          v-for="citation in message.citations"
-          :key="citation.ordinal"
-        >
-          <summary><AppIcon name="file" />[{{ citation.ordinal }}] {{ citation.evidence.sourceName }} · {{ citation.evidence.locator }}</summary><p class="answer-content">
-            {{ citation.evidence.content }}
-          </p>
-        </details>
+        </p>
       </article>
       <p
         v-if="phase"

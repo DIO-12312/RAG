@@ -24,7 +24,6 @@ python-workspace:
     COPY migrations ./migrations
     COPY tests ./tests
     COPY docs ./docs
-    COPY .github ./.github
     COPY docker ./docker
     COPY Earthfile Makefile Dockerfile Dockerfile.elasticsearch docker-compose.yml docker-compose.debug.yml alembic.ini ./
     COPY SPEC.md PLAN.md AGENTS.md ./
@@ -120,6 +119,12 @@ run:
     RUN docker volume create rag-product_product-keys
     DO +DOCKER_START
     RUN docker compose -f compose.product.yml up -d --build --wait --wait-timeout 240
+
+# Rebuild and recreate only the frontend container without starting dependencies or removing volumes.
+web-restart:
+    LOCALLY
+    RUN docker compose -f compose.product.yml config --quiet
+    RUN docker compose -f compose.product.yml up -d --build --no-deps --force-recreate --wait --wait-timeout 240 web
 
 # Run a selected real Docker suite and preserve the service state for diagnosis after failure.
 docker-test:
