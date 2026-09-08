@@ -328,9 +328,7 @@ def _write_matching_config(work_dir: Path) -> None:
     )
 
 
-def test_verify_existing_uses_output_flag_for_sgctl_get_config(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_verify_existing_uses_output_flag_for_sgctl_get_config(monkeypatch, tmp_path: Path) -> None:
     """sgctl 4.x get-config 必须使用 --output 选项；位置参数会被 sgctl 拒绝。"""
 
     work_dir = tmp_path / "work"
@@ -386,9 +384,7 @@ def test_verify_existing_returns_false_on_timeout(monkeypatch, tmp_path: Path) -
     assert result is False
 
 
-def test_initialize_retries_on_timeout_instead_of_aborting(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_initialize_retries_on_timeout_instead_of_aborting(monkeypatch, tmp_path: Path) -> None:
     """update-config 超时属于瞬态故障，必须继续重试而非终止 bootstrap。"""
 
     config_dir = tmp_path / "config"

@@ -115,9 +115,7 @@ def _verify_existing(work_dir: Path) -> bool:
     for name, markers in _REQUIRED_MARKERS.items():
         content = (work_dir / name).read_text(encoding="utf-8")
         if any(marker not in content for marker in markers):
-            raise RuntimeError(
-                f"existing Search Guard {name} differs from the declared baseline"
-            )
+            raise RuntimeError(f"existing Search Guard {name} differs from the declared baseline")
     return True
 
 
