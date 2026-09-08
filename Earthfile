@@ -25,7 +25,9 @@ python-workspace:
     COPY tests ./tests
     COPY docs ./docs
     COPY docker ./docker
-    COPY Earthfile Makefile Dockerfile Dockerfile.elasticsearch docker-compose.yml docker-compose.debug.yml alembic.ini ./
+    COPY apps ./apps
+    COPY backend ./backend
+    COPY Earthfile Makefile Dockerfile Dockerfile.elasticsearch docker-compose.yml docker-compose.debug.yml compose.product.yml alembic.ini ./
     COPY SPEC.md PLAN.md AGENTS.md ./
     COPY .dockerignore .gitattributes .earthly.env ./
     RUN uv sync --frozen --group dev

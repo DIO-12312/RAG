@@ -98,6 +98,9 @@ def test_earthfile_pins_tools_and_separates_offline_targets() -> None:
     assert "resilience and not docker_resilience" in earthfile
     assert "eval and not e2e" in earthfile
     assert "EMBEDDING_MODEL_API_KEY" not in earthfile
+    assert "COPY apps ./apps" in earthfile
+    assert "COPY backend ./backend" in earthfile
+    assert "compose.product.yml" in earthfile
 
 
 def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> None:
