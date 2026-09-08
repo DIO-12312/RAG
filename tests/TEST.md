@@ -4,6 +4,22 @@
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
 
+### 2026-09-08 聊天行内来源引用
+
+```text
+apps/web/tests/
+└─ markdown-content.spec.ts  # Markdown、安全清洗、行内引用与来源卡片 Markdown
+```
+
+| 文件 | 用例 / 职责 | 运行边界 |
+|---|---|---|
+| `apps/web/tests/markdown-content.spec.ts` | `renders only mapped prose citations as inline circular controls`：已映射正文编号转圆形控件，未知编号、代码和链接保持原样 | Vitest/jsdom，离线组件测试 |
+| 同上 | `previews source on hover and expands full evidence on click with Escape focus return`：悬停文件与位置、点击完整原文、安全文本展示、Esc / 按钮 / 遮罩关闭及焦点返回，关闭不重开预览 | 同上 |
+| 同上 | `supports keyboard opening and clears stale sources when message changes`：键盘打开，切换消息清除旧卡片及来源映射 | 同上 |
+| 同上 | `renders expanded source Markdown safely without turning source numbers into citations`：展开来源支持标题、强调、列表、表格、代码块；防止脚本执行、远程图片请求及来源内部编号误映射 | 同上 |
+
+运行 `npm --prefix apps/web test -- --run`；不纳入 Python 门禁，不替代真实浏览器布局、真实 Chat 或后端集成验收。
+
 ## 目录树
 
 ### 2026-09-06 产品体验与模型配置补充
