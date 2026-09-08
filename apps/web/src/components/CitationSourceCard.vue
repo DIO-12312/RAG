@@ -44,9 +44,40 @@ function onKey(event: KeyboardEvent): void {
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
 }
+function copyWithSelection(text: string): boolean {
+  const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const input = document.createElement('textarea');
+  input.value = text;
+  input.readOnly = true;
+  input.style.position = 'fixed';
+  input.style.opacity = '0';
+  input.style.pointerEvents = 'none';
+  document.body.appendChild(input);
+  input.focus({ preventScroll: true });
+  input.select();
+  input.setSelectionRange(0, text.length);
+  try {
+    return typeof document.execCommand === 'function' && document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    input.remove();
+    focused?.focus({ preventScroll: true });
+  }
+}
 async function copy(): Promise<void> {
-  try { await navigator.clipboard.writeText(props.citation.evidence.content); copyStatus.value = '已复制'; }
-  catch { copyStatus.value = '复制失败，请选择原文复制'; }
+  const text = props.citation.evidence.content;
+  let copied = false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    }
+  } catch {
+    // 普通 HTTP 或权限受限时，回退到选区复制。
+  }
+  if (!copied) copied = copyWithSelection(text);
+  copyStatus.value = copied ? '已复制' : '复制失败，请选择原文复制';
 }
 watch(() => [props.expanded, props.citation, props.anchor], async () => {
   copyStatus.value = '';

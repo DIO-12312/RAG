@@ -8,11 +8,13 @@
 
 ```text
 apps/web/tests/
-└─ markdown-content.spec.ts  # Markdown、安全清洗、行内引用与来源卡片 Markdown
+├─ markdown-content.spec.ts  # Markdown、安全清洗、行内引用与来源卡片 Markdown
+└─ copy-source.spec.ts       # 来源原文复制与普通 HTTP 兼容回退
 ```
 
 | 文件 | 用例 / 职责 | 运行边界 |
 |---|---|---|
+| `apps/web/tests/copy-source.spec.ts` | `copies raw source with ... clipboard support and reports the actual result`：覆盖现代 Clipboard API、API 缺失、权限拒绝、选区复制失败与异常，并验证原文、清理及焦点恢复 | Vitest/jsdom，离线组件测试 |
 | `apps/web/tests/markdown-content.spec.ts` | `renders only mapped prose citations as inline circular controls`：已映射正文编号转圆形控件，未知编号、代码和链接保持原样 | Vitest/jsdom，离线组件测试 |
 | 同上 | `previews source on hover and expands full evidence on click with Escape focus return`：悬停文件与位置、点击完整原文、安全文本展示、Esc / 按钮 / 遮罩关闭及焦点返回，关闭不重开预览 | 同上 |
 | 同上 | `supports keyboard opening and clears stale sources when message changes`：键盘打开，切换消息清除旧卡片及来源映射 | 同上 |
