@@ -29,6 +29,7 @@ apps/web/tests/
 | `unit/adapters/test_dataset_profile.py` | `test_profiles_keep_provider_keys_isolated`、`test_invalid_profile_fails_without_exposing_secret`：快照选模型、密钥隔离及错误脱敏 | 离线，HTTP 传输替身 |
 | `unit/adapters/test_dataset_profile.py` | `test_endpoint_blocks_private_resolution`、`test_fake_ip_resolution_uses_public_dns_before_connecting`：私网拒绝、Fake-IP 公网重解析后固定连接地址 | 离线，DNS/传输替身 |
 | `fakes/metadata.py` | Fake Metadata 新增首次绑定模型快照，保留已有快照，拒绝原模型/维度不匹配 | 仅测试，不代表真实 MySQL 锁验收 |
+| `contract/test_build_entrypoints.py` | `test_web_restart_only_rebuilds_web_through_earthly`：执行 Make recipe 与 Earthfile RUN 的命令替身，验证仅重新构建/重建 web、静默校验 Compose、不启动依赖或删除卷 | 离线 sh；GNU Make 转发另用 make -n 检查；不实际重启 Docker，不替代真实容器验收 |
 | `contract/test_container_artifacts.py` | Runtime 不再注入 Embedding 凭据，只读共享基础设施密钥；旧模型环境变量只用于显式模型测试 | `make ci` |
 | `integration/test_mysql_migrations.py` | 升级至 0003，加密快照列可空以兼容旧 Dataset | 必须隔离测试库，fixture 会清空业务表 |
 | `integration/test_mysql_submission.py` | `test_embedding_binding_is_first_write_only`：原模型不匹配拒绝、并发首次绑定收敛、后续配置不能覆盖快照 | 真实隔离 MySQL |
@@ -43,7 +44,7 @@ tests/
 ├─ embedding_profile.py                    # E2E/真实韧性套件生成加密 RPC 快照；测试专用 env 凭据不进入运行服务
 ├─ conftest.py                              # 共享 pytest 配置与 fixture
 ├─ contract/                                # gRPC、protobuf 与 Port 语义契约
-│  ├─ test_build_entrypoints.py
+│  ├─ test_build_entrypoints.py          # Make/Earthly 公共入口与仅前端重启边界
 │  ├─ test_container_artifacts.py
 │  ├─ test_delete_document_contract.py
 │  ├─ test_generated_code.py

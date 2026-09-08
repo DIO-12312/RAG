@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 # 校验 Makefile 与 Earthfile 公开入口、密钥隔离及卷保护约束。
+import os
 import re
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,7 +29,17 @@ def test_makefile_offline_targets_are_commented_earthly_only_entrypoints() -> No
     assert "EARTHLY_ENV_FILE ?= .earthly.env" in makefile
     assert "EARTHLY_FLAGS ?=" in makefile
     assert (ROOT / ".earthly.env").read_text(encoding="utf-8").startswith("# Intentionally empty")
-    earthfile_targets = {"proto", "lint", "test", "ci", "docker-up", "docker-test", "docker-down", "run"}
+    earthfile_targets = {
+        "proto",
+        "lint",
+        "test",
+        "ci",
+        "docker-up",
+        "docker-test",
+        "docker-down",
+        "run",
+        "web-restart",
+    }
     execution_recipes = [
         match.group("recipe")
         for match in re.finditer(
@@ -103,6 +115,7 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
         "docker-test",
         "docker-down",
         "run",
+        "web-restart",
         "clear",
         "help",
     }
@@ -169,3 +182,60 @@ def test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths() -> N
     assert "RAG_TEST_ELASTICSEARCH_CA_CERT=/run/secrets/ca.pem" in earthfile
     assert "docker compose config --quiet" in earthfile
     assert "docker compose config >" not in earthfile
+
+
+def test_web_restart_only_rebuilds_web_through_earthly(tmp_path: Path) -> None:
+    """Make delegates to Earthly; local Docker commands only recreate web."""
+    recorder = tmp_path / "recorder"
+    recorder.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n', encoding="utf-8")
+    recorder.chmod(0o755)
+    recipe = re.search(r"^web-restart:\n\t(.+)$", _text("Makefile"), re.MULTILINE)
+    assert recipe is not None
+    # Run the actual recipe with Make variables resolved; offline images need no GNU Make.
+    command = recipe.group(1).replace("$(EARTHLY)", str(recorder))
+    command = command.replace("$(EARTHLY_ENV_FILE)", ".earthly.env")
+    command = command.replace("$(EARTHLY_FLAGS)", "")
+    result = subprocess.run(
+        ["sh", "-c", command],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.splitlines() == ["--env-file-path", ".earthly.env", "+web-restart"]
+    earthfile = _text("Earthfile")
+    target = earthfile.split("\nweb-restart:\n", 1)[1].split("\n#", 1)[0]
+    assert "    LOCALLY" in target
+    assert "DO +DOCKER_START" not in target
+    docker = tmp_path / "docker"
+    docker.write_text(recorder.read_text(encoding="utf-8"), encoding="utf-8")
+    docker.chmod(0o755)
+    commands = re.findall(r"^    RUN (.+)$", target, re.MULTILINE)
+    calls = []
+    for command in commands:
+        completed = subprocess.run(
+            ["sh", "-c", command],
+            cwd=ROOT,
+            env={**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        calls.append(completed.stdout.splitlines())
+    assert calls == [
+        ["compose", "-f", "compose.product.yml", "config", "--quiet"],
+        [
+            "compose",
+            "-f",
+            "compose.product.yml",
+            "up",
+            "-d",
+            "--build",
+            "--no-deps",
+            "--force-recreate",
+            "--wait",
+            "--wait-timeout",
+            "240",
+            "web",
+        ],
+    ]
