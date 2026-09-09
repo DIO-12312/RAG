@@ -162,6 +162,7 @@ tests/
    ├─ retrieval/
    │  ├─ test_context_builder.py
    │  ├─ test_hybrid.py
+   │  ├─ test_query_analysis.py
    │  ├─ test_provenance.py
    │  └─ test_rerank.py
    ├─ test_config.py
@@ -231,6 +232,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_chi_hit_resolves_associated_chm_topic_and_then_expands_neighbors` | CHI 命中按同 Dataset、同名 CHM 和 Topic/anchor 回查正文，经 MySQL active-version 复核后继续扩展同 Topic 邻居，并区分两类辅助 Evidence。 |
 | 同上 | `test_chi_reference_replaces_duplicate_direct_chm_anchor` | CHI 回指与普通混合检索命中同一 CHM Chunk 时不复制正文：保留直接锚点位置和真实分数，并附加 CHI 桥接审计字段。 |
 | 同上 | `test_identifier_priority_supports_mixed_case_c_api_names` | 显式混合大小写 C API 名完整命中优先于更高 RRF 的无关候选，覆盖 `DDS_DomainParticipantFactory_create_participant` 形式。 |
+| 同上 | `test_vague_dds_query_runs_all_rewrites_through_dense_and_sparse_routes` | 模糊 DDS 问题产生的 2～3 个子查询全部经过 Dense/BM25 召回，并能用规范接口词命中证据。 |
 | `application/test_source_service.py` | `test_source_service_returns_complete_normalized_topic_as_markdown` | 以 Document、激活版本和安全 Topic 路径从原始 CHM 恢复完整 Topic Markdown。 |
 | 同上 | `test_source_service_rejects_stale_citation_version` | 旧索引版本的引用不得读取当前版本原文，避免来源错配。 |
 | 同上 | `test_source_service_rejects_unsafe_topic_path` | 路径穿越在读取对象前 fail closed。 |
@@ -292,6 +294,14 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | `retrieval/test_hybrid.py` | `test_rrf_fuses_routes_deduplicates_and_keeps_stage_scores` | RRF 融合双路候选、去重并保留阶段分数。 |
 | 同上 | `test_rrf_uses_record_id_as_stable_final_tie_breaker` | RRF 同分时使用 record ID 稳定排序。 |
 | 同上 | `test_rrf_rejects_invalid_constant` | 非法 RRF 常量被拒绝。 |
+| 同上 | `test_same_route_merge_rewards_candidates_recalled_by_multiple_subqueries` | 同一 Dense 或 BM25 路线内，跨子查询重复召回的候选稳定优先并保留最大原始分数。 |
+| 同上 | `test_same_route_merge_rejects_invalid_constant` | 同路子查询合并拒绝非法 RRF 常量。 |
+| `retrieval/test_query_analysis.py` | `test_query_intent_classification` | 安装、配置、接口使用、QoS、错误排查和性能调优六类意图可确定分类。 |
+| 同上 | `test_query_normalization_expands_abbreviations_terms_and_natural_language_apis` | DP/DW/DR、中英文 DDS 术语与自然语言操作扩展为规范实体和接口名。 |
+| 同上 | `test_query_analysis_extracts_api_struct_enum_and_error_code` | 显式 API、结构体、枚举和错误码被分类提取。 |
+| 同上 | `test_vague_query_produces_two_or_three_distinct_retrieval_subqueries` | 模糊问题只生成 2～3 个稳定去重子查询。 |
+| 同上 | `test_explicit_api_query_keeps_one_normalized_subquery` | 含明确 API 的问题只保留一个归一化查询，避免无必要扩召回。 |
+| 同上 | `test_empty_query_is_rejected` | 空查询在纯分析器边界被拒绝。 |
 | `retrieval/test_provenance.py` | `test_dense_evidence_preserves_traceable_chunk_fields` | evidence 保留可追溯 chunk 字段。 |
 | 同上 | `test_chm_evidence_exposes_body_without_retrieval_weight_prefix` | Evidence 的展示正文去除 CHM 检索权重前缀，同时保留原 `content_with_weight` 供模型使用。 |
 | `retrieval/test_rerank.py` | `test_rerank_scores_reorder_stably_and_keep_fusion_data` | Rerank 稳定重排并保留 fusion 数据。 |

@@ -278,7 +278,7 @@ tests/
 ├─ unit/
 │  ├─ domain/                 # 状态机、digest、稳定 ID、领域校验
 │  ├─ ingestion/              # parser、chunker、dedup、pipeline
-│  ├─ retrieval/              # RRF、过滤、排序、context budget、evidence provenance
+│  ├─ retrieval/              # 查询理解、RRF、过滤、排序、context budget、evidence provenance
 │  └─ application/            # 用例与 fake ports
 ├─ contract/
 │  ├─ test_search_engine_contract.py
@@ -355,6 +355,7 @@ tests/
 | T23 | Delete 取消未启动摄取，已发布消息只 ACK。 | 分别构造 WAITING、READY、PUBLISHED 未认领 Task 后删除；断言前两者不发布/不执行，后者 Worker 仅 ACK。 |
 | T24 | 并发相同文件上传只复用一个 canonical Job。 | 两个不同幂等键同时提交相同 dataset/file/config，断言唯一 fingerprint、同一 Document/Job、第二个 staging object 被清理。 |
 | T25 | Fingerprint 在失败重试和删除后遵守复用/释放语义。 | 正式对象存在的失败上传再次 Submit 返回 FAILED_RETRYABLE canonical Job；无正式对象失败和已删除 Document 的 fingerprint=RELEASED，下一次上传可创建新 Document。 |
+| T26 | DDS 查询理解与改写保持确定、受限且可追踪。 | 固定中英文术语、DP/DW/DR、API、结构体、枚举和错误码输入，断言归一化实体与意图；明确问题只生成一个归一化查询，模糊问题只生成 2～3 个去重子查询，并让每个子查询同时经过 Dense/BM25 召回。 |
 
 ### 4.5 如何测试“断电重启”
 
@@ -525,6 +526,7 @@ python-rag-mvp/
 │  │  ├─ failpoints.py                  # TEST-only 跨进程文件 barrier；生产配置拒绝启用
 │  │  └─ worker.py                     # 唯一的 JetStream consumer：consume → IngestionService → ACK/NAK
 │  ├─ retrieval/                       # 纯检索算法；不依赖 gRPC、MySQL、NATS 或 ES SDK
+│  │  ├─ query_analysis.py              # 确定性 DDS 术语归一化、实体提取、意图分类与受限多查询改写
 │  │  ├─ hybrid.py                      # 合并 Dense KNN 与 BM25 候选，按 RRF 融合、去重、保留各阶段分数
 │  │  ├─ rerank.py                      # 纯函数：按 application 提供的 rerank 分数稳定重排；模型不可用时按融合排序降级
 │  │  ├─ context_builder.py             # 按 token 预算选取完整 evidence，返回 ContextPlan（evidence + token 估算）；不生成 Prompt
@@ -560,10 +562,11 @@ MySQL OutboxEvent
     → ports/message_queue.py（仅发布 task_id）
 
 application/retrieval_service.py
-  → ports/search_engine.py（dense/sparse candidates）
+  → retrieval/query_analysis.py（术语归一化、实体/意图识别、最多 3 个子查询）
+  → ModelGateway.embed(subqueries) + ports/search_engine.py（各子查询的 dense/sparse candidates）
   → ports/metadata_repository.py（active-version / 删除状态复核）
-  → ModelGateway.embed(query) → ports/search_engine.py（dense candidates）
-  → retrieval/hybrid.py → ModelGateway.rerank(...) → rerank.py → context_builder.py → provenance.py
+  → retrieval/hybrid.py（同路子查询合并后，再做 Dense/BM25 RRF）
+  → ModelGateway.rerank(original query, ...) → rerank.py → context_builder.py → provenance.py
   → 返回 Evidence DTO
 ```
 
@@ -620,9 +623,11 @@ class ModelGateway(Protocol):
     async def rerank(self, query: str, passages: list[str]) -> list[float]: ...
 ```
 
-`SearchRequest` 必须包含 `dataset_id`、受限的 metadata filters、召回数量和 query（稀疏）或 query vector（稠密）；`SearchCandidate` 必须至少返回 `chunk_id`、`document_id`、`index_version`、`dataset_id`、原始分数、文本和来源定位。`RetrievalService` 负责先调用 `ModelGateway.embed([query])`，再调用 `dense_search`；不能让 ES adapter 自行选择 Embedding 模型。这样 `dataset_id` 过滤在 ES 侧先收窄，Document/version 的最终可见性仍由 MySQL 复核。
+`SearchRequest` 必须包含 `dataset_id`、受限的 metadata filters、召回数量和 query（稀疏）或 query vector（稠密）；`SearchCandidate` 必须至少返回 `chunk_id`、`document_id`、`index_version`、`dataset_id`、原始分数、文本和来源定位。`RetrievalService` 负责先对查询做确定性分析，再调用 `ModelGateway.embed(subqueries)` 和 `dense_search`；不能让 ES adapter 自行选择 Embedding 模型。这样 `dataset_id` 过滤在 ES 侧先收窄，Document/version 的最终可见性仍由 MySQL 复核。
 
 `SearchEngine` 不能只暴露 `similarity_search`。它必须从接口层支持 metadata filter、全文/稠密多路匹配与删除；`retrieval/hybrid.py` 是 Dense/BM25 候选的唯一 RRF 融合和稳定排序位置，避免适配器和算法层重复融合。这是从 RAGFlow `DocStoreConnection` 的成熟检索抽象中借鉴的关键点。
+
+查询分析必须由纯规则模块 `retrieval/query_analysis.py` 完成，不调用 LLM、数据库或搜索 SDK。模块以 NFKC 和空白规范化保留原问题，执行中英文 DDS 术语归一化，扩展 `DP`、`DW`、`DR`，提取 API 名、结构体、枚举和错误码，将常见自然语言操作映射到 DDS 接口名，并把查询归入安装、配置、接口使用、QoS、错误排查、性能调优或通用意图。含明确 API/错误码的问题只产生一个归一化查询；“怎么用、怎么配、报错了、很慢”等模糊问题产生 2～3 个稳定去重的检索子查询。每个子查询必须同时执行 Dense 与 BM25 召回；同一种召回路线内先按跨子查询排名合并并去重，再由 `retrieval/hybrid.py` 执行既有 Dense/BM25 RRF。Rerank 仍使用用户原问题，且无论改写数量如何，最终仍受原 filters、MySQL active-version 复核、Top-K 和 context budget 约束。
 
 `RetrievalService` 必须向 ES 请求大于最终 Top-K 的候选，再经 `MetadataRepository` 批量读取候选 Document 的 `active_version` 与删除状态，剔除版本不匹配或已删除的候选后才执行 RRF。若启用重排，由 `RetrievalService` 调用 `ModelGateway.rerank`，把返回分数交给纯函数 `retrieval/rerank.py` 稳定排序；模型不可用且错误可降级时只返回 RRF 排序。查询中出现 C API/枚举形式的显式标识符时，应用层可在不修改各路原始分数的前提下，对大小写不敏感的完整标识符命中执行稳定优先级调整。
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # 验证检索服务复核 active version 后执行融合、重排与 evidence 返回。
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import pytest
@@ -11,7 +12,7 @@ from rag_mvp.domain.enums import DocumentStatus
 from rag_mvp.domain.errors import DomainError
 from rag_mvp.domain.ids import content_sha256
 from rag_mvp.domain.models import Chunk, Dataset, Document, Locator
-from rag_mvp.ports.search_engine import IndexedChunk
+from rag_mvp.ports.search_engine import IndexedChunk, SearchCandidate, SearchRequest
 from rag_mvp.retrieval.hybrid import HybridCandidate
 from tests.fakes.metadata import FakeMetadataRepository
 from tests.fakes.model import FakeModelGateway
@@ -23,6 +24,21 @@ class FailingRerankModel(FakeModelGateway):
         """模拟重排模型并返回可预测的分数。"""
         del query, passages
         raise ConnectionError("reranker unavailable")
+
+
+class RecordingSearchEngine(FakeSearchEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.dense_requests: list[SearchRequest] = []
+        self.sparse_requests: list[SearchRequest] = []
+
+    async def dense_search(self, request: SearchRequest) -> Sequence[SearchCandidate]:
+        self.dense_requests.append(request)
+        return await super().dense_search(request)
+
+    async def sparse_search(self, request: SearchRequest) -> Sequence[SearchCandidate]:
+        self.sparse_requests.append(request)
+        return await super().sparse_search(request)
 
 
 def _chunk(
@@ -431,3 +447,42 @@ def test_identifier_priority_supports_mixed_case_c_api_names() -> None:
     )
 
     assert [candidate.record_id for candidate in ranked] == ["exact", "unrelated"]
+
+
+@pytest.mark.asyncio
+async def test_vague_dds_query_runs_all_rewrites_through_dense_and_sparse_routes() -> None:
+    now = datetime.now(UTC)
+    repository = FakeMetadataRepository()
+    model = FakeModelGateway(8)
+    search = RecordingSearchEngine()
+    await repository.create_dataset(Dataset("dataset-1", "Docs", "fake", 8, now))
+    repository.documents["document-1"] = Document(
+        id="document-1",
+        dataset_id="dataset-1",
+        source_name="manual.chm",
+        file_sha256="0" * 64,
+        status=DocumentStatus.READY,
+        active_version=1,
+        next_index_version=2,
+        lifecycle_generation=0,
+        created_at=now,
+        object_key="objects/document-1/source",
+    )
+    chunk = _chunk(
+        "document-1",
+        1,
+        "DDS_DataWriter DDS_Publisher_create_datawriter 接口 使用方法 参数 返回值",
+    )
+    vector = (await model.embed(["index text"]))[0]
+    await search.upsert_chunks((IndexedChunk("record-1", "dataset-1", chunk, vector),))
+
+    result = await RetrievalService(repository, search, model).retrieve(
+        RetrieveQuery("request", "dataset-1", "DW怎么用", 5, {}, 100)
+    )
+
+    assert [item.chunk_id for item in result.evidence] == [chunk.id]
+    assert len(search.dense_requests) == 3
+    assert len(search.sparse_requests) == 3
+    sparse_queries = tuple(request.query or "" for request in search.sparse_requests)
+    assert any("DDS_DataWriter" in search_query for search_query in sparse_queries)
+    assert any("DDS_Publisher_create_datawriter" in search_query for search_query in sparse_queries)

@@ -24,8 +24,13 @@ from rag_mvp.ports.search_engine import (
     TopicReferenceRequest,
 )
 from rag_mvp.retrieval.context_builder import ContextPlan, build_context_plan
-from rag_mvp.retrieval.hybrid import HybridCandidate, reciprocal_rank_fusion
+from rag_mvp.retrieval.hybrid import (
+    HybridCandidate,
+    merge_ranked_routes,
+    reciprocal_rank_fusion,
+)
 from rag_mvp.retrieval.provenance import hybrid_evidence, reranked_evidence
+from rag_mvp.retrieval.query_analysis import analyze_query
 from rag_mvp.retrieval.rerank import apply_rerank_scores
 
 
@@ -57,8 +62,12 @@ class RetrievalService:
             raise DomainError(DomainFailure("DATASET_NOT_FOUND", "dataset does not exist"))
         if dataset.status is not DatasetStatus.ACTIVE:
             raise DomainError(DomainFailure("DATASET_DELETING", "dataset is being deleted"))
-        vectors = await model_for_dataset(self._model, dataset).embed([query.query])
-        if len(vectors) != 1 or len(vectors[0]) != dataset.embedding_dimension:
+        analysis = analyze_query(query.query)
+        search_queries = analysis.subqueries
+        vectors = await model_for_dataset(self._model, dataset).embed(list(search_queries))
+        if len(vectors) != len(search_queries) or any(
+            len(vector) != dataset.embedding_dimension for vector in vectors
+        ):
             raise DomainError(
                 DomainFailure(
                     "EMBEDDING_DIMENSION_MISMATCH",
@@ -68,42 +77,57 @@ class RetrievalService:
             )
 
         candidate_limit = min(max(query.top_k * 4, 20), 100)
-        dense_candidates, sparse_candidates = await asyncio.gather(
-            self._search.dense_search(
-                SearchRequest(
-                    dataset_id=query.dataset_id,
-                    top_k=candidate_limit,
-                    query_vector=vectors[0],
-                    filters=query.filters,
+        route_results = await asyncio.gather(
+            *(
+                self._search.dense_search(
+                    SearchRequest(
+                        dataset_id=query.dataset_id,
+                        top_k=candidate_limit,
+                        query_vector=vector,
+                        filters=query.filters,
+                    )
                 )
+                for vector in vectors
             ),
-            self._search.sparse_search(
-                SearchRequest(
-                    dataset_id=query.dataset_id,
-                    top_k=candidate_limit,
-                    query=query.query,
-                    filters=query.filters,
+            *(
+                self._search.sparse_search(
+                    SearchRequest(
+                        dataset_id=query.dataset_id,
+                        top_k=candidate_limit,
+                        query=search_query,
+                        filters=query.filters,
+                    )
                 )
+                for search_query in search_queries
             ),
         )
+        route_count = len(search_queries)
+        dense_routes = route_results[:route_count]
+        sparse_routes = route_results[route_count:]
+        all_candidates = tuple(candidate for route in route_results for candidate in route)
         visible_versions = await self._metadata.visible_document_versions(
-            tuple(
-                dict.fromkeys(
-                    candidate.chunk.document_id
-                    for candidate in (*dense_candidates, *sparse_candidates)
-                )
-            )
+            tuple(dict.fromkeys(candidate.chunk.document_id for candidate in all_candidates))
         )
-        visible_dense = self._visible(dense_candidates, query.dataset_id, visible_versions)
-        visible_sparse = self._visible(sparse_candidates, query.dataset_id, visible_versions)
+        visible_dense_routes = tuple(
+            self._visible(route, query.dataset_id, visible_versions) for route in dense_routes
+        )
+        visible_sparse_routes = tuple(
+            self._visible(route, query.dataset_id, visible_versions) for route in sparse_routes
+        )
+        visible_dense = merge_ranked_routes(visible_dense_routes, rrf_k=60)
+        visible_sparse = merge_ranked_routes(visible_sparse_routes, rrf_k=60)
         fused = reciprocal_rank_fusion(
             visible_dense,
             visible_sparse,
             rrf_k=60,
         )
-        fused = self._prioritize_identifiers(query.query, fused)
+        fused = self._prioritize_identifiers(analysis.normalized_query, fused)
         anchors = await self._evidence(query, fused)
-        anchors, referenced_chunks = await self._expand_chi_topic_references(query, anchors)
+        anchors, referenced_chunks = await self._expand_chi_topic_references(
+            query,
+            anchors,
+            search_query=analysis.normalized_query,
+        )
         evidence = await self._expand_topic_neighbors(
             query,
             anchors,
@@ -174,6 +198,8 @@ class RetrievalService:
         self,
         query: RetrieveQuery,
         anchors: Sequence[Evidence],
+        *,
+        search_query: str,
     ) -> tuple[tuple[Evidence, ...], tuple[Chunk, ...]]:
         reference_requests = tuple(
             TopicReferenceAnchor(
@@ -194,7 +220,7 @@ class RetrievalService:
             candidates = await self._search.topic_references(
                 TopicReferenceRequest(
                     dataset_id=query.dataset_id,
-                    query=query.query,
+                    query=search_query,
                     anchors=reference_requests,
                     filters=query.filters,
                 )

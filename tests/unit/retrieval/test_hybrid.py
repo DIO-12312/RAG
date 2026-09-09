@@ -5,7 +5,7 @@ import pytest
 from rag_mvp.domain.ids import content_sha256
 from rag_mvp.domain.models import Chunk, Locator
 from rag_mvp.ports.search_engine import SearchCandidate
-from rag_mvp.retrieval.hybrid import reciprocal_rank_fusion
+from rag_mvp.retrieval.hybrid import merge_ranked_routes, reciprocal_rank_fusion
 
 
 def _candidate(record_id: str, score: float) -> SearchCandidate:
@@ -49,3 +49,20 @@ def test_rrf_rejects_invalid_constant() -> None:
     """验证本测试场景的预期行为与边界条件。"""
     with pytest.raises(ValueError, match="rrf_k"):
         reciprocal_rank_fusion((), (), rrf_k=0)
+
+
+def test_same_route_merge_rewards_candidates_recalled_by_multiple_subqueries() -> None:
+    routes = (
+        (_candidate("a", 0.9), _candidate("b", 0.7)),
+        (_candidate("b", 0.8), _candidate("c", 0.6)),
+    )
+
+    result = merge_ranked_routes(routes, rrf_k=60)
+
+    assert [item.record_id for item in result] == ["b", "a", "c"]
+    assert result[0].score == 0.8
+
+
+def test_same_route_merge_rejects_invalid_constant() -> None:
+    with pytest.raises(ValueError, match="rrf_k"):
+        merge_ranked_routes((), rrf_k=0)
