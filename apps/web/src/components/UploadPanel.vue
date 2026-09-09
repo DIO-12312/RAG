@@ -90,7 +90,10 @@ function fileIcon(name: string): string {
           <span class="upload-file-icon"><AppIcon :name="fileIcon(entry.file.name)" /></span>
           <span class="upload-file-name">{{ entry.file.webkitRelativePath || entry.file.name }}</span>
           <span class="upload-file-size">{{ formatSize(entry.file.size) }}</span>
-          <small class="upload-file-status" :class="{ 'upload-error': entry.error }">{{ entry.status }}{{ entry.error ? '：' + entry.error : '' }}</small>
+          <small
+            class="upload-file-status"
+            :class="{ 'upload-error': entry.error }"
+          >{{ entry.status }}{{ entry.error ? '：' + entry.error : '' }}</small>
         </div>
       </div>
       <div class="upload-actions">

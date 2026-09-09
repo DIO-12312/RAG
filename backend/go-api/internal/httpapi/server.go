@@ -98,6 +98,7 @@ func (s *Server) Router() *gin.Engine {
 	a.GET("/datasets/:id/jobs", s.jobs)
 	a.POST("/jobs/:id/:action", s.jobAction)
 	a.DELETE("/documents/:id", s.deleteDocument)
+	a.GET("/documents/:id/source-topic", s.sourceTopic)
 	a.POST("/chat/stream", s.chat)
 	a.GET("/conversations", s.conversations)
 	a.GET("/conversations/:id/messages", s.messages)

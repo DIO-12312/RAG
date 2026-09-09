@@ -12,6 +12,7 @@ from rag_mvp.application.dto import (
     DeleteDatasetCommand,
     DeleteDocumentCommand,
     GetJobQuery,
+    GetSourceTopicQuery,
     JobView,
     RetrieveQuery,
     RetryJobCommand,
@@ -19,6 +20,7 @@ from rag_mvp.application.dto import (
 )
 from rag_mvp.application.job_service import JobService
 from rag_mvp.application.retrieval_service import RetrievalService
+from rag_mvp.application.source_service import SourceService
 from rag_mvp.domain.enums import DocumentStatus, JobStatus, JobType, TaskStatus
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.models import Evidence, Locator, ScoreBreakdown
@@ -152,6 +154,7 @@ def _evidence(evidence: Evidence) -> rag_service_pb2.Evidence:
         metadata=dict(evidence.metadata),
         scores=_scores(evidence.scores),
         index_version=evidence.index_version,
+        display_content=evidence.display_content,
     )
 
 
@@ -189,8 +192,9 @@ class RagService:
         documents: DocumentService | None = None,
         jobs: JobService | None = None,
         retrieval: RetrievalService | None = None,
+        sources: SourceService | None = None,
         now: Callable[[], datetime] | None = None,
-        parser_version: str = "source-router-v5",
+        parser_version: str = "source-router-v6",
         chunk_size: int = 800,
         chunk_overlap: int = 120,
         embedding_model: str | None = None,
@@ -204,6 +208,7 @@ class RagService:
         self._documents = documents
         self._jobs = jobs
         self._retrieval = retrieval
+        self._sources = sources
         self._now = now or (lambda: datetime.now(UTC))
         self._parser_version = parser_version
         self._chunk_size = chunk_size
@@ -465,6 +470,41 @@ class RagService:
             return rag_service_pb2.RetrieveResponse(result=_retrieve_result(plan))
         except Exception as error:
             return rag_service_pb2.RetrieveResponse(error=_unexpected(error, request.request_id))
+
+    async def GetSourceTopic(
+        self,
+        request: rag_service_pb2.GetSourceTopicRequest,
+        context: object,
+    ) -> rag_service_pb2.GetSourceTopicResponse:
+        """Return one complete normalized CHM Topic for citation inspection."""
+
+        del context
+        if self._sources is None:
+            return rag_service_pb2.GetSourceTopicResponse(error=_unavailable(request.request_id))
+        try:
+            view = await self._sources.get_topic(
+                GetSourceTopicQuery(
+                    request_id=request.request_id,
+                    document_id=request.document_id,
+                    index_version=request.index_version,
+                    topic_path=request.topic_path,
+                    anchor=request.anchor if request.HasField("anchor") else None,
+                )
+            )
+            result = rag_service_pb2.GetSourceTopicResult(
+                document_id=view.document_id,
+                source_name=view.source_name,
+                topic_path=view.topic_path,
+                topic_title=view.topic_title,
+                markdown=view.markdown,
+            )
+            if view.anchor is not None:
+                result.anchor = view.anchor
+            return rag_service_pb2.GetSourceTopicResponse(result=result)
+        except Exception as error:
+            return rag_service_pb2.GetSourceTopicResponse(
+                error=_unexpected(error, request.request_id)
+            )
 
     # 实现 DeleteDocument 对应的局部职责。
     async def DeleteDocument(

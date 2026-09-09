@@ -3,11 +3,13 @@ from __future__ import annotations
 # 校验 gRPC Servicer 只完成 DTO 转换并委托 application 层。
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import grpc
 import pytest
 
 from rag_mvp.application.document_service import DocumentService
+from rag_mvp.application.dto import SourceTopicView
 from rag_mvp.application.job_service import JobService
 from rag_mvp.application.retrieval_service import RetrievalService
 from rag_mvp.domain.ids import config_digest
@@ -85,7 +87,7 @@ async def test_open_rpc_methods_convert_application_results() -> None:
     assert submitted.result.document_id
     assert repository.jobs[submitted.result.job_id].config_digest == config_digest(
         {
-            "parser_version": "source-router-v5",
+            "parser_version": "source-router-v6",
             "chunker_config": {"chunk_size": 800, "overlap": 120},
             "embedding_model": "fake",
         }
@@ -225,3 +227,35 @@ async def test_open_methods_work_through_generated_grpc_transport() -> None:
     finally:
         await channel.close()
         await server.stop(0)
+
+
+@pytest.mark.asyncio
+async def test_get_source_topic_maps_the_read_only_application_view() -> None:
+    sources = AsyncMock()
+    sources.get_topic.return_value = SourceTopicView(
+        document_id="document-1",
+        source_name="manual.chm",
+        topic_path="api/waitset.html",
+        topic_title="DDS WaitSet",
+        markdown="# DDS WaitSet\n\nComplete body.",
+        anchor="wait",
+    )
+    service = RagService(sources=sources)
+
+    response = await service.GetSourceTopic(
+        rag_service_pb2.GetSourceTopicRequest(
+            request_id="source-1",
+            document_id="document-1",
+            index_version=2,
+            topic_path="api/waitset.html",
+            anchor="wait",
+        ),
+        None,
+    )
+
+    assert response.WhichOneof("outcome") == "result"
+    assert response.result.topic_title == "DDS WaitSet"
+    assert response.result.markdown.endswith("Complete body.")
+    query = sources.get_topic.await_args.args[0]
+    assert query.index_version == 2
+    assert query.anchor == "wait"

@@ -20,7 +20,7 @@ it.each(['modern', 'unavailable', 'denied', 'failed', 'throws'])(
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: mode === 'unavailable' ? undefined : { writeText } });
     Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand });
     const wrapper = mount(MarkdownContent, { attachTo: document.body, props: {
-      content: '结论。[1]', citations: [{ ordinal: 1, evidence: { chunkId: 'c', content, sourceName: '文档.md', locator: 'L1', scores: { fusionScore: 1 } } }],
+      content: '结论。[1]', citations: [{ ordinal: 1, evidence: { chunkId: 'c', documentId: 'd', indexVersion: 1, content, sourceName: '文档.md', locator: 'L1', metadata: {}, scores: { fusionScore: 1 } } }],
     } });
     try {
       await wrapper.get('.citation-marker').trigger('click');

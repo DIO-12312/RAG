@@ -11,12 +11,14 @@ import (
 )
 
 type Evidence struct {
-	ChunkID    string             `json:"chunkId"`
-	DocumentID string             `json:"documentId"`
-	Content    string             `json:"content"`
-	SourceName string             `json:"sourceName"`
-	Locator    string             `json:"locator"`
-	Scores     map[string]float64 `json:"scores"`
+	ChunkID      string             `json:"chunkId"`
+	DocumentID   string             `json:"documentId"`
+	IndexVersion uint64             `json:"indexVersion"`
+	Content      string             `json:"content"`
+	SourceName   string             `json:"sourceName"`
+	Locator      string             `json:"locator"`
+	Metadata     map[string]string  `json:"metadata"`
+	Scores       map[string]float64 `json:"scores"`
 }
 type Citation struct {
 	Ordinal  int      `json:"ordinal"`

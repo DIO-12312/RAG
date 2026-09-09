@@ -74,6 +74,11 @@ class RagServiceStub:
                 request_serializer=rag__service__pb2.RetrieveRequest.SerializeToString,
                 response_deserializer=rag__service__pb2.RetrieveResponse.FromString,
                 _registered_method=True)
+        self.GetSourceTopic = channel.unary_unary(
+                '/rag.v1.RagService/GetSourceTopic',
+                request_serializer=rag__service__pb2.GetSourceTopicRequest.SerializeToString,
+                response_deserializer=rag__service__pb2.GetSourceTopicResponse.FromString,
+                _registered_method=True)
         self.DeleteDocument = channel.unary_unary(
                 '/rag.v1.RagService/DeleteDocument',
                 request_serializer=rag__service__pb2.DeleteDocumentRequest.SerializeToString,
@@ -132,6 +137,12 @@ class RagServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetSourceTopic(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def DeleteDocument(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -180,6 +191,11 @@ def add_RagServiceServicer_to_server(servicer, server):
                     servicer.Retrieve,
                     request_deserializer=rag__service__pb2.RetrieveRequest.FromString,
                     response_serializer=rag__service__pb2.RetrieveResponse.SerializeToString,
+            ),
+            'GetSourceTopic': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSourceTopic,
+                    request_deserializer=rag__service__pb2.GetSourceTopicRequest.FromString,
+                    response_serializer=rag__service__pb2.GetSourceTopicResponse.SerializeToString,
             ),
             'DeleteDocument': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteDocument,
@@ -403,6 +419,33 @@ class RagService:
             '/rag.v1.RagService/Retrieve',
             rag__service__pb2.RetrieveRequest.SerializeToString,
             rag__service__pb2.RetrieveResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSourceTopic(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/rag.v1.RagService/GetSourceTopic',
+            rag__service__pb2.GetSourceTopicRequest.SerializeToString,
+            rag__service__pb2.GetSourceTopicResponse.FromString,
             options,
             channel_credentials,
             insecure,

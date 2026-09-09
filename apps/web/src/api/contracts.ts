@@ -12,6 +12,7 @@ export const rootRoutes = [
   "/jobs/:id/cancel",
   "/jobs/:id/retry",
   "/documents/:id",
+  "/documents/:id/source-topic",
   "/settings",
   "/settings/models/chat",
   "/settings/models/embedding",
@@ -101,10 +102,22 @@ export interface ScoreBreakdown {
 
 export interface Evidence {
   chunkId: string;
+  documentId: string;
+  indexVersion: number;
   content: string;
   sourceName: string;
   locator: string;
+  metadata: Record<string, string>;
   scores: ScoreBreakdown;
+}
+
+export interface SourceTopic {
+  documentId: string;
+  sourceName: string;
+  topicPath: string;
+  topicTitle: string;
+  markdown: string;
+  anchor?: string;
 }
 
 export interface Citation {

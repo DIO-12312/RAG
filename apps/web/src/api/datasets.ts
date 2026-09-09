@@ -3,6 +3,7 @@ import type {
   DatasetDetail,
   DatasetSummary,
   Job,
+  SourceTopic,
 } from "./contracts";
 import { request } from "./http";
 import { randomUUID } from "../utils/id";
@@ -46,4 +47,15 @@ export function retryJob(jobId: string): Promise<Job> {
 
 export function deleteDocument(documentId: string): Promise<void> {
   return request<void>(`/documents/${documentId}`, { method: "DELETE" });
+}
+
+export function getSourceTopic(
+  documentId: string,
+  indexVersion: number,
+  topicPath: string,
+  anchor?: string,
+): Promise<SourceTopic> {
+  const query = new URLSearchParams({ indexVersion: String(indexVersion), topicPath });
+  if (anchor) query.set("anchor", anchor);
+  return request<SourceTopic>(`/documents/${documentId}/source-topic?${query.toString()}`);
 }

@@ -371,7 +371,7 @@ class ScoreBreakdown(_message.Message):
     def __init__(self, dense_score: _Optional[float] = ..., sparse_score: _Optional[float] = ..., fusion_score: _Optional[float] = ..., rerank_score: _Optional[float] = ...) -> None: ...
 
 class Evidence(_message.Message):
-    __slots__ = ("chunk_id", "document_id", "content_with_weight", "source_name", "locator", "metadata", "scores", "index_version")
+    __slots__ = ("chunk_id", "document_id", "content_with_weight", "source_name", "locator", "metadata", "scores", "index_version", "display_content")
     class MetadataEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -387,6 +387,7 @@ class Evidence(_message.Message):
     METADATA_FIELD_NUMBER: _ClassVar[int]
     SCORES_FIELD_NUMBER: _ClassVar[int]
     INDEX_VERSION_FIELD_NUMBER: _ClassVar[int]
+    DISPLAY_CONTENT_FIELD_NUMBER: _ClassVar[int]
     chunk_id: str
     document_id: str
     content_with_weight: str
@@ -395,7 +396,8 @@ class Evidence(_message.Message):
     metadata: _containers.ScalarMap[str, str]
     scores: ScoreBreakdown
     index_version: int
-    def __init__(self, chunk_id: _Optional[str] = ..., document_id: _Optional[str] = ..., content_with_weight: _Optional[str] = ..., source_name: _Optional[str] = ..., locator: _Optional[_Union[Locator, _Mapping]] = ..., metadata: _Optional[_Mapping[str, str]] = ..., scores: _Optional[_Union[ScoreBreakdown, _Mapping]] = ..., index_version: _Optional[int] = ...) -> None: ...
+    display_content: str
+    def __init__(self, chunk_id: _Optional[str] = ..., document_id: _Optional[str] = ..., content_with_weight: _Optional[str] = ..., source_name: _Optional[str] = ..., locator: _Optional[_Union[Locator, _Mapping]] = ..., metadata: _Optional[_Mapping[str, str]] = ..., scores: _Optional[_Union[ScoreBreakdown, _Mapping]] = ..., index_version: _Optional[int] = ..., display_content: _Optional[str] = ...) -> None: ...
 
 class RetrieveResult(_message.Message):
     __slots__ = ("evidence", "estimated_tokens", "omitted_chunk_ids")
@@ -414,6 +416,44 @@ class RetrieveResponse(_message.Message):
     result: RetrieveResult
     error: BusinessError
     def __init__(self, result: _Optional[_Union[RetrieveResult, _Mapping]] = ..., error: _Optional[_Union[BusinessError, _Mapping]] = ...) -> None: ...
+
+class GetSourceTopicRequest(_message.Message):
+    __slots__ = ("request_id", "document_id", "index_version", "topic_path", "anchor")
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    DOCUMENT_ID_FIELD_NUMBER: _ClassVar[int]
+    INDEX_VERSION_FIELD_NUMBER: _ClassVar[int]
+    TOPIC_PATH_FIELD_NUMBER: _ClassVar[int]
+    ANCHOR_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    document_id: str
+    index_version: int
+    topic_path: str
+    anchor: str
+    def __init__(self, request_id: _Optional[str] = ..., document_id: _Optional[str] = ..., index_version: _Optional[int] = ..., topic_path: _Optional[str] = ..., anchor: _Optional[str] = ...) -> None: ...
+
+class GetSourceTopicResult(_message.Message):
+    __slots__ = ("document_id", "source_name", "topic_path", "topic_title", "markdown", "anchor")
+    DOCUMENT_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_NAME_FIELD_NUMBER: _ClassVar[int]
+    TOPIC_PATH_FIELD_NUMBER: _ClassVar[int]
+    TOPIC_TITLE_FIELD_NUMBER: _ClassVar[int]
+    MARKDOWN_FIELD_NUMBER: _ClassVar[int]
+    ANCHOR_FIELD_NUMBER: _ClassVar[int]
+    document_id: str
+    source_name: str
+    topic_path: str
+    topic_title: str
+    markdown: str
+    anchor: str
+    def __init__(self, document_id: _Optional[str] = ..., source_name: _Optional[str] = ..., topic_path: _Optional[str] = ..., topic_title: _Optional[str] = ..., markdown: _Optional[str] = ..., anchor: _Optional[str] = ...) -> None: ...
+
+class GetSourceTopicResponse(_message.Message):
+    __slots__ = ("result", "error")
+    RESULT_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    result: GetSourceTopicResult
+    error: BusinessError
+    def __init__(self, result: _Optional[_Union[GetSourceTopicResult, _Mapping]] = ..., error: _Optional[_Union[BusinessError, _Mapping]] = ...) -> None: ...
 
 class DeleteDocumentRequest(_message.Message):
     __slots__ = ("context", "document_id")

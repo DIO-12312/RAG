@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
-import type { Citation } from '@/api/contracts';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
+import { getSourceTopic } from '@/api/datasets';
+import type { Citation, SourceTopic } from '@/api/contracts';
 import AppIcon from './AppIcon.vue';
 import MarkdownContent from './MarkdownContent.vue';
 
@@ -11,6 +12,84 @@ const card = ref<HTMLElement>();
 const closeButton = ref<HTMLButtonElement>();
 const position = ref({ left: '12px', top: '12px', maxHeight: '360px' });
 const copyStatus = ref('');
+const sourceTopic = ref<SourceTopic>();
+const sourceLoading = ref(false);
+const sourceError = ref('');
+const showWholeTopic = ref(false);
+let sourceRequest = 0;
+const canLoadTopic = computed(() => (
+  props.citation.evidence.metadata?.source_type === 'chm'
+  && Boolean(props.citation.evidence.metadata.topic_path)
+  && Boolean(props.citation.evidence.documentId)
+  && props.citation.evidence.indexVersion > 0
+));
+const sourceHeadingPath = computed(() => (
+  props.citation.evidence.metadata?.heading_path
+  || props.citation.evidence.metadata?.topic_title
+  || props.citation.evidence.locator
+  || '引用所在位置'
+));
+function normalizedHeading(value: string): string {
+  return value.replace(/\s+/g, ' ').replace(/[：:]$/, '').trim().toLocaleLowerCase();
+}
+function focusedSection(markdown: string): string {
+  const pathParts = sourceHeadingPath.value.split(/\s*>\s*/).filter(Boolean);
+  const candidates = [
+    ...pathParts.reverse(),
+    props.citation.evidence.metadata?.symbol,
+  ].filter((value): value is string => Boolean(value)).map(normalizedHeading);
+  const lines = markdown.split('\n');
+  let start = -1;
+  let level = 0;
+  for (const candidate of candidates) {
+    for (let index = 0; index < lines.length; index += 1) {
+      const match = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[index] ?? '');
+      if (!match || normalizedHeading(match[2] ?? '') !== candidate) continue;
+      start = index;
+      level = match[1]?.length ?? 1;
+      break;
+    }
+    if (start >= 0) break;
+  }
+  if (start < 0) return props.citation.evidence.content;
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const match = /^(#{1,6})\s+/.exec(lines[index] ?? '');
+    if (match && (match[1]?.length ?? 7) <= level) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end).join('\n').trim() || props.citation.evidence.content;
+}
+const focusedSource = computed(() => (
+  sourceTopic.value ? focusedSection(sourceTopic.value.markdown) : props.citation.evidence.content
+));
+const visibleSource = computed(() => (
+  sourceTopic.value && showWholeTopic.value ? sourceTopic.value.markdown : focusedSource.value
+));
+async function loadSourceTopic(): Promise<void> {
+  if (!canLoadTopic.value || sourceLoading.value) return;
+  const requestId = ++sourceRequest;
+  sourceLoading.value = true;
+  sourceError.value = '';
+  try {
+    const metadata = props.citation.evidence.metadata;
+    const result = await getSourceTopic(
+      props.citation.evidence.documentId,
+      props.citation.evidence.indexVersion,
+      metadata.topic_path,
+      metadata.anchor,
+    );
+    if (requestId === sourceRequest) sourceTopic.value = result;
+  } catch (error) {
+    if (requestId === sourceRequest) {
+      sourceError.value = error instanceof Error ? error.message : '完整来源暂时无法读取。';
+    }
+  } finally {
+    if (requestId === sourceRequest) sourceLoading.value = false;
+  }
+}
 function place(): void {
   if (props.expanded) return;
   const rect = props.anchor.getBoundingClientRect();
@@ -66,7 +145,7 @@ function copyWithSelection(text: string): boolean {
   }
 }
 async function copy(): Promise<void> {
-  const text = props.citation.evidence.content;
+  const text = visibleSource.value;
   let copied = false;
   try {
     if (navigator.clipboard?.writeText) {
@@ -79,8 +158,16 @@ async function copy(): Promise<void> {
   if (!copied) copied = copyWithSelection(text);
   copyStatus.value = copied ? '已复制' : '复制失败，请选择原文复制';
 }
-watch(() => [props.expanded, props.citation, props.anchor], async () => {
+watch(() => [props.expanded, props.citation, props.anchor], async (_, previous) => {
+  if (previous?.[1] !== props.citation) {
+    sourceRequest += 1;
+    sourceTopic.value = undefined;
+    sourceError.value = '';
+    sourceLoading.value = false;
+    showWholeTopic.value = false;
+  }
   copyStatus.value = '';
+  if (props.expanded) await loadSourceTopic();
   await nextTick();
   if (props.expanded) closeButton.value?.focus();
   else place();
@@ -90,6 +177,7 @@ onMounted(async () => {
   document.addEventListener('pointerdown', onOutside);
   window.addEventListener('scroll', onScroll, true);
   window.addEventListener('resize', place);
+  if (props.expanded) await loadSourceTopic();
   await nextTick();
   if (props.expanded) closeButton.value?.focus();
   else place();
@@ -130,6 +218,12 @@ onBeforeUnmount(() => {
             <p v-if="citation.evidence.locator">
               {{ citation.evidence.locator }}
             </p>
+            <p
+              v-if="expanded && sourceTopic"
+              class="citation-topic-title"
+            >
+              {{ sourceTopic.topicTitle }}
+            </p>
           </div>
           <button
             v-if="expanded"
@@ -143,10 +237,51 @@ onBeforeUnmount(() => {
           </button>
         </header>
         <div class="citation-body">
-          <MarkdownContent
-            v-if="expanded"
-            :content="citation.evidence.content"
-          />
+          <div
+            v-if="expanded && canLoadTopic && sourceLoading"
+            class="citation-state"
+            role="status"
+          >
+            正在读取完整 Topic…
+          </div>
+          <div
+            v-else-if="expanded && canLoadTopic && sourceError"
+            class="citation-state citation-state-error"
+            role="alert"
+          >
+            <span>{{ sourceError }}</span>
+            <button
+              type="button"
+              class="citation-quiet"
+              @click="loadSourceTopic"
+            >
+              重新加载
+            </button>
+          </div>
+          <div
+            v-else-if="expanded"
+            class="citation-source-view"
+          >
+            <div
+              v-if="sourceTopic && !showWholeTopic"
+              class="citation-focus-banner"
+            >
+              <span>检索命中位置</span>
+              <strong>{{ sourceHeadingPath }}</strong>
+              <small>紫色框内是本次回答实际引用的片段，下方补充该标题所属章节的连续上下文。</small>
+              <div class="citation-hit-snippet">
+                <span>本次回答引用片段</span>
+                <MarkdownContent :content="citation.evidence.content" />
+              </div>
+            </div>
+            <p
+              v-if="sourceTopic && !showWholeTopic"
+              class="citation-context-label"
+            >
+              所在章节上下文
+            </p>
+            <MarkdownContent :content="visibleSource" />
+          </div>
           <p
             v-else
             class="citation-original"
@@ -155,12 +290,27 @@ onBeforeUnmount(() => {
           </p>
         </div>
         <footer class="citation-footer">
-          <span>{{ expanded ? '来源原文' : '来源片段' }}</span>
+          <div
+            v-if="expanded && sourceTopic"
+            class="citation-location"
+          >
+            <span class="citation-location-label">已定位到引用章节</span>
+            <strong>{{ sourceHeadingPath }}</strong>
+          </div>
+          <span v-else>{{ expanded ? '来源原文' : '来源片段' }}</span>
           <template v-if="expanded">
             <span
               v-if="copyStatus"
               role="status"
             >{{ copyStatus }}</span>
+            <button
+              v-if="sourceTopic"
+              type="button"
+              class="citation-quiet"
+              @click="showWholeTopic = !showWholeTopic"
+            >
+              {{ showWholeTopic ? '返回命中章节' : '查看完整 Topic' }}
+            </button>
             <button
               type="button"
               class="citation-quiet"
@@ -175,7 +325,7 @@ onBeforeUnmount(() => {
             class="citation-quiet"
             @click="emit('expand')"
           >
-            展开完整来源 ↗
+            {{ canLoadTopic ? '查看完整来源 ↗' : '展开来源片段 ↗' }}
           </button>
         </footer>
       </section>
@@ -192,10 +342,24 @@ onBeforeUnmount(() => {
 .citation-heading small { font-size: 11px; color: var(--accent); }
 .citation-heading h3 { margin: 5px 0; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
 .citation-heading p { margin: 0; color: var(--text-muted); font-size: 12px; }
+.citation-heading .citation-topic-title { margin-top: 5px; color: var(--accent-strong); }
 .citation-body { overflow: auto; overscroll-behavior: contain; padding: 18px 22px; min-height: 0; }
+.citation-state { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border-radius: 10px; background: var(--accent-soft); color: var(--accent-strong); font-size: 13px; }
+.citation-state-error { background: var(--danger-soft, #fff0f0); color: var(--danger, #a33); }
+.citation-source-view { display: grid; gap: 20px; }
+.citation-focus-banner { display: grid; gap: 4px; padding: 12px 15px; border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 10px; background: var(--accent-soft); }
+.citation-focus-banner span { color: var(--accent-strong); font-size: 11px; font-weight: 700; }
+.citation-focus-banner strong { overflow-wrap: anywhere; font-size: 14px; }
+.citation-focus-banner small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.citation-hit-snippet { display: grid; gap: 8px; margin-top: 8px; padding: 12px 14px; border-radius: 8px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+.citation-hit-snippet span { font-size: 12px; }
+.citation-context-label { margin: 0 0 -10px; color: var(--text-muted); font-size: 12px; font-weight: 700; }
 .citation-original { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.9; user-select: text; }
 .citation-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface-muted); flex-shrink: 0; font-size: 12px; color: var(--text-muted); }
 .citation-footer > :first-child { margin-right: auto; }
+.citation-location { display: grid; min-width: 0; gap: 3px; padding-left: 10px; border-left: 3px solid var(--accent); }
+.citation-location-label { color: var(--accent-strong); font-size: 11px; }
+.citation-location strong { max-width: min(520px, 55vw); overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .citation-quiet { padding: 6px 10px; border: 0; border-radius: 8px; background: var(--accent-soft); color: var(--accent-strong); box-shadow: none; font-size: 12px; flex-shrink: 0; cursor: pointer; }
 .citation-quiet:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .citation-backdrop { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; padding: 24px; background: #21192c66; backdrop-filter: blur(4px); }

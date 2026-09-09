@@ -2,9 +2,12 @@ import type { ChatEvent, Citation, Evidence } from "@/api/contracts";
 
 const evidence: Evidence = {
   chunkId: "chunk-release-notes-4",
+  documentId: "document-release-notes",
+  indexVersion: 1,
   content: "旧字段将在下一主版本移除。迁移窗口截止至 2026 年 12 月 31 日，之后只接受新版字段。",
   sourceName: "release-notes.pdf",
   locator: "第 4 页",
+  metadata: {},
   scores: { fusionScore: 0.91 },
 };
 

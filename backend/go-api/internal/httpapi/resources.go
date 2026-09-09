@@ -8,6 +8,7 @@ import (
 	"rag-mvp/backend/go-api/internal/ragclient"
 	pb "rag-mvp/backend/go-api/internal/ragpb"
 	"rag-mvp/backend/go-api/internal/storage"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -235,4 +236,23 @@ func (s *Server) deleteDocument(c *gin.Context) {
 		return
 	}
 	c.Status(204)
+}
+
+func (s *Server) sourceTopic(c *gin.Context) {
+	r, ok := s.owned(c, c.Param("id"), "document")
+	if !ok {
+		return
+	}
+	topicPath := strings.TrimSpace(c.Query("topicPath"))
+	version, err := strconv.ParseUint(c.Query("indexVersion"), 10, 64)
+	if topicPath == "" || err != nil || version < 1 {
+		fail(c, 400, "INVALID_SOURCE", "来源定位信息不完整。")
+		return
+	}
+	result, err := s.RAG.SourceTopic(c.Request.Context(), r.ID, version, topicPath, strings.TrimSpace(c.Query("anchor")))
+	if err != nil {
+		fail(c, 502, "SOURCE_UNAVAILABLE", "完整来源暂时无法读取。")
+		return
+	}
+	c.JSON(200, result)
 }

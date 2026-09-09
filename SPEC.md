@@ -79,6 +79,10 @@ Python MVP 的唯一入口是 gRPC；本地调试也调用同一 gRPC 服务。P
 
 CHM 只解析本地解包后的 HTML 文本，不执行脚本、样式、ActiveX 或外部资源。生产 Worker 使用 `extract_chmLib`，并对签名、路径、符号链接、解包超时、文件数、Topic 数和展开总字节执行 fail-closed 限制；缺少运行时返回 `CHM_EXTRACTOR_UNAVAILABLE`，损坏、越界或无可读 Topic 返回不可重试 `INVALID_CHM`。
 
+CHM HTML 清洗必须忽略 `script/style/template` 以及语义化 `nav/aside/footer`，并按常见 Doxygen/产品手册的 `navrow`、`navpath`、`breadcrumb`、`menu`、`sidebar`、`toolbar`、`search` 等容器标识过滤导航噪声；页面提供 `main/article/role=main` 或明确正文容器时，优先只采用该正文区域。该规则改变规范化正文、Embedding、内容摘要和 `chunk_id`，因此自 `source-router-v6` 起旧 CHM 必须重建。Evidence 额外返回不含 `topic_title/heading_path/symbol` 检索权重前缀的 `display_content` 供引用预览使用，但模型检索上下文仍使用 `content_with_weight`。
+
+完整来源查看采用独立只读路径，不把整个 Topic 塞入检索上下文：调用方以 Evidence 的 `document_id`、`index_version`、`metadata.topic_path` 和可选 `anchor` 调用 `GetSourceTopic`。服务端必须复核 Document 为 `READY`、请求版本等于 `active_version`、对象已提升且源格式为 CHM，再从原始对象按同一清洗规则恢复完整 Topic 并返回安全 Markdown；路径穿越、已删除文档、旧版本引用和非 CHM 来源均 fail closed。Go 产品层在转发前还必须校验当前用户拥有该 Document。前端首次展开时必须根据 Evidence 的 `heading_path`/`symbol` 定位并突出显示命中章节，单独标示本次回答实际引用的 Evidence 片段，并只展示该标题至下一个同级或更高层级标题之间的连续上下文；用户可显式切换到完整 Topic，也可返回命中章节。定位失败时退回 Evidence 原文，不得让无法定位的整篇长 Topic 冒充命中位置。
+
 `.chi` 是可选的 CHM 关键词索引侧车，作为同一 Dataset 中单独上传的辅助文档参与检索，不创建或替代 CHM 的 Domain Document。生产 Worker 使用同一 `extract_chmLib` 解包，按 `$WWKeywordLinks/BTree` 的 listing-block 结构读取 UTF-16LE 关键词及其 `#TOPICS` 索引，再通过 `#TOPICS → #URLTBL → #URLSTR` 恢复目标 HTML Topic 路径/锚点，并用 `#STRINGS` 恢复 Topic 标题；禁止把 BTree 控制字节误判成关键词。关键词按目标 Topic 形成有界分段，每个分段的检索权重前缀稳定加入索引关键词、Topic 标题、Topic 路径/URL 和关联 CHM 名称；metadata 必须包含 `source_type=chi`、`logical_document_type=chm_index`、`chi_stream=$WWKeywordLinks/BTree`、`associated_chm_source_name`、`chi_topic_index`、`topic_path`、`topic_title`、`topic_url` 和可选 `anchor`。缺少任一必需映射流、无可读 Topic 链接、偏移/块链越界或解包失败返回不可重试 `INVALID_CHI`；CHI 不执行脚本、HTML 或外部资源。调用方应把同名 CHM 与 CHI 上传到同一 Dataset，检索会在同一 Dense/BM25/RRF 流程中同时考虑两者。
 
 ### 2.2 可恢复的异步摄取
@@ -139,6 +143,7 @@ service RagService {
   rpc RetryJob(RetryJobRequest) returns (RetryJobResponse);
   rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
   rpc Retrieve(RetrieveRequest) returns (RetrieveResponse);
+  rpc GetSourceTopic(GetSourceTopicRequest) returns (GetSourceTopicResponse);
   rpc DeleteDocument(DeleteDocumentRequest) returns (DeleteDocumentResponse);
 }
 ```
@@ -152,6 +157,7 @@ service RagService {
 | `RetryJob` | Unary | 仅对 `FAILED` 且 `retryable=true` 的 Job 创建同类型的 retry Job、待执行 Task 和 OutboxEvent；旧 Job 保持终态，不修改已成功的索引版本。 | Go Dataset/Document 服务 |
 | `CancelJob` | Unary | 取消尚未开始的摄取，或向运行中摄取写入 `cancel_requested_at`；Worker 在 checkpoint 收敛到 `CANCELLED`。删除 Job 不可取消。 | Go Dataset/Document 服务 |
 | `Retrieve` | Unary | 仅检索，返回带分数、位置、元数据的 evidence chunks，不生成回答。 | Go Agent 的 RAG Tool |
+| `GetSourceTopic` | Unary | 按当前激活版本和 Topic 路径从原始 CHM 恢复完整、已清洗的 Topic Markdown；仅用于用户查看引用原文，不参与检索上下文。 | Go 引用来源 API |
 | `DeleteDocument` | Unary | 在 MySQL 标记 Document 删除并使其立刻不可检索；创建 `DELETE_DOCUMENT` Job 和清理 Task，经 Outbox 异步删除 ES 记录和对象文件。 | Go Dataset/Document 服务 |
 
 `UploadDocumentRequest` 的第一帧必须是 header（`dataset_id`、`source_name`、`idempotency_key`、可选 `expected_sha256`、可选 `target_document_id`），后续帧只能携带字节；服务端限制最大字节数并在结束帧校验 SHA-256。文件先写入由 `idempotency_key` 派生的 staging object。新文档模式在同一 MySQL 事务内对唯一 `(dataset_id, file_sha256, config_digest)` 的 `IngestionFingerprint` 行 `SELECT ... FOR UPDATE`：已有 `PENDING/RUNNING/SUCCEEDED` fingerprint 时返回其 canonical Document/Job，不创建新 Task，并立即删除本次未引用 staging object；`FAILED_RETRYABLE` fingerprint 也返回其 canonical Job，由调用方使用 `RetryJob`；只有 `RELEASED`（无正式对象的不可恢复失败或已删除 Document）才创建新的 Document/Job/Task、重新占用 fingerprint，并创建 `WAITING_OBJECT` OutboxEvent。这样并发上传相同文件也只产生一个摄取。

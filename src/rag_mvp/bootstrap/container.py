@@ -27,6 +27,7 @@ from rag_mvp.application.document_service import DocumentService
 from rag_mvp.application.ingestion_service import IngestionService
 from rag_mvp.application.job_service import JobService
 from rag_mvp.application.retrieval_service import RetrievalService
+from rag_mvp.application.source_service import SourceService
 from rag_mvp.config import Settings
 from rag_mvp.ingestion.checkpoints import Failpoint
 from rag_mvp.ingestion.failpoints import FileBarrierFailpoint
@@ -153,6 +154,13 @@ async def build_server_container(
         container.storage = storage
         container.search = search
         container.model = model
+        source_parser = SourceParserRouter(
+            chm_extractor_path=settings.chm_extractor_path,
+            chm_extract_timeout_seconds=settings.chm_extract_timeout_seconds,
+            chm_max_files=settings.chm_max_files,
+            chm_max_topics=settings.chm_max_topics,
+            chm_max_expanded_bytes=settings.chm_max_expanded_bytes,
+        )
         documents = DocumentService(
             metadata,
             storage,
@@ -165,6 +173,7 @@ async def build_server_container(
             documents=documents,
             jobs=JobService(metadata, max_user_retries=settings.max_user_retries),
             retrieval=RetrievalService(metadata, search, model),
+            sources=SourceService(metadata, storage, source_parser),
             parser_version=settings.parser_version,
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,

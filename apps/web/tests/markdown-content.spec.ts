@@ -1,5 +1,5 @@
-import { mount } from "@vue/test-utils";
-import { expect, it } from "vitest";
+import { flushPromises, mount } from "@vue/test-utils";
+import { expect, it, vi } from "vitest";
 import MarkdownContent from "../src/components/MarkdownContent.vue";
 it("renders structured Markdown and updates streamed content",async()=>{
   const wrapper=mount(MarkdownContent,{props:{content:'# Title\n\n**bold**\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n```go\nfmt.Println("hi")\n```'}});
@@ -11,7 +11,7 @@ it("never injects raw HTML, executable links or tracking images",()=>{
   expect(wrapper.find('script,img,iframe').exists()).toBe(false);expect(wrapper.find('[onerror]').exists()).toBe(false);expect(wrapper.find('a[href^="javascript:"]').exists()).toBe(false);expect(wrapper.get('a').attributes('rel')).toContain('noreferrer');
 });
 
-const citations = [{ ordinal: 1, evidence: { chunkId: 'chunk-1', content: '完整 chunk 原文\n第二行 <script>不可执行</script>', sourceName: '指南.md', locator: 'L10–L20', scores: { fusionScore: 0.1 } } }];
+const citations = [{ ordinal: 1, evidence: { chunkId: 'chunk-1', documentId: 'document-1', indexVersion: 1, content: '完整 chunk 原文\n第二行 <script>不可执行</script>', sourceName: '指南.md', locator: 'L10–L20', metadata: {}, scores: { fusionScore: 0.1 } } }];
 it('renders only mapped prose citations as inline circular controls', () => {
   const wrapper = mount(MarkdownContent, { props: { content: '结论。[1][9]\n\n`[1]`\n\n```txt\n[1]\n```\n\n[1](https://example.test)', citations } });
   expect(wrapper.findAll('.citation-marker')).toHaveLength(1);
@@ -73,4 +73,52 @@ it('renders expanded source Markdown safely without turning source numbers into 
     expect(dialog.querySelector('script,img,iframe,[onerror],a[href^="javascript:"]')).toBeNull();
     expect(dialog.querySelector('a')?.getAttribute('rel')).toContain('noreferrer');
   } finally { wrapper.unmount(); }
+});
+
+it('loads and renders the complete CHM Topic when the source is expanded', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    documentId: 'document-1', sourceName: 'manual.chm', topicPath: 'api/waitset.html',
+    topicTitle: 'DDS WaitSet',
+    markdown: '# DDS WaitSet\n\nTopic 简介\n\n## Parameters\n\ntimeout 是等待时长。\n\n### Detail\n\n命中章节的补充说明。\n\n## Return value\n\n不相关的后续章节。',
+    anchor: 'wait',
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  vi.stubGlobal('fetch', fetchMock);
+  const chmCitation = [{ ordinal: 1, evidence: {
+    ...citations[0]!.evidence,
+    sourceName: 'manual.chm',
+    content: '短引用片段',
+    metadata: {
+      source_type: 'chm', topic_path: 'api/waitset.html', anchor: 'wait',
+      heading_path: 'DDS WaitSet > Parameters',
+    },
+  } }];
+  const wrapper = mount(MarkdownContent, { attachTo: document.body, props: {
+    content: '结论。[1]', citations: chmCitation,
+  } });
+  try {
+    await wrapper.get('.citation-marker').trigger('click');
+    await flushPromises();
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('已定位到引用章节');
+    expect(dialog.textContent).toContain('DDS WaitSet > Parameters');
+    expect(dialog.textContent).toContain('本次回答引用片段');
+    expect(dialog.textContent).toContain('短引用片段');
+    expect(dialog.textContent).toContain('所在章节上下文');
+    expect(dialog.textContent).toContain('timeout 是等待时长。');
+    expect(dialog.textContent).toContain('命中章节的补充说明。');
+    expect(dialog.textContent).not.toContain('不相关的后续章节。');
+    const wholeTopic = Array.from(dialog.querySelectorAll('button')).find(button => button.textContent?.includes('查看完整 Topic'))!;
+    wholeTopic.click();
+    await wrapper.vm.$nextTick();
+    expect(dialog.textContent).toContain('Topic 简介');
+    expect(dialog.textContent).toContain('不相关的后续章节。');
+    expect(dialog.textContent).toContain('返回命中章节');
+    const requested = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(requested.pathname).toBe('/documents/document-1/source-topic');
+    expect(requested.searchParams.get('topicPath')).toBe('api/waitset.html');
+    expect(requested.searchParams.get('indexVersion')).toBe('1');
+  } finally {
+    wrapper.unmount();
+    vi.unstubAllGlobals();
+  }
 });

@@ -19,6 +19,7 @@ apps/web/tests/
 | 同上 | `previews source on hover and expands full evidence on click with Escape focus return`：悬停文件与位置、点击完整原文、安全文本展示、Esc / 按钮 / 遮罩关闭及焦点返回，关闭不重开预览 | 同上 |
 | 同上 | `supports keyboard opening and clears stale sources when message changes`：键盘打开，切换消息清除旧卡片及来源映射 | 同上 |
 | 同上 | `renders expanded source Markdown safely without turning source numbers into citations`：展开来源支持标题、强调、列表、表格、代码块；防止脚本执行、远程图片请求及来源内部编号误映射 | 同上 |
+| 同上 | `loads and renders the complete CHM Topic when the source is expanded`：展开 CHM 引用时携带 Document、激活版本、Topic 路径和锚点请求后端，并以既有来源卡片样式显示完整 Topic | 同上 |
 
 运行 `npm --prefix apps/web test -- --run`；不纳入 Python 门禁，不替代真实浏览器布局、真实 Chat 或后端集成验收。
 
@@ -141,7 +142,8 @@ tests/
    │  ├─ test_cleanup_service.py
    │  ├─ test_document_service.py
    │  ├─ test_job_service.py
-   │  └─ test_retrieval_service.py
+   │  ├─ test_retrieval_service.py
+   │  └─ test_source_service.py
    ├─ domain/
    │  ├─ test_ids.py
    │  ├─ test_models.py
@@ -229,6 +231,9 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_chi_hit_resolves_associated_chm_topic_and_then_expands_neighbors` | CHI 命中按同 Dataset、同名 CHM 和 Topic/anchor 回查正文，经 MySQL active-version 复核后继续扩展同 Topic 邻居，并区分两类辅助 Evidence。 |
 | 同上 | `test_chi_reference_replaces_duplicate_direct_chm_anchor` | CHI 回指与普通混合检索命中同一 CHM Chunk 时不复制正文：保留直接锚点位置和真实分数，并附加 CHI 桥接审计字段。 |
 | 同上 | `test_identifier_priority_supports_mixed_case_c_api_names` | 显式混合大小写 C API 名完整命中优先于更高 RRF 的无关候选，覆盖 `DDS_DomainParticipantFactory_create_participant` 形式。 |
+| `application/test_source_service.py` | `test_source_service_returns_complete_normalized_topic_as_markdown` | 以 Document、激活版本和安全 Topic 路径从原始 CHM 恢复完整 Topic Markdown。 |
+| 同上 | `test_source_service_rejects_stale_citation_version` | 旧索引版本的引用不得读取当前版本原文，避免来源错配。 |
+| 同上 | `test_source_service_rejects_unsafe_topic_path` | 路径穿越在读取对象前 fail closed。 |
 | `domain/test_ids.py` | `test_new_id_is_uuid7_compatible` | 新 ID 符合 UUIDv7 兼容格式。 |
 | 同上 | `test_canonical_json_and_digests_are_stable` | 规范 JSON 与 digest 在相同输入下稳定。 |
 | 同上 | `test_chunk_id_matches_ragflow_xxhash64_rule` | `chunk_id` 遵循 RAGFlow xxHash64 规则。 |
@@ -254,6 +259,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_router_rejects_unsupported_source_type` | 不支持的类型返回稳定错误。 |
 | 同上 | `test_pdf_parser_rejects_corrupt_bytes` | 损坏 PDF 返回稳定错误。 |
 | `ingestion/test_chm_parser.py` | `test_chm_parser_orders_topics_and_preserves_heading_provenance` | CHM 按 HHC 目录稳定排列 Topic，按标题层级分段，过滤脚本/样式并保留 Topic、标题路径与锚点。 |
+| 同上 | `test_chm_parser_prefers_main_content_and_removes_navigation_noise` | 优先语义化正文区域，并过滤 Doxygen/产品手册的导航、面包屑和页脚噪声。 |
 | 同上 | `test_chm_topic_and_heading_segments_are_hard_chunk_boundaries` | Topic 与标题段均为不可跨越的切块边界；正文切分保持上限与全局稳定 ordinal，每个 CHM Chunk 的检索文本稳定加入 Topic、Heading 与 Symbol 前缀。 |
 | 同上 | `test_chm_parser_decodes_declared_legacy_charset` | CHM HTML Topic 按声明的旧编码解码中文正文和标题。 |
 | 同上 | `test_chm_parser_recovers_isolated_invalid_declared_charset_bytes` | 对声明了有效编码但包含孤立损坏字节的旧式 HTML Topic 使用替换字符恢复，避免单个坏字节导致整个 CHM 摄取失败。 |
@@ -287,6 +293,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_rrf_uses_record_id_as_stable_final_tie_breaker` | RRF 同分时使用 record ID 稳定排序。 |
 | 同上 | `test_rrf_rejects_invalid_constant` | 非法 RRF 常量被拒绝。 |
 | `retrieval/test_provenance.py` | `test_dense_evidence_preserves_traceable_chunk_fields` | evidence 保留可追溯 chunk 字段。 |
+| 同上 | `test_chm_evidence_exposes_body_without_retrieval_weight_prefix` | Evidence 的展示正文去除 CHM 检索权重前缀，同时保留原 `content_with_weight` 供模型使用。 |
 | `retrieval/test_rerank.py` | `test_rerank_scores_reorder_stably_and_keep_fusion_data` | Rerank 稳定重排并保留 fusion 数据。 |
 | 同上 | `test_rerank_rejects_score_count_mismatch` | 候选数和重排分数数目不一致时拒绝。 |
 | 同上 | `test_rerank_rejects_invalid_top_n` | 非法 Top-N 参数被拒绝。 |
@@ -355,6 +362,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_new_delete_request_for_deleted_document_is_rejected` | 已删除文档的新删除请求返回稳定错误。 |
 | `test_generated_code.py` | `test_generated_python_is_in_sync_with_proto` | Python protobuf 生成物与 `.proto` 保持同步。 |
 | `test_grpc_application_contract.py` | `test_open_rpc_methods_convert_application_results` | 已开放 RPC 正确转换 application 结果，上传摘要使用注入的 parser/chunk/model 配置。 |
+| 同上 | `test_get_source_topic_maps_the_read_only_application_view` | `GetSourceTopic` 将版本、Topic 路径和锚点传给应用层，并完整映射 Markdown 结果。 |
 | 同上 | `test_delete_dataset_maps_success_reuse_and_stable_failures` | DeleteDataset 映射成功与幂等复用，并保留删除中、不存在和缺少幂等键错误码。 |
 | 同上 | `test_rpc_maps_domain_failures_and_keeps_future_methods_closed` | 领域错误映射正确，未来方法保持关闭。 |
 | 同上 | `test_submit_document_rejects_data_before_header` | 上传流首帧必须为 header。 |

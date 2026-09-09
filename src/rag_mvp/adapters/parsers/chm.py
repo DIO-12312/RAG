@@ -152,26 +152,78 @@ class _TopicParser(HTMLParser):
         "tr",
     }
     _IGNORED_TAGS = {"script", "style", "noscript", "template"}
+    _NAVIGATION_TAGS = {"nav", "aside", "footer"}
+    _VOID_TAGS = {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+    _NAVIGATION_TOKENS = {
+        "breadcrumb",
+        "breadcrumbs",
+        "footer",
+        "main-nav",
+        "mainnav",
+        "menu",
+        "navbar",
+        "navpath",
+        "related",
+        "search",
+        "sidebar",
+        "tabs",
+        "toolbar",
+        "toc",
+    }
+    _PRIMARY_TOKENS = {
+        "article-content",
+        "contents",
+        "document-content",
+        "main-content",
+        "topic-content",
+    }
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.blocks: list[_HtmlBlock] = []
+        self.primary_blocks: list[_HtmlBlock] = []
         self.title = ""
         self._parts: list[str] = []
         self._heading_level: int | None = None
         self._anchor: str | None = None
-        self._ignored_depth = 0
+        self._ignored_tags: list[str] = []
+        self._primary_tags: list[str] = []
         self._in_title = False
         self._title_parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.casefold()
-        if tag in self._IGNORED_TAGS:
-            self._ignored_depth += 1
-            return
-        if self._ignored_depth:
+        if self._ignored_tags:
+            if tag not in self._VOID_TAGS:
+                self._ignored_tags.append(tag)
             return
         attributes = {key.casefold(): value or "" for key, value in attrs}
+        if self._is_navigation(tag, attributes) or tag in self._IGNORED_TAGS:
+            self._flush()
+            if tag not in self._VOID_TAGS:
+                self._ignored_tags.append(tag)
+            return
+        if self._primary_tags and tag not in self._VOID_TAGS:
+            self._primary_tags.append(tag)
+        elif self._is_primary(tag, attributes):
+            self._flush()
+            if tag not in self._VOID_TAGS:
+                self._primary_tags.append(tag)
         if tag == "title":
             self._in_title = True
             return
@@ -187,10 +239,12 @@ class _TopicParser(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         tag = tag.casefold()
-        if tag in self._IGNORED_TAGS:
-            self._ignored_depth = max(0, self._ignored_depth - 1)
-            return
-        if self._ignored_depth:
+        if self._ignored_tags:
+            if tag in self._ignored_tags:
+                while self._ignored_tags:
+                    opened = self._ignored_tags.pop()
+                    if opened == tag:
+                        break
             return
         if tag == "title":
             self._in_title = False
@@ -202,9 +256,15 @@ class _TopicParser(HTMLParser):
             self._anchor = None
         elif tag in self._BLOCK_TAGS:
             self._flush()
+        if self._primary_tags and tag in self._primary_tags:
+            self._flush()
+            while self._primary_tags:
+                opened = self._primary_tags.pop()
+                if opened == tag:
+                    break
 
     def handle_data(self, data: str) -> None:
-        if self._ignored_depth:
+        if self._ignored_tags:
             return
         if self._in_title:
             self._title_parts.append(data)
@@ -219,7 +279,46 @@ class _TopicParser(HTMLParser):
         text = _normalize_text("".join(self._parts))
         self._parts.clear()
         if text:
-            self.blocks.append(_HtmlBlock(text, self._heading_level, self._anchor))
+            block = _HtmlBlock(text, self._heading_level, self._anchor)
+            self.blocks.append(block)
+            if self._primary_tags:
+                self.primary_blocks.append(block)
+
+    @property
+    def content_blocks(self) -> list[_HtmlBlock]:
+        """Prefer an explicit semantic body when the Topic provides one."""
+
+        return self.primary_blocks or self.blocks
+
+    @classmethod
+    def _is_navigation(cls, tag: str, attributes: dict[str, str]) -> bool:
+        if tag in cls._NAVIGATION_TAGS:
+            return True
+        if attributes.get("role", "").casefold() in {"navigation", "search"}:
+            return True
+        tokens = cls._attribute_tokens(attributes)
+        return any(
+            token in cls._NAVIGATION_TOKENS
+            or token.startswith("navrow")
+            or token.startswith("breadcrumb")
+            for token in tokens
+        )
+
+    @classmethod
+    def _is_primary(cls, tag: str, attributes: dict[str, str]) -> bool:
+        if tag in {"main", "article"} or attributes.get("role", "").casefold() == "main":
+            return True
+        return bool(cls._attribute_tokens(attributes) & cls._PRIMARY_TOKENS)
+
+    @staticmethod
+    def _attribute_tokens(attributes: dict[str, str]) -> set[str]:
+        values = (attributes.get("id", ""), attributes.get("class", ""))
+        return {
+            token.casefold()
+            for value in values
+            for token in re.split(r"[^A-Za-z0-9_-]+", value)
+            if token
+        }
 
 
 class _TocParser(HTMLParser):
@@ -336,7 +435,7 @@ class ChmParser:
             current_parts = []
             current_start_line = next_line
 
-        for block in parser.blocks:
+        for block in parser.content_blocks:
             if block.heading_level is not None:
                 flush()
                 while heading_stack and heading_stack[-1][0] >= block.heading_level:

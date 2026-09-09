@@ -128,6 +128,9 @@ async def test_all_unopened_rpc_methods_return_feature_not_available() -> None:
         service.RetryJob(rag_service_pb2.RetryJobRequest(), context),
         service.CancelJob(rag_service_pb2.CancelJobRequest(), context),
         service.Retrieve(rag_service_pb2.RetrieveRequest(request_id="request-1"), context),
+        service.GetSourceTopic(
+            rag_service_pb2.GetSourceTopicRequest(request_id="request-1"), context
+        ),
         service.DeleteDocument(rag_service_pb2.DeleteDocumentRequest(), context),
     ]
 
