@@ -9,6 +9,7 @@ from rag_mvp.ports.search_engine import (
     IndexedChunk,
     SearchCandidate,
     SearchRequest,
+    SectionContextRequest,
     TopicNeighborRequest,
     TopicReferenceRequest,
 )
@@ -84,6 +85,7 @@ class FakeSearchEngine:
             )
             for indexed in self.records.values()
             if self._matches(indexed, request)
+            and indexed.chunk.metadata.get("chunk_role") != "section_parent"
         ]
         # 用 record_id 作为稳定次级排序键，消除同分候选的不确定性。
         return tuple(
@@ -99,6 +101,8 @@ class FakeSearchEngine:
         for indexed in self.records.values():
             if not self._matches(indexed, request):
                 continue
+            if indexed.chunk.metadata.get("chunk_role") == "section_parent":
+                continue
             words = {term.casefold() for term in indexed.chunk.content_with_weight.split()}
             overlap = len(terms & words)
             if overlap:
@@ -113,6 +117,55 @@ class FakeSearchEngine:
         # 稀疏召回同样保持确定的排序，方便精确断言融合结果。
         return tuple(
             sorted(candidates, key=lambda item: (-item.score, item.record_id))[: request.top_k]
+        )
+
+    async def section_context(self, request: SectionContextRequest) -> Sequence[SearchCandidate]:
+        """Return bounded section children and extractive parent chunks for each anchor."""
+
+        filter_request = SearchRequest(request.dataset_id, 1, filters=request.filters)
+        candidates: list[SearchCandidate] = []
+        for indexed in self.records.values():
+            if not self._matches(indexed, filter_request):
+                continue
+            chunk = indexed.chunk
+            for anchor in request.anchors:
+                if (
+                    chunk.document_id != anchor.document_id
+                    or chunk.index_version != anchor.index_version
+                    or chunk.metadata.get("topic_path") != anchor.topic_path
+                ):
+                    continue
+                role = chunk.metadata.get("chunk_role")
+                sibling = (
+                    role == "section_child"
+                    and chunk.metadata.get("section_id") == anchor.section_id
+                    and abs(
+                        int(chunk.metadata.get("chunk_index_in_section", "-1000000"))
+                        - anchor.chunk_index_in_section
+                    )
+                    <= request.sibling_radius
+                )
+                parent = chunk.id == anchor.parent_chunk_id
+                ancestor = (
+                    bool(anchor.parent_section_id)
+                    and role == "section_parent"
+                    and chunk.metadata.get("section_id") == anchor.parent_section_id
+                )
+                if sibling or parent or ancestor:
+                    candidates.append(
+                        SearchCandidate(indexed.record_id, indexed.dataset_id, chunk, 0.0)
+                    )
+                    break
+        return tuple(
+            sorted(
+                candidates,
+                key=lambda item: (
+                    item.chunk.document_id,
+                    item.chunk.index_version,
+                    item.chunk.ordinal,
+                    item.record_id,
+                ),
+            )
         )
 
     async def topic_neighbors(self, request: TopicNeighborRequest) -> Sequence[SearchCandidate]:
@@ -168,6 +221,7 @@ class FakeSearchEngine:
                 if chunk.source_name == anchor.associated_source_name
                 and chunk.metadata.get("source_type") == "chm"
                 and chunk.metadata.get("topic_path") == anchor.topic_path
+                and chunk.metadata.get("chunk_role") != "section_parent"
             ]
             if not matching_anchors:
                 continue

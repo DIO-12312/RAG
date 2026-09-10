@@ -170,13 +170,20 @@ async def test_chm_topic_and_heading_segments_are_hard_chunk_boundaries() -> Non
     segments = await parser.parse("manual.chm", b"fake-chm")
 
     chunks = await RecursiveChunker(chunk_size=24, overlap=4).split(segments)
+    children = [chunk for chunk in chunks if chunk.metadata["chunk_role"] == "section_child"]
+    parents = [chunk for chunk in chunks if chunk.metadata["chunk_role"] == "section_parent"]
 
     assert [chunk.ordinal for chunk in chunks] == list(range(len(chunks)))
-    assert all(len(chunk.content_with_weight.rsplit("\n\n", 1)[-1]) <= 24 for chunk in chunks)
+    assert all(len(chunk.content_with_weight.rsplit("\n\n", 1)[-1]) <= 24 for chunk in children)
+    assert len(parents) == len(segments)
+    assert all("Section overview:" in chunk.content_with_weight for chunk in parents)
+    assert all(
+        len(chunk.content_with_weight.rsplit("Section overview:\n", 1)[-1]) <= 48
+        for chunk in parents
+    )
     assert all(chunk.metadata["source_type"] == "chm" for chunk in chunks)
-    assert all(chunk.metadata["chunk_role"] == "section_child" for chunk in chunks)
-    for section_id in {chunk.metadata["section_id"] for chunk in chunks}:
-        section_chunks = [chunk for chunk in chunks if chunk.metadata["section_id"] == section_id]
+    for section_id in {chunk.metadata["section_id"] for chunk in children}:
+        section_chunks = [chunk for chunk in children if chunk.metadata["section_id"] == section_id]
         assert [chunk.metadata["chunk_index_in_section"] for chunk in section_chunks] == [
             str(index) for index in range(len(section_chunks))
         ]

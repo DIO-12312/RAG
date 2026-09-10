@@ -17,6 +17,8 @@ from rag_mvp.domain.models import Chunk, Locator
 from rag_mvp.ports.search_engine import (
     IndexedChunk,
     SearchRequest,
+    SectionContextAnchor,
+    SectionContextRequest,
     TopicNeighborAnchor,
     TopicNeighborRequest,
     TopicReferenceAnchor,
@@ -54,6 +56,7 @@ def _indexed(
     topic_path: str | None = None,
     source_name: str | None = None,
     locator_anchor: str | None = None,
+    metadata_extra: dict[str, str] | None = None,
 ) -> IndexedChunk:
     """构造写入 Elasticsearch 的索引记录。"""
     chunk = Chunk(
@@ -75,6 +78,7 @@ def _indexed(
         metadata={
             "category": category,
             **({"source_type": "chm", "topic_path": topic_path} if topic_path else {}),
+            **(metadata_extra or {}),
         },
     )
     return IndexedChunk(
@@ -323,6 +327,104 @@ async def test_real_es_topic_neighbors_do_not_cross_topic_boundary(
         topic_chunks[1].chunk.id,
         topic_chunks[2].chunk.id,
     ]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_real_es_section_context_excludes_parents_from_routes_and_expands_hierarchy(
+    elasticsearch_search: tuple[ElasticsearchSearchEngine, AsyncElasticsearch],
+) -> None:
+    search, _client = elasticsearch_search
+    common = {
+        "section_id": "section-child",
+        "parent_section_id": "section-root",
+        "parent_chunk_id": "2222222222222222",
+    }
+    root = _indexed(
+        dataset_id="dataset-1",
+        document_id="document-1",
+        version=1,
+        chunk_id="1111111111111111",
+        content="root overview exactneedle",
+        vector=(1.0, 0.0, 0.0),
+        category="guide",
+        ordinal=0,
+        topic_path="topic-a.html",
+        metadata_extra={
+            "chunk_role": "section_parent",
+            "section_id": "section-root",
+            "parent_section_id": "",
+            "parent_chunk_id": "",
+            "chunk_index_in_section": "-1",
+        },
+    )
+    parent = _indexed(
+        dataset_id="dataset-1",
+        document_id="document-1",
+        version=1,
+        chunk_id="2222222222222222",
+        content="section overview exactneedle",
+        vector=(1.0, 0.0, 0.0),
+        category="guide",
+        ordinal=1,
+        topic_path="topic-a.html",
+        metadata_extra={
+            **common,
+            "chunk_role": "section_parent",
+            "parent_chunk_id": "1111111111111111",
+            "chunk_index_in_section": "-1",
+        },
+    )
+    children = [
+        _indexed(
+            dataset_id="dataset-1",
+            document_id="document-1",
+            version=1,
+            chunk_id=f"{index + 3:016x}",
+            content=f"child {index} exactneedle",
+            vector=(1.0, 0.0, 0.0),
+            category="guide",
+            ordinal=index + 2,
+            topic_path="topic-a.html",
+            metadata_extra={
+                **common,
+                "chunk_role": "section_child",
+                "chunk_index_in_section": str(index),
+            },
+        )
+        for index in range(4)
+    ]
+    await search.upsert_chunks((root, parent, *children))
+
+    dense = await search.dense_search(SearchRequest("dataset-1", 10, query_vector=(1.0, 0.0, 0.0)))
+    sparse = await search.sparse_search(SearchRequest("dataset-1", 10, query="exactneedle"))
+    context = await search.section_context(
+        SectionContextRequest(
+            "dataset-1",
+            (
+                SectionContextAnchor(
+                    "document-1",
+                    1,
+                    children[1].chunk.id,
+                    parent.chunk.id,
+                    "section-child",
+                    "section-root",
+                    1,
+                    "topic-a.html",
+                ),
+            ),
+        )
+    )
+
+    assert {candidate.chunk.id for candidate in dense} == {child.chunk.id for child in children}
+    assert {candidate.chunk.id for candidate in sparse} == {child.chunk.id for child in children}
+    assert {candidate.chunk.id for candidate in context} == {
+        root.chunk.id,
+        parent.chunk.id,
+        children[0].chunk.id,
+        children[1].chunk.id,
+        children[2].chunk.id,
+    }
 
 
 @pytest.mark.integration

@@ -64,6 +64,46 @@ class TopicNeighborRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class SectionContextAnchor:
+    """A directly retrieved CHM child used to resolve section-local context."""
+
+    document_id: str
+    index_version: int
+    chunk_id: str
+    parent_chunk_id: str
+    section_id: str
+    parent_section_id: str
+    chunk_index_in_section: int
+    topic_path: str
+
+    def __post_init__(self) -> None:
+        if not self.document_id.strip() or not self.chunk_id.strip():
+            raise ValueError("document_id and chunk_id must not be empty")
+        if self.index_version < 1:
+            raise ValueError("index_version must be at least 1")
+        if not self.parent_chunk_id.strip() or not self.section_id.strip():
+            raise ValueError("parent_chunk_id and section_id must not be empty")
+        if self.chunk_index_in_section < 0:
+            raise ValueError("chunk_index_in_section must not be negative")
+        if not self.topic_path.strip():
+            raise ValueError("topic_path must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class SectionContextRequest:
+    dataset_id: str
+    anchors: tuple[SectionContextAnchor, ...]
+    sibling_radius: int = 1
+    filters: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.dataset_id.strip():
+            raise ValueError("dataset_id must not be empty")
+        if self.sibling_radius < 1:
+            raise ValueError("sibling_radius must be at least 1")
+
+
+@dataclass(frozen=True, slots=True)
 class TopicReferenceAnchor:
     """A CHI hit that points to one Topic in its associated CHM document."""
 
@@ -126,6 +166,11 @@ class SearchEngine(Protocol):
 
     # 读取 CHM 锚点同 Topic 内的相邻物理 Chunk，供应用层进行上下文扩展。
     async def topic_neighbors(self, request: TopicNeighborRequest) -> Sequence[SearchCandidate]: ...
+
+    # 读取同标题段的子块邻居、当前标题段父块及可用的上级标题段父块。
+    async def section_context(
+        self, request: SectionContextRequest
+    ) -> Sequence[SearchCandidate]: ...
 
     # 按 CHI 的 Topic 路径定位同 Dataset 内关联 CHM 的正文 Chunk。
     async def topic_references(

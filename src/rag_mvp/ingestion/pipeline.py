@@ -71,6 +71,13 @@ class IngestionPipeline:
             logical_id = chunk_id(draft.content_with_weight, document.id)
             unique_drafts.setdefault(logical_id, draft)
 
+        parent_ids = {
+            draft.metadata["section_id"]: logical_id
+            for logical_id, draft in unique_drafts.items()
+            if draft.metadata.get("chunk_role") == "section_parent"
+            and draft.metadata.get("section_id")
+        }
+
         model = model_for_dataset(self._model, claim.dataset)
         vectors = await model.embed([draft.content_with_weight for draft in unique_drafts.values()])
         if len(vectors) != len(unique_drafts):
@@ -92,7 +99,7 @@ class IngestionPipeline:
                 content_sha256=content_sha256(draft.content_with_weight),
                 source_name=document.source_name,
                 locator=draft.locator,
-                metadata=draft.metadata,
+                metadata=self._resolved_hierarchy_metadata(draft, parent_ids),
             )
             for logical_id, draft in unique_drafts.items()
         )
@@ -108,6 +115,19 @@ class IngestionPipeline:
         await self._search.upsert_chunks(indexed)
         await self._checkpoint(Checkpoint.AFTER_INDEX_WRITE)
         return chunks
+
+    @staticmethod
+    def _resolved_hierarchy_metadata(
+        draft: ChunkDraft,
+        parent_ids: dict[str, str],
+    ) -> dict[str, str]:
+        metadata = dict(draft.metadata)
+        role = metadata.get("chunk_role")
+        if role == "section_child":
+            metadata["parent_chunk_id"] = parent_ids.get(metadata.get("section_id", ""), "")
+        elif role == "section_parent":
+            metadata["parent_chunk_id"] = parent_ids.get(metadata.get("parent_section_id", ""), "")
+        return metadata
 
     # 内部辅助：完成 checkpoint 所需的局部转换或校验。
     async def _checkpoint(self, checkpoint: Checkpoint) -> None:

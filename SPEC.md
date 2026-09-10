@@ -110,7 +110,8 @@ PENDING → RUNNING → SUCCEEDED
 2. Sparse：BM25/关键词召回；
 3. Fusion：RRF 融合两个候选排名；
 4. 可选 Rerank：只重排 Top-20，输出 Top-6；
-5. ContextBuilder：在模型上下文预算内选取证据，超限时按得分截断，不截断句中间。
+5. Hierarchy Expansion：CHM 小子块精确命中后补充同标题段相邻子块、当前标题段父级概览和可用的上级标题段概览，严格保持 Topic 边界；
+6. ContextBuilder：在模型上下文预算内选取完整证据，超限时省略低优先级扩展证据，不截断单个 Evidence。
 
 ### 2.4 全链路可插拔，但只实现一套默认适配器
 
@@ -122,7 +123,7 @@ PENDING → RUNNING → SUCCEEDED
 | 检索引擎 | `SearchEngine` | Elasticsearch | 无 |
 | Embedding / Rerank | `ModelGateway` | OpenAI-compatible 的 API 调用 | 本地 Ollama |
 | 文档解析 | `Parser` | Text / Markdown / Code / 文本 PDF / CHM HTML Topic / CHI keyword-index parser | DeepDoc、OCR |
-| 切块 | `Chunker` | Recursive Markdown/Text Chunker | 语义、父子、代码 AST Chunker |
+| 切块 | `Chunker` | Recursive Markdown/Text Chunker + CHM 标题段父子 Chunk | 通用语义、代码 AST Chunker |
 
 > 直接使用 Elasticsearch 负责MVP的向量语义索引和关键词索引。
 
@@ -633,7 +634,9 @@ class ModelGateway(Protocol):
 
 最终 Top-K 中的 CHI 锚点若包含 `associated_chm_source_name` 和 `topic_path`，`RetrievalService` 必须通过 `SearchEngine.topic_references` 在同一 Dataset 中定位关联 CHM 的对应 Topic；查询必须同时约束原 filters、CHM `source_name`、`source_type=chm` 和 `topic_path`，并优先使用 CHI `anchor` 与原查询选择最相关 Chunk。返回结果仍须经 MySQL active-version 复核；若关联正文不在直接检索结果中，新增的 Evidence 标记 `retrieval_role=chi_topic_reference`、`anchor_chunk_id` 和 `chi_topic_url`，且不伪造 Dense/BM25/RRF/Rerank 分数；若同一 CHM Chunk 已由普通混合检索直接命中，则保留其原始位置和真实分数，仅增加 `chi_reference_anchor_chunk_id` 与 `chi_topic_url`，不得复制同一正文。找不到同名 CHM 时保留 CHI Evidence 并正常降级。
 
-对最终 Top-K 中的 CHM 直接检索锚点及 CHI 定位出的 CHM Topic 锚点，`RetrievalService` 必须通过 `SearchEngine.topic_neighbors` 批量补充 ordinal 前后各一个 Chunk，并同时约束 `dataset_id`、原 filters、`document_id`、`index_version` 和 `topic_path`，不得跨 Document、版本或 Topic。直接锚点必须优先进入预算；邻接 Evidence 在 metadata 中标记 `retrieval_role=topic_neighbor`、`anchor_chunk_id` 和 `neighbor_distance`，且不伪造 Dense/BM25/RRF/Rerank 分数。这里的 Top-K 是直接检索锚点数量，CHI Topic 关联和邻接扩展后响应 Evidence 可以多于 Top-K，但最终仍由 `ContextBuilder` 按 `max_context_tokens` 选择完整 Evidence 并输出 `ContextPlan(selected_evidence, estimated_tokens, omitted_chunk_ids)`，而不是 Prompt 字符串。关联和邻接查询不可替代 MySQL active-version 复核；这个复核步骤是索引版本切换的可见性保障，不能下沉到 ES adapter。
+自 `source-router-v7` 起，每个 CHM 标题段除小型 `section_child` 外，还要生成一个 `section_parent` 提取式概览：短段保留全文，长段只保留总计不超过 `2 * chunk_size` 的段首和段尾，中间以省略标记连接。摄取 Pipeline 在计算逻辑 Chunk ID 后必须为子块写入当前标题段的 `parent_chunk_id`，并为父块写入上级标题段父块 ID；顶层父块使用空 ID。父块进入同一版本化 ES 索引，但 Dense、BM25 和 CHI Topic 直达查询必须排除 `section_parent`，保证小子块负责精确召回，父块只作为上下文补充。
+
+对带完整层级 metadata 的最终 CHM 直接锚点及 CHI 定位出的 CHM 锚点，`RetrievalService` 必须通过 `SearchEngine.section_context` 批量补充 `chunk_index_in_section` 前后各一个同标题段子块、当前 `parent_chunk_id` 对应的标题段概览，以及 `parent_section_id` 对应且仍在同一 Topic 的上级标题段概览；查询必须同时约束 `dataset_id`、原 filters、`document_id`、`index_version` 和 `topic_path`，不得跨 Document、版本、Topic 或标题段。辅助 Evidence 分别标记 `retrieval_role=section_neighbor|section_parent|parent_section`、`anchor_chunk_id`，邻居额外标记 `neighbor_distance`，且不得伪造 Dense/BM25/RRF/Rerank 分数。旧索引中没有层级 metadata 的 CHM 锚点继续通过 `SearchEngine.topic_neighbors` 按 ordinal 前后各一个 Chunk 降级扩展。直接锚点必须优先进入预算；这里的 Top-K 是直接检索锚点数量，CHI Topic 关联和层次扩展后响应 Evidence 可以多于 Top-K，但最终仍由 `ContextBuilder` 按 `max_context_tokens` 选择完整 Evidence 并输出 `ContextPlan(selected_evidence, estimated_tokens, omitted_chunk_ids)`，而不是 Prompt 字符串。关联和扩展查询不可替代 MySQL active-version 复核；这个复核步骤是索引版本切换的可见性保障，不能下沉到 ES adapter。
 
 ### 5.5 摄取执行流程
 
