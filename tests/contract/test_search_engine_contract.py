@@ -7,8 +7,6 @@ from rag_mvp.domain.models import Chunk, Locator
 from rag_mvp.ports.search_engine import (
     IndexedChunk,
     SearchRequest,
-    SectionContextAnchor,
-    SectionContextRequest,
     TopicNeighborAnchor,
     TopicNeighborRequest,
     TopicReferenceAnchor,
@@ -26,7 +24,6 @@ def _indexed(
     document_id: str = "document-1",
     ordinal: int = 0,
     topic_path: str | None = None,
-    metadata_extra: dict[str, str] | None = None,
 ) -> IndexedChunk:
     """构造本测试所需的输入、替身或运行环境。"""
     chunk = Chunk(
@@ -41,7 +38,6 @@ def _indexed(
         metadata={
             "category": "guide",
             **({"source_type": "chm", "topic_path": topic_path} if topic_path else {}),
-            **(metadata_extra or {}),
         },
     )
     return IndexedChunk(
@@ -113,99 +109,6 @@ async def test_search_can_delete_an_entire_dataset_idempotently() -> None:
     await search.delete_dataset("dataset-1")
 
     assert search.record_count == 1
-
-
-@pytest.mark.asyncio
-async def test_search_excludes_section_parents_and_resolves_bounded_hierarchy() -> None:
-    search = FakeSearchEngine()
-    common = {
-        "section_id": "section-child",
-        "parent_section_id": "section-root",
-        "parent_chunk_id": "chunk-parent",
-    }
-    root = _indexed(
-        "root overview exactneedle",
-        "chunk-root",
-        (1.0,),
-        ordinal=0,
-        topic_path="topic-a.html",
-        metadata_extra={
-            "chunk_role": "section_parent",
-            "section_id": "section-root",
-            "parent_section_id": "",
-            "parent_chunk_id": "",
-            "chunk_index_in_section": "-1",
-        },
-    )
-    parent = _indexed(
-        "section overview exactneedle",
-        "chunk-parent",
-        (1.0,),
-        ordinal=1,
-        topic_path="topic-a.html",
-        metadata_extra={
-            **common,
-            "chunk_role": "section_parent",
-            "parent_chunk_id": "chunk-root",
-            "chunk_index_in_section": "-1",
-        },
-    )
-    children = [
-        _indexed(
-            f"child-{index} exactneedle",
-            f"chunk-child-{index}",
-            (1.0,),
-            ordinal=index + 2,
-            topic_path="topic-a.html",
-            metadata_extra={
-                **common,
-                "chunk_role": "section_child",
-                "chunk_index_in_section": str(index),
-            },
-        )
-        for index in range(4)
-    ]
-    await search.upsert_chunks((root, parent, *children))
-
-    dense = await search.dense_search(SearchRequest("dataset-1", 10, query_vector=(1.0,)))
-    sparse = await search.sparse_search(SearchRequest("dataset-1", 10, query="exactneedle"))
-    context = await search.section_context(
-        SectionContextRequest(
-            "dataset-1",
-            (
-                SectionContextAnchor(
-                    "document-1",
-                    1,
-                    "chunk-child-1",
-                    "chunk-parent",
-                    "section-child",
-                    "section-root",
-                    1,
-                    "topic-a.html",
-                ),
-            ),
-        )
-    )
-
-    assert {candidate.chunk.id for candidate in dense} == {
-        "chunk-child-0",
-        "chunk-child-1",
-        "chunk-child-2",
-        "chunk-child-3",
-    }
-    assert {candidate.chunk.id for candidate in sparse} == {
-        "chunk-child-0",
-        "chunk-child-1",
-        "chunk-child-2",
-        "chunk-child-3",
-    }
-    assert {candidate.chunk.id for candidate in context} == {
-        "chunk-root",
-        "chunk-parent",
-        "chunk-child-0",
-        "chunk-child-1",
-        "chunk-child-2",
-    }
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,6 @@ from rag_mvp.ports.search_engine import (
     IndexedChunk,
     SearchCandidate,
     SearchRequest,
-    SectionContextRequest,
     TopicNeighborRequest,
     TopicReferenceRequest,
 )
@@ -145,12 +144,7 @@ class ElasticsearchSearchEngine:
                     "query_vector": list(request.query_vector),
                     "k": request.top_k,
                     "num_candidates": max(request.top_k * 10, 100),
-                    "filter": {
-                        "bool": {
-                            "filter": filters,
-                            "must_not": [{"term": {"metadata.chunk_role": "section_parent"}}],
-                        }
-                    },
+                    "filter": {"bool": {"filter": filters}},
                 },
                 size=request.top_k,
                 sort=[{"_score": {"order": "desc"}}, {"record_id": {"order": "asc"}}],
@@ -184,7 +178,6 @@ class ElasticsearchSearchEngine:
                             }
                         ],
                         "filter": filters,
-                        "must_not": [{"term": {"metadata.chunk_role": "section_parent"}}],
                     }
                 },
                 size=request.top_k,
@@ -193,88 +186,6 @@ class ElasticsearchSearchEngine:
             )
         except (ApiError, TransportError) as exc:
             raise self._unavailable("BM25 search failed") from exc
-        return self._candidates(cast(Mapping[str, Any], response.body))
-
-    async def section_context(self, request: SectionContextRequest) -> Sequence[SearchCandidate]:
-        """Fetch section siblings and extractive parents without route scores."""
-
-        if not request.anchors:
-            return ()
-        filters = self._request_filters(
-            SearchRequest(dataset_id=request.dataset_id, top_k=1, filters=request.filters)
-        )
-        contexts: list[dict[str, Any]] = []
-        for anchor in request.anchors:
-            local_indices = tuple(
-                str(index)
-                for index in range(
-                    max(0, anchor.chunk_index_in_section - request.sibling_radius),
-                    anchor.chunk_index_in_section + request.sibling_radius + 1,
-                )
-            )
-            related: list[dict[str, Any]] = [
-                {
-                    "bool": {
-                        "filter": [
-                            {"term": {"metadata.chunk_role": "section_child"}},
-                            {"term": {"metadata.section_id": anchor.section_id}},
-                            {"terms": {"metadata.chunk_index_in_section": local_indices}},
-                        ]
-                    }
-                },
-                {"term": {"chunk_id": anchor.parent_chunk_id}},
-            ]
-            if anchor.parent_section_id:
-                related.append(
-                    {
-                        "bool": {
-                            "filter": [
-                                {"term": {"metadata.chunk_role": "section_parent"}},
-                                {"term": {"metadata.section_id": anchor.parent_section_id}},
-                            ]
-                        }
-                    }
-                )
-            contexts.append(
-                {
-                    "bool": {
-                        "filter": [
-                            {"term": {"document_id": anchor.document_id}},
-                            {"term": {"index_version": anchor.index_version}},
-                            {"term": {"metadata.topic_path": anchor.topic_path}},
-                        ],
-                        "must": [
-                            {
-                                "bool": {
-                                    "should": related,
-                                    "minimum_should_match": 1,
-                                }
-                            }
-                        ],
-                    }
-                }
-            )
-        try:
-            response = await self._client.search(
-                index=self._index_name,
-                query={
-                    "bool": {
-                        "filter": filters,
-                        "should": contexts,
-                        "minimum_should_match": 1,
-                    }
-                },
-                size=min(len(request.anchors) * (request.sibling_radius * 2 + 3), 1000),
-                sort=[
-                    {"document_id": {"order": "asc"}},
-                    {"index_version": {"order": "asc"}},
-                    {"ordinal": {"order": "asc"}},
-                    {"record_id": {"order": "asc"}},
-                ],
-                track_scores=True,
-            )
-        except (ApiError, TransportError) as exc:
-            raise self._unavailable("section context lookup failed") from exc
         return self._candidates(cast(Mapping[str, Any], response.body))
 
     async def topic_neighbors(self, request: TopicNeighborRequest) -> Sequence[SearchCandidate]:
@@ -324,7 +235,6 @@ class ElasticsearchSearchEngine:
                             },
                         ],
                         "filter": filters,
-                        "must_not": [{"term": {"metadata.chunk_role": "section_parent"}}],
                     }
                 },
                 size=min(len(request.anchors) * (request.radius * 2 + 1), 1000),
@@ -385,7 +295,6 @@ class ElasticsearchSearchEngine:
                             {"term": {"metadata.source_type": "chm"}},
                             {"term": {"metadata.topic_path": anchor.topic_path}},
                         ],
-                        "must_not": [{"term": {"metadata.chunk_role": "section_parent"}}],
                         "should": score_hints,
                     }
                 }

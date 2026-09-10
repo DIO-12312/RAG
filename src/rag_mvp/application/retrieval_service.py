@@ -18,8 +18,6 @@ from rag_mvp.ports.search_engine import (
     SearchCandidate,
     SearchEngine,
     SearchRequest,
-    SectionContextAnchor,
-    SectionContextRequest,
     TopicNeighborAnchor,
     TopicNeighborRequest,
     TopicReferenceAnchor,
@@ -130,12 +128,14 @@ class RetrievalService:
             anchors,
             search_query=analysis.normalized_query,
         )
-        candidate_chunks = (
-            *(candidate.chunk for candidate in fused),
-            *referenced_chunks,
+        evidence = await self._expand_topic_neighbors(
+            query,
+            anchors,
+            (
+                *(candidate.chunk for candidate in fused),
+                *referenced_chunks,
+            ),
         )
-        evidence = await self._expand_section_context(query, anchors, candidate_chunks)
-        evidence = await self._expand_topic_neighbors(query, evidence, candidate_chunks)
         result = build_context_plan(evidence, max_context_tokens=query.max_context_tokens)
         emit_event(
             "retrieval_completed",
@@ -290,132 +290,6 @@ class RetrievalService:
             expanded.append(self._topic_reference_evidence(chunk, anchor))
         return tuple(expanded), tuple(referenced_chunks)
 
-    async def _expand_section_context(
-        self,
-        query: RetrieveQuery,
-        anchors: Sequence[Evidence],
-        chunks: Sequence[Chunk],
-    ) -> tuple[Evidence, ...]:
-        chunk_lookup = {
-            (chunk.document_id, chunk.index_version, chunk.id): chunk for chunk in chunks
-        }
-        eligible: list[tuple[Evidence, Chunk, SectionContextAnchor]] = []
-        for anchor in anchors:
-            chunk = chunk_lookup.get((anchor.document_id, anchor.index_version, anchor.chunk_id))
-            metadata = anchor.metadata
-            if (
-                chunk is None
-                or metadata.get("source_type") != "chm"
-                or metadata.get("chunk_role") != "section_child"
-                or not metadata.get("parent_chunk_id")
-                or not metadata.get("section_id")
-                or not metadata.get("topic_path")
-            ):
-                continue
-            try:
-                chunk_index = int(metadata["chunk_index_in_section"])
-            except (KeyError, ValueError):
-                continue
-            request_anchor = SectionContextAnchor(
-                document_id=chunk.document_id,
-                index_version=chunk.index_version,
-                chunk_id=chunk.id,
-                parent_chunk_id=metadata["parent_chunk_id"],
-                section_id=metadata["section_id"],
-                parent_section_id=metadata.get("parent_section_id", ""),
-                chunk_index_in_section=chunk_index,
-                topic_path=metadata["topic_path"],
-            )
-            eligible.append((anchor, chunk, request_anchor))
-        if not eligible:
-            return tuple(anchors)
-
-        try:
-            candidates = await self._search.section_context(
-                SectionContextRequest(
-                    dataset_id=query.dataset_id,
-                    anchors=tuple(item[2] for item in eligible),
-                    sibling_radius=1,
-                    filters=query.filters,
-                )
-            )
-        except DomainError as error:
-            if not error.failure.retryable:
-                raise
-            return tuple(anchors)
-
-        visible_versions = await self._metadata.visible_document_versions(
-            tuple(dict.fromkeys(candidate.chunk.document_id for candidate in candidates))
-        )
-        visible = self._visible(candidates, query.dataset_id, visible_versions)
-        seen = {(anchor.document_id, anchor.index_version, anchor.chunk_id) for anchor in anchors}
-        expanded = list(anchors)
-        for anchor, anchor_chunk, request_anchor in eligible:
-            scoped = tuple(
-                candidate
-                for candidate in visible
-                if candidate.chunk.document_id == anchor_chunk.document_id
-                and candidate.chunk.index_version == anchor_chunk.index_version
-                and candidate.chunk.metadata.get("topic_path") == request_anchor.topic_path
-            )
-            siblings = sorted(
-                (
-                    candidate
-                    for candidate in scoped
-                    if candidate.chunk.metadata.get("chunk_role") == "section_child"
-                    and candidate.chunk.metadata.get("section_id") == request_anchor.section_id
-                    and candidate.chunk.id != anchor_chunk.id
-                    and abs(
-                        int(candidate.chunk.metadata.get("chunk_index_in_section", "-1000000"))
-                        - request_anchor.chunk_index_in_section
-                    )
-                    <= 1
-                ),
-                key=lambda candidate: (
-                    abs(
-                        int(candidate.chunk.metadata["chunk_index_in_section"])
-                        - request_anchor.chunk_index_in_section
-                    ),
-                    int(candidate.chunk.metadata["chunk_index_in_section"]),
-                    candidate.record_id,
-                ),
-            )
-            current_parent = next(
-                (
-                    candidate
-                    for candidate in scoped
-                    if candidate.chunk.id == request_anchor.parent_chunk_id
-                ),
-                None,
-            )
-            ancestor_parent = next(
-                (
-                    candidate
-                    for candidate in scoped
-                    if request_anchor.parent_section_id
-                    and candidate.chunk.metadata.get("chunk_role") == "section_parent"
-                    and candidate.chunk.metadata.get("section_id")
-                    == request_anchor.parent_section_id
-                ),
-                None,
-            )
-            related = (
-                *((candidate, "section_neighbor") for candidate in siblings),
-                *(((current_parent, "section_parent"),) if current_parent is not None else ()),
-                *(((ancestor_parent, "parent_section"),) if ancestor_parent is not None else ()),
-            )
-            for candidate, role in related:
-                key = (
-                    candidate.chunk.document_id,
-                    candidate.chunk.index_version,
-                    candidate.chunk.id,
-                )
-                if key in seen:
-                    continue
-                seen.add(key)
-                expanded.append(self._section_context_evidence(candidate.chunk, anchor, role))
-        return tuple(expanded)
-
     # 内部辅助：完成 evidence 所需的局部转换或校验。
     async def _evidence(
         self, query: RetrieveQuery, fused: Sequence[HybridCandidate]
@@ -480,12 +354,7 @@ class RetrievalService:
         for anchor in anchors:
             chunk = chunk_lookup.get((anchor.document_id, anchor.index_version, anchor.chunk_id))
             topic_path = anchor.metadata.get("topic_path", "")
-            if (
-                chunk is None
-                or anchor.metadata.get("source_type") != "chm"
-                or anchor.metadata.get("chunk_role")
-                or not topic_path
-            ):
+            if chunk is None or anchor.metadata.get("source_type") != "chm" or not topic_path:
                 continue
             eligible.append((anchor, chunk))
             requests.append(
@@ -553,31 +422,6 @@ class RetrievalService:
                     )
                 )
         return tuple(expanded)
-
-    @staticmethod
-    def _section_context_evidence(chunk: Chunk, anchor: Evidence, role: str) -> Evidence:
-        metadata = dict(chunk.metadata)
-        metadata.update(
-            {
-                "retrieval_role": role,
-                "anchor_chunk_id": anchor.chunk_id,
-            }
-        )
-        if role == "section_neighbor":
-            metadata["neighbor_distance"] = str(
-                int(chunk.metadata["chunk_index_in_section"])
-                - int(anchor.metadata["chunk_index_in_section"])
-            )
-        return Evidence(
-            chunk_id=chunk.id,
-            document_id=chunk.document_id,
-            content_with_weight=chunk.content_with_weight,
-            source_name=chunk.source_name,
-            locator=chunk.locator,
-            scores=ScoreBreakdown(),
-            index_version=chunk.index_version,
-            metadata=metadata,
-        )
 
     @staticmethod
     def _topic_reference_evidence(chunk: Chunk, anchor: Evidence) -> Evidence:

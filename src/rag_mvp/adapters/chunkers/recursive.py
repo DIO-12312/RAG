@@ -28,81 +28,23 @@ class RecursiveChunker:
     async def split(self, segments: Sequence[ParsedSegment]) -> tuple[ChunkDraft, ...]:
         drafts: list[ChunkDraft] = []
         for segment in segments:
-            slices = self._segment_slices(segment.text)
-            if segment.metadata.get("source_type") == "chm":
-                parent_metadata = dict(segment.metadata)
-                parent_metadata.update(
-                    {
-                        "chunk_role": "section_parent",
-                        "chunk_index_in_section": "-1",
-                        "section_chunk_count": str(len(slices)),
-                    }
-                )
-                overview = self._section_overview(segment.text)
-                drafts.append(
-                    ChunkDraft(
-                        ordinal=len(drafts),
-                        content_with_weight=self._content_with_weight(
-                            segment,
-                            f"Section overview:\n{overview}",
-                        ),
-                        locator=segment.locator,
-                        metadata=parent_metadata,
-                    )
-                )
-            for chunk_index, (start, end) in enumerate(slices):
+            start = 0
+            while start < len(segment.text):
+                end = self._find_end(segment.text, start)
                 body = segment.text[start:end]
-                metadata = dict(segment.metadata)
-                if metadata.get("source_type") == "chm":
-                    metadata.update(
-                        {
-                            "chunk_role": "section_child",
-                            "chunk_index_in_section": str(chunk_index),
-                            "section_chunk_count": str(len(slices)),
-                        }
+                if body:
+                    drafts.append(
+                        ChunkDraft(
+                            ordinal=len(drafts),
+                            content_with_weight=self._content_with_weight(segment, body),
+                            locator=self._locator(segment, start, end),
+                            metadata=segment.metadata,
+                        )
                     )
-                drafts.append(
-                    ChunkDraft(
-                        ordinal=len(drafts),
-                        content_with_weight=self._content_with_weight(segment, body),
-                        locator=self._locator(segment, start, end),
-                        metadata=metadata,
-                    )
-                )
+                if end >= len(segment.text):
+                    break
+                start = max(start + 1, end - self._overlap)
         return tuple(drafts)
-
-    def _section_overview(self, text: str) -> str:
-        """Build a bounded extractive parent context from the section head and tail."""
-
-        limit = self._chunk_size * 2
-        if len(text) <= limit:
-            return text
-        side = max(1, (limit - len("\n...\n")) // 2)
-        head_end = self._preferred_boundary(text, side, reverse=True)
-        tail_start = self._preferred_boundary(text, len(text) - side, reverse=False)
-        return f"{text[:head_end].rstrip()}\n...\n{text[tail_start:].lstrip()}"
-
-    @staticmethod
-    def _preferred_boundary(text: str, position: int, *, reverse: bool) -> int:
-        if reverse:
-            candidates = (text.rfind("\n\n", 0, position), text.rfind("\n", 0, position))
-            boundary = max(candidates)
-            return boundary if boundary > 0 else position
-        candidates = (text.find("\n\n", position), text.find("\n", position))
-        valid = [candidate for candidate in candidates if candidate >= 0]
-        return min(valid) if valid else position
-
-    def _segment_slices(self, text: str) -> tuple[tuple[int, int], ...]:
-        slices: list[tuple[int, int]] = []
-        start = 0
-        while start < len(text):
-            end = self._find_end(text, start)
-            if text[start:end]:
-                slices.append((start, end))
-            if end >= len(text):
-                break
-            start = max(start + 1, end - self._overlap)
-        return tuple(slices)
 
     @staticmethod
     def _content_with_weight(segment: ParsedSegment, body: str) -> str:

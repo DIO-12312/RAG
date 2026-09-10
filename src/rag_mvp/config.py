@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     object_root: Path = Path("data/objects")
 
     max_upload_bytes: int = Field(default=16 * 1024 * 1024, ge=1)
-    parser_version: str = "source-router-v7"
+    parser_version: str = "source-router-v6"
     chunk_size: int = Field(default=800, ge=1)
     chunk_overlap: int = Field(default=120, ge=0)
     chm_extractor_path: str = "extract_chmLib"

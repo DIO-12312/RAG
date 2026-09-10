@@ -133,12 +133,6 @@ async def test_chm_parser_orders_topics_and_preserves_heading_provenance() -> No
     assert segments[1].locator.metadata["anchor"] == "intro"
     assert segments[2].locator.start_line > segments[1].locator.end_line
     assert segments[1].metadata["logical_document_type"] == "chm_topic"
-    assert all(segment.metadata["section_id"].startswith("section-") for segment in segments)
-    assert segments[0].metadata["parent_section_id"] == ""
-    assert segments[1].metadata["parent_section_id"] == ""
-    assert segments[2].metadata["parent_section_id"] == segments[1].metadata["section_id"]
-    assert [segment.metadata["heading_level"] for segment in segments] == ["0", "1", "2"]
-    assert segments == await parser.parse("manual.chm", b"fake-chm")
     assert "hidden script" not in " ".join(segment.text for segment in segments)
     assert "hidden style" not in " ".join(segment.text for segment in segments)
 
@@ -170,27 +164,10 @@ async def test_chm_topic_and_heading_segments_are_hard_chunk_boundaries() -> Non
     segments = await parser.parse("manual.chm", b"fake-chm")
 
     chunks = await RecursiveChunker(chunk_size=24, overlap=4).split(segments)
-    children = [chunk for chunk in chunks if chunk.metadata["chunk_role"] == "section_child"]
-    parents = [chunk for chunk in chunks if chunk.metadata["chunk_role"] == "section_parent"]
 
     assert [chunk.ordinal for chunk in chunks] == list(range(len(chunks)))
-    assert all(len(chunk.content_with_weight.rsplit("\n\n", 1)[-1]) <= 24 for chunk in children)
-    assert len(parents) == len(segments)
-    assert all("Section overview:" in chunk.content_with_weight for chunk in parents)
-    assert all(
-        len(chunk.content_with_weight.rsplit("Section overview:\n", 1)[-1]) <= 48
-        for chunk in parents
-    )
+    assert all(len(chunk.content_with_weight.rsplit("\n\n", 1)[-1]) <= 24 for chunk in chunks)
     assert all(chunk.metadata["source_type"] == "chm" for chunk in chunks)
-    for section_id in {chunk.metadata["section_id"] for chunk in children}:
-        section_chunks = [chunk for chunk in children if chunk.metadata["section_id"] == section_id]
-        assert [chunk.metadata["chunk_index_in_section"] for chunk in section_chunks] == [
-            str(index) for index in range(len(section_chunks))
-        ]
-        assert all(
-            chunk.metadata["section_chunk_count"] == str(len(section_chunks))
-            for chunk in section_chunks
-        )
     assert all(chunk.content_with_weight.startswith("Topic: ") for chunk in chunks)
     assert all("\nHeading: " in chunk.content_with_weight for chunk in chunks)
     assert all("\nSymbol: " in chunk.content_with_weight for chunk in chunks)

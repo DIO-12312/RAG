@@ -57,42 +57,6 @@ class _RecordingModel(FakeModelGateway):
         return await super().embed(texts)
 
 
-class _HierarchyChunker:
-    async def split(self, segments: Sequence[ParsedSegment]) -> tuple[ChunkDraft, ...]:
-        assert segments
-        common = {
-            "source_type": "chm",
-            "topic_path": "topic.html",
-            "section_id": "section-child",
-            "parent_section_id": "section-root",
-        }
-        return (
-            ChunkDraft(
-                0,
-                "root overview",
-                Locator(start_line=1, end_line=3),
-                {
-                    **common,
-                    "section_id": "section-root",
-                    "parent_section_id": "",
-                    "chunk_role": "section_parent",
-                },
-            ),
-            ChunkDraft(
-                1,
-                "child overview",
-                Locator(start_line=4, end_line=8),
-                {**common, "chunk_role": "section_parent"},
-            ),
-            ChunkDraft(
-                2,
-                "precise child evidence",
-                Locator(start_line=5, end_line=6),
-                {**common, "chunk_role": "section_child"},
-            ),
-        )
-
-
 @pytest.mark.asyncio
 async def test_pipeline_builds_stable_versioned_chunks_and_upserts_search() -> None:
     """验证本测试场景的预期行为与边界条件。"""
@@ -190,54 +154,3 @@ async def test_pipeline_collapses_duplicate_chunk_ids_before_embedding() -> None
     assert [chunk.metadata["position"] for chunk in chunks] == ["first", "third"]
     assert model.embedded_batches == [("repeated evidence", "unique evidence")]
     assert search.record_count == 2
-
-
-@pytest.mark.asyncio
-async def test_pipeline_resolves_child_and_ancestor_parent_chunk_ids() -> None:
-    now = datetime.now(UTC)
-    repository = FakeMetadataRepository()
-    storage = FakeObjectStorage()
-    model = FakeModelGateway(dimension=8)
-    search = FakeSearchEngine()
-    documents = DocumentService(repository, storage, max_upload_bytes=1024)
-    await documents.create_dataset(
-        CreateDatasetCommand("trace", "create-hierarchy", "Docs", "fake", 8, now, "dataset-3")
-    )
-    await documents.submit_document(
-        SubmitDocumentCommand(
-            "trace",
-            "submit-hierarchy",
-            "dataset-3",
-            "manual.chm",
-            b"source",
-            None,
-            None,
-            "source-router-v7",
-            800,
-            120,
-            "fake",
-            now,
-        )
-    )
-    await finalize_once(repository, storage, now, limit=10)
-    task = next(iter(repository.tasks.values()))
-    claim = await repository.claim_task(task.id, delivery_sequence=1, now=now)
-    assert claim is not None
-
-    chunks = await IngestionPipeline(
-        storage,
-        TextParser(),
-        _HierarchyChunker(),
-        model,
-        search,
-    ).execute(claim)
-
-    by_content = {chunk.content_with_weight: chunk for chunk in chunks}
-    assert by_content["root overview"].metadata["parent_chunk_id"] == ""
-    assert (
-        by_content["child overview"].metadata["parent_chunk_id"] == by_content["root overview"].id
-    )
-    assert (
-        by_content["precise child evidence"].metadata["parent_chunk_id"]
-        == by_content["child overview"].id
-    )

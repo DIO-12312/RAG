@@ -229,7 +229,6 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_retrieve_rejects_invalid_or_unavailable_requests` | 非法请求、数据集不可用等场景返回稳定失败。 |
 | 同上 | `test_rerank_failure_degrades_to_rrf_evidence` | Rerank 不可用时降级为 RRF evidence。 |
 | 同上 | `test_chm_retrieve_appends_same_topic_neighbors_before_context_budget` | CHM Top-K 锚点在预算裁剪前补充同 Document/version/Topic 的前后相邻 Chunk，邻接 evidence 标明角色、锚点和距离且不伪造检索分数。 |
-| 同上 | `test_chm_retrieve_expands_section_siblings_and_parent_context` | 新版 CHM 子块命中后依次补充同标题段邻块、当前标题段概览和同 Topic 上级标题段概览，且辅助 Evidence 不伪造检索分数。 |
 | 同上 | `test_chi_hit_resolves_associated_chm_topic_and_then_expands_neighbors` | CHI 命中按同 Dataset、同名 CHM 和 Topic/anchor 回查正文，经 MySQL active-version 复核后继续扩展同 Topic 邻居，并区分两类辅助 Evidence。 |
 | 同上 | `test_chi_reference_replaces_duplicate_direct_chm_anchor` | CHI 回指与普通混合检索命中同一 CHM Chunk 时不复制正文：保留直接锚点位置和真实分数，并附加 CHI 桥接审计字段。 |
 | 同上 | `test_identifier_priority_supports_mixed_case_c_api_names` | 显式混合大小写 C API 名完整命中优先于更高 RRF 的无关候选，覆盖 `DDS_DomainParticipantFactory_create_participant` 形式。 |
@@ -261,9 +260,9 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_router_selects_supported_parser` | Router 为各受支持后缀选择正确 parser。 |
 | 同上 | `test_router_rejects_unsupported_source_type` | 不支持的类型返回稳定错误。 |
 | 同上 | `test_pdf_parser_rejects_corrupt_bytes` | 损坏 PDF 返回稳定错误。 |
-| `ingestion/test_chm_parser.py` | `test_chm_parser_orders_topics_and_preserves_heading_provenance` | CHM 按 HHC 目录稳定排列 Topic，按标题层级分段，过滤脚本/样式，并稳定保留 Topic、标题路径、锚点及 section/parent 层级关系。 |
+| `ingestion/test_chm_parser.py` | `test_chm_parser_orders_topics_and_preserves_heading_provenance` | CHM 按 HHC 目录稳定排列 Topic，按标题层级分段，过滤脚本/样式并保留 Topic、标题路径与锚点。 |
 | 同上 | `test_chm_parser_prefers_main_content_and_removes_navigation_noise` | 优先语义化正文区域，并过滤 Doxygen/产品手册的导航、面包屑和页脚噪声。 |
-| 同上 | `test_chm_topic_and_heading_segments_are_hard_chunk_boundaries` | Topic 与标题段均为不可跨越的切块边界；正文切分保持上限与全局稳定 ordinal，每个子块保存 section 内索引/总数并稳定加入 Topic、Heading 与 Symbol 前缀。 |
+| 同上 | `test_chm_topic_and_heading_segments_are_hard_chunk_boundaries` | Topic 与标题段均为不可跨越的切块边界；正文切分保持上限与全局稳定 ordinal，每个 CHM Chunk 的检索文本稳定加入 Topic、Heading 与 Symbol 前缀。 |
 | 同上 | `test_chm_parser_decodes_declared_legacy_charset` | CHM HTML Topic 按声明的旧编码解码中文正文和标题。 |
 | 同上 | `test_chm_parser_recovers_isolated_invalid_declared_charset_bytes` | 对声明了有效编码但包含孤立损坏字节的旧式 HTML Topic 使用替换字符恢复，避免单个坏字节导致整个 CHM 摄取失败。 |
 | 同上 | `test_router_selects_injected_chm_parser` | ParserRouter 对大小写不敏感的 `.chm` 后缀选择 CHM parser。 |
@@ -277,7 +276,6 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_chmlib_extractor_rejects_non_chm_before_starting_process` | 非 CHM 签名字节在启动外部解包进程前返回稳定 `INVALID_CHM`。 |
 | `ingestion/test_pipeline.py` | `test_pipeline_builds_stable_versioned_chunks_and_upserts_search` | Pipeline 生成稳定的版本化 chunk 并幂等写入检索端。 |
 | 同上 | `test_pipeline_collapses_duplicate_chunk_ids_before_embedding` | 同一 Document 内相同逻辑 Chunk 在 Embedding 前稳定折叠，保留首次来源，避免重复向量化及 manifest 唯一键冲突。 |
-| 同上 | `test_pipeline_resolves_child_and_ancestor_parent_chunk_ids` | Pipeline 在逻辑 ID 确定后为 CHM 子块关联当前标题段父块，并把标题段父块继续关联到上级标题段父块。 |
 | `ingestion/test_recursive_chunker.py` | `test_recursive_chunker_is_stable_bounded_and_overlapping` | 切块边界稳定、长度受限且 overlap 正确。 |
 | 同上 | `test_recursive_chunker_rejects_invalid_overlap` | 非法 overlap 参数被拒绝。 |
 | 同上 | `test_recursive_chunker_matches_txt_golden_fixture` | TXT 切块结果与 golden fixture 一致。 |
@@ -403,7 +401,6 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | `test_search_engine_contract.py` | `test_search_upsert_is_idempotent_and_dense_sparse_are_separate` | Search upsert 幂等，Dense 与 Sparse 候选分离，并共同遵守 Dataset/metadata 过滤。 |
 | 同上 | `test_search_can_delete_an_entire_dataset_idempotently` | Search Port 可按 Dataset 幂等删除全部索引记录。 |
 | 同上 | `test_search_topic_neighbors_stay_inside_document_version_and_topic` | Topic 邻接 Port 同时约束 Dataset、filters、Document、index version、topic_path 与 ordinal 半径。 |
-| 同上 | `test_search_excludes_section_parents_and_resolves_bounded_hierarchy` | Dense/BM25 不直接召回 CHM 父块；层次上下文 Port 只返回同 section 邻块、当前父块与同 Topic 上级父块。 |
 | 同上 | `test_search_resolves_chi_topic_reference_inside_dataset_and_source` | CHI Topic 回指只返回同 Dataset、同关联 source_name、同 CHM Topic 且满足 metadata filter 的正文。 |
 | `test_task_queue_contract.py` | `test_queue_preserves_at_least_once_delivery_and_explicit_ack_nak` | Queue 保持至少一次投递、重复 publish 和显式 ACK/NAK。 |
 | 同上 | `test_unacked_delivery_can_be_redelivered` | 未 ACK delivery 可重新投递。 |
@@ -418,7 +415,6 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | 同上 | `test_real_es_version_and_document_delete_are_idempotent` | 真实 ES 按版本和整文档删除均可重复执行并收敛到正确记录数。 |
 | 同上 | `test_real_es_dataset_delete_is_idempotent_and_isolated` | 真实 ES 按 Dataset 幂等删除且不影响其他 Dataset。 |
 | 同上 | `test_real_es_topic_neighbors_do_not_cross_topic_boundary` | 真实 ES 以批量邻接查询返回锚点 ordinal 前后 Chunk，并拒绝跨 CHM Topic 扩展。 |
-| 同上 | `test_real_es_section_context_excludes_parents_from_routes_and_expands_hierarchy` | 真实 ES 的 Dense/BM25 排除父块，section context 查询按 Document/version/Topic/section 边界返回邻块与两级父上下文。 |
 | 同上 | `test_real_es_chi_topic_reference_prefers_anchor_and_stays_in_associated_chm` | 真实 ES 以 CHI Topic 路径、关联 CHM 名和可选 anchor 定位正文，锚点/查询命中优先且不串到同路径的其他 CHM。 |
 | `test_nats_jetstream_adapter.py` | `test_real_jetstream_preserves_duplicate_publish_and_ack_removes_deliveries` | 真实 JetStream 保留重复 task_id 消息，PubAck 后可消费，显式 ACK 后移除。 |
 | 同上 | `test_real_jetstream_redelivers_after_ack_wait_and_honors_delayed_nak` | 真实 durable consumer 在 ACK 超时后重投，并遵守 NAK delay。 |

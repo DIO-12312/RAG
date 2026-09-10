@@ -87,7 +87,7 @@ async def test_open_rpc_methods_convert_application_results() -> None:
     assert submitted.result.document_id
     assert repository.jobs[submitted.result.job_id].config_digest == config_digest(
         {
-            "parser_version": "source-router-v7",
+            "parser_version": "source-router-v6",
             "chunker_config": {"chunk_size": 800, "overlap": 120},
             "embedding_model": "fake",
         }
