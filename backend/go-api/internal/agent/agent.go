@@ -49,6 +49,7 @@ type Harness struct {
 	Tool      Retriever
 	MaxRounds int
 	TopK      int
+	Budget    *ContextBudget
 }
 
 var reference = regexp.MustCompile(`\[(\d+)\]`)
@@ -68,12 +69,25 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 	}
 	messages = append(messages, history...)
 	messages = append(messages, Message{Role: "user", Content: question})
+
+	budget := h.ContextBudget()
+	if h.Budget != nil {
+		budget = *h.Budget
+	}
+	messages = budget.TrimMessages(messages)
+
 	citations := []Citation{}
 	seen := map[string]int{}
 	for round := 0; round < rounds; round++ {
 		if e := ctx.Err(); e != nil {
 			return "", nil, e
 		}
+
+		messages = budget.TrimMessages(messages)
+		if !budget.Fits(messages) {
+			return "", nil, errors.New("context budget exceeded")
+		}
+
 		msg, e := h.Model.Complete(ctx, messages, round == 0)
 		if e != nil {
 			return "", nil, e
