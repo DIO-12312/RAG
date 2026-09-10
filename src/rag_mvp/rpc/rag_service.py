@@ -194,7 +194,7 @@ class RagService:
         retrieval: RetrievalService | None = None,
         sources: SourceService | None = None,
         now: Callable[[], datetime] | None = None,
-        parser_version: str = "source-router-v6",
+        parser_version: str = "source-router-v7",
         chunk_size: int = 800,
         chunk_overlap: int = 120,
         embedding_model: str | None = None,

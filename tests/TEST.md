@@ -260,9 +260,9 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_router_selects_supported_parser` | Router 为各受支持后缀选择正确 parser。 |
 | 同上 | `test_router_rejects_unsupported_source_type` | 不支持的类型返回稳定错误。 |
 | 同上 | `test_pdf_parser_rejects_corrupt_bytes` | 损坏 PDF 返回稳定错误。 |
-| `ingestion/test_chm_parser.py` | `test_chm_parser_orders_topics_and_preserves_heading_provenance` | CHM 按 HHC 目录稳定排列 Topic，按标题层级分段，过滤脚本/样式并保留 Topic、标题路径与锚点。 |
+| `ingestion/test_chm_parser.py` | `test_chm_parser_orders_topics_and_preserves_heading_provenance` | CHM 按 HHC 目录稳定排列 Topic，按标题层级分段，过滤脚本/样式，并稳定保留 Topic、标题路径、锚点及 section/parent 层级关系。 |
 | 同上 | `test_chm_parser_prefers_main_content_and_removes_navigation_noise` | 优先语义化正文区域，并过滤 Doxygen/产品手册的导航、面包屑和页脚噪声。 |
-| 同上 | `test_chm_topic_and_heading_segments_are_hard_chunk_boundaries` | Topic 与标题段均为不可跨越的切块边界；正文切分保持上限与全局稳定 ordinal，每个 CHM Chunk 的检索文本稳定加入 Topic、Heading 与 Symbol 前缀。 |
+| 同上 | `test_chm_topic_and_heading_segments_are_hard_chunk_boundaries` | Topic 与标题段均为不可跨越的切块边界；正文切分保持上限与全局稳定 ordinal，每个子块保存 section 内索引/总数并稳定加入 Topic、Heading 与 Symbol 前缀。 |
 | 同上 | `test_chm_parser_decodes_declared_legacy_charset` | CHM HTML Topic 按声明的旧编码解码中文正文和标题。 |
 | 同上 | `test_chm_parser_recovers_isolated_invalid_declared_charset_bytes` | 对声明了有效编码但包含孤立损坏字节的旧式 HTML Topic 使用替换字符恢复，避免单个坏字节导致整个 CHM 摄取失败。 |
 | 同上 | `test_router_selects_injected_chm_parser` | ParserRouter 对大小写不敏感的 `.chm` 后缀选择 CHM parser。 |

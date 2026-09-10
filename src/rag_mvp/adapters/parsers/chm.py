@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import hashlib
 import re
 import subprocess
 from collections.abc import Sequence
@@ -411,7 +412,6 @@ class ChmParser:
             raise _invalid_chm(f"HTML topic {entry.path} cannot be decoded") from error
 
         topic_title = parser.title or PurePosixPath(entry.path).stem
-        heading_stack: list[tuple[int, str]] = []
         sections: list[tuple[str | None, int | None, str | None, list[str], int]] = []
         current_heading: str | None = None
         current_level: int | None = None
@@ -438,9 +438,6 @@ class ChmParser:
         for block in parser.content_blocks:
             if block.heading_level is not None:
                 flush()
-                while heading_stack and heading_stack[-1][0] >= block.heading_level:
-                    heading_stack.pop()
-                heading_stack.append((block.heading_level, block.text))
                 current_heading = block.text
                 current_level = block.heading_level
                 current_anchor = block.anchor
@@ -449,13 +446,19 @@ class ChmParser:
         flush()
 
         result: list[ParsedSegment] = []
-        active_stack: list[tuple[int, str]] = []
-        for heading, level, anchor, parts, start_line in sections:
+        active_stack: list[tuple[int, str, str]] = []
+        for section_index, (heading, level, anchor, parts, start_line) in enumerate(sections):
             if level is not None and heading is not None:
                 while active_stack and active_stack[-1][0] >= level:
                     active_stack.pop()
-                active_stack.append((level, heading))
-            heading_path = " > ".join(item[1] for item in active_stack) or topic_title
+            heading_path = " > ".join(item[1] for item in active_stack)
+            if heading is not None:
+                heading_path = " > ".join(filter(None, (heading_path, heading)))
+            heading_path = heading_path or topic_title
+            section_id = _section_id(entry.path, section_index, heading_path, anchor)
+            parent_section_id = active_stack[-1][2] if active_stack else ""
+            if level is not None and heading is not None:
+                active_stack.append((level, heading, section_id))
             text = "\n\n".join(parts).strip()
             if not text:
                 continue
@@ -465,6 +468,9 @@ class ChmParser:
                 "topic_title": topic_title,
                 "topic_order": str(topic_order),
                 "heading_path": heading_path,
+                "section_id": section_id,
+                "parent_section_id": parent_section_id,
+                "heading_level": str(level or 0),
             }
             if anchor:
                 locator_metadata["anchor"] = anchor
@@ -473,8 +479,6 @@ class ChmParser:
                 "logical_document_type": "chm_topic",
                 **locator_metadata,
             }
-            if level is not None:
-                metadata["heading_level"] = str(level)
             result.append(
                 ParsedSegment(
                     text=text,
@@ -489,6 +493,13 @@ class ChmParser:
                 )
             )
         return tuple(result)
+
+
+def _section_id(topic_path: str, section_index: int, heading_path: str, anchor: str | None) -> str:
+    """Build a stable section identity without depending on one uploaded Document ID."""
+
+    identity = "\x00".join((topic_path, str(section_index), heading_path, anchor or ""))
+    return f"section-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:24]}"
 
 
 def _decode_html(content: bytes) -> str:

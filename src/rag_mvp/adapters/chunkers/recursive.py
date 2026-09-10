@@ -28,23 +28,39 @@ class RecursiveChunker:
     async def split(self, segments: Sequence[ParsedSegment]) -> tuple[ChunkDraft, ...]:
         drafts: list[ChunkDraft] = []
         for segment in segments:
-            start = 0
-            while start < len(segment.text):
-                end = self._find_end(segment.text, start)
+            slices = self._segment_slices(segment.text)
+            for chunk_index, (start, end) in enumerate(slices):
                 body = segment.text[start:end]
-                if body:
-                    drafts.append(
-                        ChunkDraft(
-                            ordinal=len(drafts),
-                            content_with_weight=self._content_with_weight(segment, body),
-                            locator=self._locator(segment, start, end),
-                            metadata=segment.metadata,
-                        )
+                metadata = dict(segment.metadata)
+                if metadata.get("source_type") == "chm":
+                    metadata.update(
+                        {
+                            "chunk_role": "section_child",
+                            "chunk_index_in_section": str(chunk_index),
+                            "section_chunk_count": str(len(slices)),
+                        }
                     )
-                if end >= len(segment.text):
-                    break
-                start = max(start + 1, end - self._overlap)
+                drafts.append(
+                    ChunkDraft(
+                        ordinal=len(drafts),
+                        content_with_weight=self._content_with_weight(segment, body),
+                        locator=self._locator(segment, start, end),
+                        metadata=metadata,
+                    )
+                )
         return tuple(drafts)
+
+    def _segment_slices(self, text: str) -> tuple[tuple[int, int], ...]:
+        slices: list[tuple[int, int]] = []
+        start = 0
+        while start < len(text):
+            end = self._find_end(text, start)
+            if text[start:end]:
+                slices.append((start, end))
+            if end >= len(text):
+                break
+            start = max(start + 1, end - self._overlap)
+        return tuple(slices)
 
     @staticmethod
     def _content_with_weight(segment: ParsedSegment, body: str) -> str:
