@@ -4,7 +4,7 @@ EARTHLY_FLAGS ?=
 SUITE ?= all
 EVAL_FIXTURE ?= rephrased
 
-.PHONY: all proto lint test ci docker-up docker-test docker-down run clear help
+.PHONY: all proto lint test ci docker-up docker-test docker-down run web-restart clear help
 
 # 默认所有的检验与启动
 all: proto lint test docker-up docker-test
@@ -41,6 +41,10 @@ docker-down:
 run:
 	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +run
 
+# 重新构建并仅重启前端容器，保留后端服务与数据卷
+web-restart:
+	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +web-restart
+
 # 查找 tests/**/log 目录下的所有文件并删除
 clear:
 	find tests -type d -name log -exec find {} -maxdepth 1 -type f -delete \;
@@ -54,6 +58,7 @@ help:
 	@echo make ci     - 运行完整的免密钥质量门禁
 	@echo make docker-up                  - 校验、构建并启动所有服务
 	@echo make run                        - 一键启动 RAG、Go 后端、产品 MySQL 和 Vue 前端容器
+	@echo make web-restart                - 重新构建并仅重启 Vue 前端容器
 	@echo make docker-test SUITE=VALUE EVAL_FIXTURE=original	实际评估数据集选择器
 	@echo make docker-down                - 扫描日志并停止服务（不删除数据卷）
 	@echo make clear                      - 删除 tests/**/log 目录下的文件

@@ -25,6 +25,7 @@ def test_rag_service_defines_the_complete_rpc_surface() -> None:
         "RetryJob",
         "CancelJob",
         "Retrieve",
+        "GetSourceTopic",
         "DeleteDocument",
     }
     assert methods["SubmitDocument"].client_streaming is True
@@ -45,6 +46,7 @@ def test_every_response_has_result_and_business_error_outcome() -> None:
         "RetryJobResponse",
         "CancelJobResponse",
         "RetrieveResponse",
+        "GetSourceTopicResponse",
         "DeleteDocumentResponse",
     )
 
@@ -120,8 +122,18 @@ def test_evidence_contains_provenance_and_stage_scores_but_no_answer() -> None:
         "metadata",
         "scores",
         "index_version",
+        "display_content",
     } <= set(evidence.fields_by_name)
     assert {"answer", "citation", "prompt"}.isdisjoint(evidence.fields_by_name)
+
+    source = _message("GetSourceTopicRequest")
+    assert [(field.name, field.number) for field in source.fields] == [
+        ("request_id", 1),
+        ("document_id", 2),
+        ("index_version", 3),
+        ("topic_path", 4),
+        ("anchor", 5),
+    ]
 
     scores = _message("ScoreBreakdown")
     assert set(scores.fields_by_name) == {

@@ -25,6 +25,7 @@ describe("frontend API contracts", () => {
       "/jobs/:id/cancel",
       "/jobs/:id/retry",
       "/documents/:id",
+      "/documents/:id/source-topic",
       "/settings",
       "/settings/models/chat",
       "/settings/models/embedding",

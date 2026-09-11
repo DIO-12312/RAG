@@ -101,6 +101,13 @@ export function findMockDataset(datasetId: string): DatasetDetail | undefined {
   return datasets.find((dataset) => dataset.id === datasetId);
 }
 
+export function deleteMockDataset(datasetId: string): boolean {
+  const previousLength = datasets.length;
+  datasets = datasets.filter((dataset) => dataset.id !== datasetId);
+  jobs = jobs.filter((job) => job.datasetId !== datasetId);
+  return datasets.length < previousLength;
+}
+
 export function createMockDataset(name: string): DatasetSummary {
   const id = `dataset-created-${generatedId++}`;
   const dataset: DatasetDetail = {

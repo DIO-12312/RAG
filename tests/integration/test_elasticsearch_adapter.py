@@ -14,7 +14,14 @@ from elasticsearch import AsyncElasticsearch
 from rag_mvp.adapters.search_engine.elasticsearch import ElasticsearchSearchEngine
 from rag_mvp.domain.ids import es_record_id
 from rag_mvp.domain.models import Chunk, Locator
-from rag_mvp.ports.search_engine import IndexedChunk, SearchRequest
+from rag_mvp.ports.search_engine import (
+    IndexedChunk,
+    SearchRequest,
+    TopicNeighborAnchor,
+    TopicNeighborRequest,
+    TopicReferenceAnchor,
+    TopicReferenceRequest,
+)
 
 
 def _client_from_environment(prefix: str) -> AsyncElasticsearch:
@@ -43,18 +50,32 @@ def _indexed(
     content: str,
     vector: tuple[float, float, float],
     category: str,
+    ordinal: int = 0,
+    topic_path: str | None = None,
+    source_name: str | None = None,
+    locator_anchor: str | None = None,
 ) -> IndexedChunk:
     """构造写入 Elasticsearch 的索引记录。"""
     chunk = Chunk(
         id=chunk_id,
         document_id=document_id,
         index_version=version,
-        ordinal=0,
+        ordinal=ordinal,
         content_with_weight=content,
         content_sha256=(chunk_id[0] if chunk_id else "c") * 64,
-        source_name=f"{document_id}.md",
-        locator=Locator(start_line=1, end_line=2, metadata={"section": category}),
-        metadata={"category": category},
+        source_name=source_name or f"{document_id}.md",
+        locator=Locator(
+            start_line=1,
+            end_line=2,
+            metadata={
+                "section": category,
+                **({"anchor": locator_anchor} if locator_anchor else {}),
+            },
+        ),
+        metadata={
+            "category": category,
+            **({"source_type": "chm", "topic_path": topic_path} if topic_path else {}),
+        },
     )
     return IndexedChunk(
         record_id=es_record_id(document_id, version, chunk_id),
@@ -69,7 +90,7 @@ async def elasticsearch_search() -> AsyncIterator[
     tuple[ElasticsearchSearchEngine, AsyncElasticsearch]
 ]:
     """创建隔离索引并在测试结束后清理。"""
-    index_name = f"rag-test-{uuid.uuid4().hex}"
+    index_name = f"rag-chunks-v1-test-{uuid.uuid4().hex}"
     client = _client_from_environment("RAG_TEST")
     search = ElasticsearchSearchEngine(client, index_name, embedding_dimension=3)
     try:
@@ -246,3 +267,126 @@ async def test_real_es_dataset_delete_is_idempotent_and_isolated(
     )
     assert count["count"] == 1
     assert [candidate.chunk.id for candidate in remaining] == [isolated.chunk.id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_real_es_topic_neighbors_do_not_cross_topic_boundary(
+    elasticsearch_search: tuple[ElasticsearchSearchEngine, AsyncElasticsearch],
+) -> None:
+    search, _client = elasticsearch_search
+    topic_chunks = [
+        _indexed(
+            dataset_id="dataset-1",
+            document_id="document-1",
+            version=1,
+            chunk_id=f"{ordinal + 1:016x}",
+            content=f"topic-a-{ordinal}",
+            vector=(1.0, 0.0, 0.0),
+            category="guide",
+            ordinal=ordinal,
+            topic_path="topic-a.html",
+        )
+        for ordinal in range(3)
+    ]
+    other_topic = _indexed(
+        dataset_id="dataset-1",
+        document_id="document-1",
+        version=1,
+        chunk_id="ffffffffffffffff",
+        content="topic-b",
+        vector=(1.0, 0.0, 0.0),
+        category="guide",
+        ordinal=3,
+        topic_path="topic-b.html",
+    )
+    await search.upsert_chunks([*topic_chunks, other_topic])
+
+    neighbors = await search.topic_neighbors(
+        TopicNeighborRequest(
+            dataset_id="dataset-1",
+            anchors=(
+                TopicNeighborAnchor(
+                    document_id="document-1",
+                    index_version=1,
+                    ordinal=1,
+                    topic_path="topic-a.html",
+                ),
+            ),
+            radius=1,
+            filters={"category": "guide"},
+        )
+    )
+
+    assert [candidate.chunk.id for candidate in neighbors] == [
+        topic_chunks[0].chunk.id,
+        topic_chunks[1].chunk.id,
+        topic_chunks[2].chunk.id,
+    ]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_real_es_chi_topic_reference_prefers_anchor_and_stays_in_associated_chm(
+    elasticsearch_search: tuple[ElasticsearchSearchEngine, AsyncElasticsearch],
+) -> None:
+    search, _client = elasticsearch_search
+    target = _indexed(
+        dataset_id="dataset-1",
+        document_id="chm-document",
+        version=1,
+        chunk_id="1111111111111111",
+        content="DDS_DataReader_take reads available samples",
+        vector=(1.0, 0.0, 0.0),
+        category="guide",
+        ordinal=2,
+        topic_path="group___c_subscription.html",
+        source_name="manual.chm",
+        locator_anchor="ga-take",
+    )
+    same_topic_other_chunk = _indexed(
+        dataset_id="dataset-1",
+        document_id="chm-document",
+        version=1,
+        chunk_id="2222222222222222",
+        content="general subscription introduction",
+        vector=(1.0, 0.0, 0.0),
+        category="guide",
+        ordinal=1,
+        topic_path="group___c_subscription.html",
+        source_name="manual.chm",
+    )
+    wrong_source = _indexed(
+        dataset_id="dataset-1",
+        document_id="other-document",
+        version=1,
+        chunk_id="3333333333333333",
+        content="DDS_DataReader_take duplicated",
+        vector=(1.0, 0.0, 0.0),
+        category="guide",
+        topic_path="group___c_subscription.html",
+        source_name="other.chm",
+    )
+    await search.upsert_chunks((same_topic_other_chunk, target, wrong_source))
+
+    references = await search.topic_references(
+        TopicReferenceRequest(
+            dataset_id="dataset-1",
+            query="DDS_DataReader_take",
+            anchors=(
+                TopicReferenceAnchor(
+                    anchor_chunk_id="chi-anchor",
+                    associated_source_name="manual.chm",
+                    topic_path="group___c_subscription.html",
+                    anchor="ga-take",
+                ),
+            ),
+            filters={"category": "guide"},
+        )
+    )
+
+    assert references[0].chunk.id == target.chunk.id
+    assert {candidate.chunk.id for candidate in references} == {
+        target.chunk.id,
+        same_topic_other_chunk.chunk.id,
+    }

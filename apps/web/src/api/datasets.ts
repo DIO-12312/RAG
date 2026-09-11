@@ -2,7 +2,9 @@ import type {
   CreateDatasetRequest,
   DatasetDetail,
   DatasetSummary,
+  DeleteDatasetResult,
   Job,
+  SourceTopic,
 } from "./contracts";
 import { request } from "./http";
 import { randomUUID } from "../utils/id";
@@ -20,6 +22,13 @@ export function createDataset(payload: CreateDatasetRequest, key = randomUUID())
     method: "POST",
     headers: { "Idempotency-Key": key },
     body: JSON.stringify(payload),
+  });
+}
+
+export function deleteDataset(datasetId: string, key = randomUUID()): Promise<DeleteDatasetResult> {
+  return request<DeleteDatasetResult>(`/datasets/${datasetId}`, {
+    method: "DELETE",
+    headers: { "Idempotency-Key": key },
   });
 }
 
@@ -46,4 +55,15 @@ export function retryJob(jobId: string): Promise<Job> {
 
 export function deleteDocument(documentId: string): Promise<void> {
   return request<void>(`/documents/${documentId}`, { method: "DELETE" });
+}
+
+export function getSourceTopic(
+  documentId: string,
+  indexVersion: number,
+  topicPath: string,
+  anchor?: string,
+): Promise<SourceTopic> {
+  const query = new URLSearchParams({ indexVersion: String(indexVersion), topicPath });
+  if (anchor) query.set("anchor", anchor);
+  return request<SourceTopic>(`/documents/${documentId}/source-topic?${query.toString()}`);
 }

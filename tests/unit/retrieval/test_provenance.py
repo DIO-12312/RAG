@@ -30,3 +30,26 @@ def test_dense_evidence_preserves_traceable_chunk_fields() -> None:
     assert evidence.metadata == {"team": "search"}
     assert evidence.scores.dense_score == 0.75
     assert evidence.scores.sparse_score is None
+
+
+def test_chm_evidence_exposes_body_without_retrieval_weight_prefix() -> None:
+    weighted = (
+        "Topic: DDS WaitSet\nHeading: DDS WaitSet > wait\nSymbol: DDS_WaitSet_wait\n\n"
+        "Wait for an active condition."
+    )
+    chunk = Chunk(
+        id="chunk-1",
+        document_id="document-1",
+        index_version=1,
+        ordinal=0,
+        content_with_weight=weighted,
+        content_sha256=content_sha256(weighted),
+        source_name="manual.chm",
+        locator=Locator(symbol="DDS_WaitSet_wait"),
+        metadata={"source_type": "chm", "topic_path": "waitset.html"},
+    )
+
+    evidence = dense_evidence(SearchCandidate("record-1", "dataset-1", chunk, 0.8))
+
+    assert evidence.content_with_weight == weighted
+    assert evidence.display_content == "Wait for an active condition."

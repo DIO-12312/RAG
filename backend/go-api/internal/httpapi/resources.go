@@ -8,6 +8,7 @@ import (
 	"rag-mvp/backend/go-api/internal/ragclient"
 	pb "rag-mvp/backend/go-api/internal/ragpb"
 	"rag-mvp/backend/go-api/internal/storage"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -103,6 +104,40 @@ func (s *Server) createDataset(c *gin.Context) {
 	}
 	c.JSON(201, gin.H{"id": id, "name": p.Name, "status": "EMPTY", "documentCount": 0, "updatedAt": time.Now().UTC().Format(time.RFC3339)})
 }
+
+func (s *Server) deleteDataset(c *gin.Context) {
+	r, e := s.Store.Resource(c.Request.Context(), uid(c), c.Param("id"))
+	if e != nil || (r.Kind != "dataset" && r.Kind != "deleting_dataset") {
+		fail(c, 404, "NOT_FOUND", "资源不存在。")
+		return
+	}
+	if r.Kind == "deleting_dataset" {
+		c.JSON(202, gin.H{"datasetId": r.ID, "jobId": r.JobID})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+	result, e := s.RAG.DeleteDataset(ctx, r.ID, uid(c)+"-"+key(c))
+	if e != nil || result == nil {
+		fail(c, 502, "DELETE_FAILED", "知识库删除失败，请稍后重试。")
+		return
+	}
+	if _, e = s.Store.DB.ExecContext(
+		ctx,
+		"UPDATE resource_index SET kind=CASE WHEN id=? THEN 'deleting_dataset' ELSE 'deleted' END, job_id=CASE WHEN id=? THEN ? ELSE job_id END WHERE user_id=? AND (id=? OR dataset_id=?)",
+		r.ID,
+		r.ID,
+		result.JobId,
+		uid(c),
+		r.ID,
+		r.ID,
+	); e != nil {
+		fail(c, 503, "SAVE_FAILED", "删除任务已受理，请刷新知识库列表。")
+		return
+	}
+	c.JSON(202, gin.H{"datasetId": result.DatasetId, "jobId": result.JobId})
+}
+
 func (s *Server) upload(c *gin.Context) {
 	r, ok := s.owned(c, c.Param("id"), "dataset")
 	if !ok {
@@ -124,7 +159,7 @@ func (s *Server) upload(c *gin.Context) {
 	defer part.Close()
 	name := filepath.Base(part.FileName())
 	ext := strings.ToLower(filepath.Ext(name))
-	if !strings.Contains("|.pdf|.md|.txt|.py|.go|.js|.ts|.java|", "|"+ext+"|") {
+	if !strings.Contains("|.pdf|.md|.txt|.py|.go|.js|.ts|.java|.chm|.chi|", "|"+ext+"|") {
 		fail(c, 400, "UNSUPPORTED_FILE", "暂不支持此文件格式。")
 		return
 	}
@@ -235,4 +270,23 @@ func (s *Server) deleteDocument(c *gin.Context) {
 		return
 	}
 	c.Status(204)
+}
+
+func (s *Server) sourceTopic(c *gin.Context) {
+	r, ok := s.owned(c, c.Param("id"), "document")
+	if !ok {
+		return
+	}
+	topicPath := strings.TrimSpace(c.Query("topicPath"))
+	version, err := strconv.ParseUint(c.Query("indexVersion"), 10, 64)
+	if topicPath == "" || err != nil || version < 1 {
+		fail(c, 400, "INVALID_SOURCE", "来源定位信息不完整。")
+		return
+	}
+	result, err := s.RAG.SourceTopic(c.Request.Context(), r.ID, version, topicPath, strings.TrimSpace(c.Query("anchor")))
+	if err != nil {
+		fail(c, 502, "SOURCE_UNAVAILABLE", "完整来源暂时无法读取。")
+		return
+	}
+	c.JSON(200, result)
 }

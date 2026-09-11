@@ -129,3 +129,22 @@ class RetrieveQuery:
     filters: Mapping[str, str]
     max_context_tokens: int
     enable_rerank: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class GetSourceTopicQuery:
+    request_id: str
+    document_id: str
+    index_version: int
+    topic_path: str
+    anchor: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SourceTopicView:
+    document_id: str
+    source_name: str
+    topic_path: str
+    topic_title: str
+    markdown: str
+    anchor: str | None = None

@@ -58,6 +58,9 @@ logs/
 *.log
 tests/eval/log/
 tests/.search-guard/
+test-results/
+测试用例.md
+CHM回答命中率测试结果.md
 *.pid
 *.tmp
 tmp/

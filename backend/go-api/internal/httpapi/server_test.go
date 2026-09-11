@@ -17,6 +17,12 @@ func TestUnauthenticatedAndCrossOrigin(t *testing.T) {
 			t.Fatalf("%s: %d", path, w.Code)
 		}
 	}
+	deleteRequest := httptest.NewRequest("DELETE", "/datasets/dataset-1", nil)
+	deleteResponse := httptest.NewRecorder()
+	r.ServeHTTP(deleteResponse, deleteRequest)
+	if deleteResponse.Code != http.StatusUnauthorized {
+		t.Fatal("unauthenticated dataset deletion accepted")
+	}
 	req := httptest.NewRequest("POST", "/auth/login", nil)
 	req.Header.Set("Origin", "https://evil.test")
 	w := httptest.NewRecorder()

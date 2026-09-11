@@ -14,6 +14,7 @@ rag_mvp_search:
         - indices:admin/mapping/put
         - indices:admin/mappings/get
         - indices:admin/refresh
+        - "indices:admin/refresh[s]"
         - indices:data/read/search
         - indices:data/read/msearch
         # Bulk writes also execute shard-level bulk[s] and replica actions.

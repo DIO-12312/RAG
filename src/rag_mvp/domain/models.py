@@ -256,9 +256,44 @@ class Evidence:
     scores: ScoreBreakdown
     index_version: int
     metadata: Mapping[str, str] = field(default_factory=dict)
+    display_content: str = ""
 
     # 在构造完成后校验并固化领域不变式。
     def __post_init__(self) -> None:
         if self.index_version < 1:
             raise ValueError("index_version must be at least 1")
         object.__setattr__(self, "metadata", _frozen_mapping(self.metadata))
+        if not self.display_content:
+            object.__setattr__(
+                self,
+                "display_content",
+                _evidence_display_content(self.content_with_weight, self.metadata),
+            )
+
+
+def _evidence_display_content(content: str, metadata: Mapping[str, str]) -> str:
+    """Remove only the deterministic CHM/CHI retrieval prefix used by the chunker."""
+
+    source_type = metadata.get("source_type")
+    expected_labels: tuple[str, ...]
+    if source_type == "chm":
+        expected_labels = ("Topic", "Heading", "Symbol")
+    elif source_type == "chi":
+        expected_labels = (
+            "Index keyword",
+            "Topic",
+            "Topic path",
+            "Topic URL",
+            "Associated CHM",
+        )
+    else:
+        return content
+    prefix, separator, body = content.partition("\n\n")
+    if not separator:
+        return content
+    lines = prefix.splitlines()
+    if not lines or any(
+        not any(line.startswith(f"{label}: ") for label in expected_labels) for line in lines
+    ):
+        return content
+    return body or content

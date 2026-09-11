@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # 验证解析、规范化、切块、向量化与写索引的单 Task 流水线。
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import pytest
@@ -10,12 +11,50 @@ from rag_mvp.adapters.parsers.text import TextParser
 from rag_mvp.application.document_service import DocumentService
 from rag_mvp.application.dto import CreateDatasetCommand, SubmitDocumentCommand
 from rag_mvp.domain.ids import es_record_id
+from rag_mvp.domain.models import Locator
 from rag_mvp.ingestion.pipeline import IngestionPipeline
 from rag_mvp.outbox.finalizer import finalize_once
+from rag_mvp.ports.chunker import ChunkDraft
+from rag_mvp.ports.parser import ParsedSegment
 from tests.fakes.metadata import FakeMetadataRepository
 from tests.fakes.model import FakeModelGateway
 from tests.fakes.search_engine import FakeSearchEngine
 from tests.fakes.storage import FakeObjectStorage
+
+
+class _DuplicateChunker:
+    async def split(self, segments: Sequence[ParsedSegment]) -> tuple[ChunkDraft, ...]:
+        assert segments
+        return (
+            ChunkDraft(
+                ordinal=0,
+                content_with_weight="repeated evidence",
+                locator=Locator(start_line=1, end_line=1),
+                metadata={"position": "first"},
+            ),
+            ChunkDraft(
+                ordinal=1,
+                content_with_weight="repeated evidence",
+                locator=Locator(start_line=2, end_line=2),
+                metadata={"position": "second"},
+            ),
+            ChunkDraft(
+                ordinal=2,
+                content_with_weight="unique evidence",
+                locator=Locator(start_line=3, end_line=3),
+                metadata={"position": "third"},
+            ),
+        )
+
+
+class _RecordingModel(FakeModelGateway):
+    def __init__(self, dimension: int = 8) -> None:
+        super().__init__(dimension)
+        self.embedded_batches: list[tuple[str, ...]] = []
+
+    async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
+        self.embedded_batches.append(tuple(texts))
+        return await super().embed(texts)
 
 
 @pytest.mark.asyncio
@@ -67,3 +106,51 @@ async def test_pipeline_builds_stable_versioned_chunks_and_upserts_search() -> N
         es_record_id(chunk.document_id, chunk.index_version, chunk.id) for chunk in chunks
     }
     assert model.embed_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_pipeline_collapses_duplicate_chunk_ids_before_embedding() -> None:
+    """相同逻辑 Chunk 保留首次来源，并且只向量化和索引一次。"""
+    now = datetime.now(UTC)
+    repository = FakeMetadataRepository()
+    storage = FakeObjectStorage()
+    model = _RecordingModel(dimension=8)
+    search = FakeSearchEngine()
+    documents = DocumentService(repository, storage, max_upload_bytes=1024)
+    await documents.create_dataset(
+        CreateDatasetCommand("trace", "create-dedup", "Docs", "fake", 8, now, "dataset-2")
+    )
+    await documents.submit_document(
+        SubmitDocumentCommand(
+            "trace",
+            "submit-dedup",
+            "dataset-2",
+            "duplicates.txt",
+            b"source",
+            None,
+            None,
+            "text-v1",
+            12,
+            3,
+            "fake",
+            now,
+        )
+    )
+    await finalize_once(repository, storage, now, limit=10)
+    task = next(iter(repository.tasks.values()))
+    claim = await repository.claim_task(task.id, delivery_sequence=1, now=now)
+    assert claim is not None
+    pipeline = IngestionPipeline(
+        storage=storage,
+        parser=TextParser(),
+        chunker=_DuplicateChunker(),
+        model=model,
+        search=search,
+    )
+
+    chunks = await pipeline.execute(claim)
+
+    assert [chunk.ordinal for chunk in chunks] == [0, 2]
+    assert [chunk.metadata["position"] for chunk in chunks] == ["first", "third"]
+    assert model.embedded_batches == [("repeated evidence", "unique evidence")]
+    assert search.record_count == 2

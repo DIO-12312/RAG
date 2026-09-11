@@ -10,6 +10,8 @@
   --accent-strong: #624995;
   --accent-soft: #eee8f6;
   --success: #027a48;
+  --danger: #a53949;
+  --danger-soft: #fbe8e7;
   --radius: 18px;
   --ease-out: cubic-bezier(.22,1,.36,1);
   --shadow-lift: 0 14px 32px rgb(57 41 83 / 7%);
