@@ -89,6 +89,8 @@ def test_idempotency_context_is_only_used_by_commands() -> None:
     assert "request_id" in retrieve_fields
     assert "context" not in retrieve_fields
     assert "idempotency_key" not in retrieve_fields
+    assert retrieve_fields["encrypted_rerank_profile"].number == 8
+    assert retrieve_fields["encrypted_rerank_profile"].type == FieldDescriptor.TYPE_STRING
 
 
 def test_delete_dataset_contract_keeps_job_history_scoped_to_dataset() -> None:

@@ -30,6 +30,8 @@ python-workspace:
     COPY Earthfile Makefile Dockerfile Dockerfile.elasticsearch docker-compose.yml docker-compose.debug.yml compose.product.yml alembic.ini ./
     COPY SPEC.md PLAN.md AGENTS.md ./
     COPY .dockerignore .gitattributes .earthly.env ./
+    COPY .github/workflows/quality.yml ./.github/workflows/quality.yml
+    COPY .github/main-ruleset.json ./.github/main-ruleset.json
     RUN uv sync --frozen --group dev
 
 # Regenerate protobuf code, verify it, and export only successful generated files to the host.
@@ -64,6 +66,7 @@ type-check:
 
 # Aggregate all non-mutating source-quality checks for the public make lint command.
 lint:
+    FROM +python-workspace
     BUILD +ruff-check
     BUILD +format-check
     BUILD +type-check
@@ -91,6 +94,7 @@ test-coverage:
 
 # Aggregate every offline behavioral, resilience, evaluation, and coverage target.
 test:
+    FROM +python-workspace
     BUILD +test-fast
     BUILD +test-resilience
     BUILD +test-eval
@@ -98,6 +102,7 @@ test:
 
 # Run the complete Secret-free gate used by pre-commit and pull-request CI.
 ci:
+    FROM +python-workspace
     BUILD +lint
     BUILD +test
 

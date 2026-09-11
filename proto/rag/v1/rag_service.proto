@@ -223,6 +223,9 @@ message RetrieveRequest {
   uint32 top_k = 5;
   bool enable_rerank = 6;
   uint32 max_context_tokens = 7;
+  // Request-scoped AES-GCM profile, AAD rag/rerank-profile/v1/<dataset_id>.
+  // Ignored when enable_rerank is false; never persisted or returned to callers.
+  string encrypted_rerank_profile = 8;
 }
 
 message Locator {

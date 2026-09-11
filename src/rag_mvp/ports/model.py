@@ -21,6 +21,19 @@ class DatasetModelGateway(Protocol):
     def for_dataset(self, dataset: Dataset) -> ModelGateway: ...
 
 
+@runtime_checkable
+class RerankProfileGateway(Protocol):
+    def for_rerank(self, encrypted_profile: str, dataset_id: str) -> ModelGateway: ...
+
+
+def model_for_rerank(model: ModelGateway, encrypted_profile: str, dataset_id: str) -> ModelGateway:
+    if not encrypted_profile:
+        return model
+    if not isinstance(model, RerankProfileGateway):
+        raise DomainError(DomainFailure("RERANK_PROFILE_UNSUPPORTED", "rerank gateway unavailable"))
+    return model.for_rerank(encrypted_profile, dataset_id)
+
+
 def model_for_dataset(model: ModelGateway, dataset: Dataset) -> ModelGateway:
     if dataset.encrypted_embedding_profile:
         if not isinstance(model, DatasetModelGateway):

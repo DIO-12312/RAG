@@ -77,20 +77,7 @@ func (s *Server) Router() *gin.Engine {
 	a.POST("/auth/logout", s.logout)
 	a.GET("/settings", s.settings)
 	a.PUT("/settings/models/:kind", s.saveModel)
-	a.PUT("/settings/agent", func(c *gin.Context) {
-		var p struct {
-			Enabled bool `json:"rerankEnabled"`
-		}
-		if c.ShouldBindJSON(&p) != nil {
-			fail(c, 400, "INVALID_INPUT", "参数无效。")
-			return
-		}
-		if p.Enabled {
-			fail(c, 409, "RERANK_UNAVAILABLE", "当前 Python 部署尚未接入用户级 Rerank。")
-			return
-		}
-		s.settings(c)
-	})
+	a.PUT("/settings/agent", s.saveAgentSettings)
 	a.GET("/datasets", s.datasets)
 	a.POST("/datasets", s.createDataset)
 	a.GET("/datasets/:id", s.dataset)

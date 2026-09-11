@@ -13,6 +13,7 @@ import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from rag_mvp.adapters.model.openai_compatible import OpenAICompatibleModelGateway
+from rag_mvp.adapters.model.rerank import rerank_passages
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.models import Dataset
 from rag_mvp.ports.model import ModelGateway
@@ -30,9 +31,12 @@ class PublicEndpointTransport(httpx.AsyncBaseTransport):
         host = request.url.host
         if request.url.scheme != "https" or request.url.userinfo:
             raise httpx.ConnectError("model endpoint requires HTTPS", request=request)
-        addresses = await asyncio.get_running_loop().getaddrinfo(
-            host, request.url.port or 443, type=socket.SOCK_STREAM
-        )
+        try:
+            addresses = await asyncio.get_running_loop().getaddrinfo(
+                host, request.url.port or 443, type=socket.SOCK_STREAM
+            )
+        except socket.gaierror:
+            raise httpx.ConnectError("model endpoint DNS unavailable", request=request) from None
         ips = [str(item[4][0]) for item in addresses]
         # Local TUN proxies may synthesize benchmark-range addresses. Resolve
         # those through a pinned HTTPS public resolver; never allow the fake IP.
@@ -70,9 +74,20 @@ class PublicEndpointTransport(httpx.AsyncBaseTransport):
 
 
 class DatasetProfileGateway:
-    def __init__(self, key_file: Path, dataset: Dataset | None = None) -> None:
+    def __init__(
+        self,
+        key_file: Path,
+        dataset: Dataset | None = None,
+        rerank_profile: str = "",
+        rerank_dataset_id: str = "",
+    ) -> None:
         self._key_file = key_file
         self._dataset = dataset
+        self._rerank_profile = rerank_profile
+        self._rerank_dataset_id = rerank_dataset_id
+
+    def for_rerank(self, encrypted_profile: str, dataset_id: str) -> ModelGateway:
+        return DatasetProfileGateway(self._key_file, self._dataset, encrypted_profile, dataset_id)
 
     def for_dataset(self, dataset: Dataset) -> ModelGateway:
         return DatasetProfileGateway(self._key_file, dataset)
@@ -124,4 +139,32 @@ class DatasetProfileGateway:
             return await model.embed(texts)
 
     async def rerank(self, query: str, passages: list[str]) -> list[float]:
-        raise DomainError(DomainFailure("RERANK_UNAVAILABLE", "rerank not configured"))
+        if not passages:
+            return []
+        try:
+            key = base64.b64decode(self._key_file.read_text().strip(), validate=True)
+            sealed = base64.b64decode(self._rerank_profile, validate=True)
+            aad = ("rag/rerank-profile/v1/" + self._rerank_dataset_id).encode()
+            config = json.loads(AESGCM(key).decrypt(sealed[:12], sealed[12:], aad))
+            endpoint, name, api_key = config["baseUrl"], config["modelName"], config["apiKey"]
+            timeout = float(config["timeoutSeconds"])
+            if (
+                not all(isinstance(v, str) and v.strip() for v in (endpoint, name, api_key))
+                or not 1 <= timeout <= 300
+            ):
+                raise ValueError("invalid profile")
+        except Exception:
+            raise DomainError(
+                DomainFailure(
+                    "RERANK_PROFILE_INVALID",
+                    "rerank configuration unavailable or invalid",
+                )
+            ) from None
+        async with httpx.AsyncClient(
+            transport=PublicEndpointTransport(),
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            return await rerank_passages(client, endpoint, name, query, passages)

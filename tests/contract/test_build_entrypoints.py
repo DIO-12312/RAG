@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 # 校验 Makefile 与 Earthfile 公开入口、密钥隔离及卷保护约束。
+import json
 import os
 import re
 import subprocess
 from pathlib import Path
+
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -101,6 +104,89 @@ def test_earthfile_pins_tools_and_separates_offline_targets() -> None:
     assert "COPY apps ./apps" in earthfile
     assert "COPY backend ./backend" in earthfile
     assert "compose.product.yml" in earthfile
+    for aggregate in ("lint", "test", "ci"):
+        assert f"\n{aggregate}:\n    FROM +python-workspace\n" in earthfile
+
+
+def test_quality_workflow_runs_for_push_and_main_pull_requests() -> None:
+    workflow = yaml.safe_load(_text(".github/workflows/quality.yml"))
+
+    assert workflow["on"] == {
+        "push": {"branches": ["**"]},
+        "pull_request": {"branches": ["main"]},
+        "workflow_dispatch": {},
+    }
+    assert workflow["permissions"] == {"contents": "read"}
+    assert workflow["concurrency"] == {
+        "group": (
+            "${{ github.workflow }}-${{ github.event_name }}-"
+            "${{ github.event.pull_request.number || github.ref }}"
+        ),
+        "cancel-in-progress": True,
+    }
+    assert set(workflow["jobs"]) == {"quality"}
+    job = workflow["jobs"]["quality"]
+    assert job["name"] == "python-quality"
+    assert job["runs-on"] == "ubuntu-24.04"
+    assert 10 <= job["timeout-minutes"] <= 30
+    assert "if" not in job
+    assert not job.get("continue-on-error", False)
+    steps = job["steps"]
+    gate = next(step for step in steps if step.get("id") == "gate")
+    assert gate["run"] == "make ci"
+    assert "if" not in gate
+    assert gate.get("env") == {"EARTHLY_FLAGS": "--ci"}
+    assert all(not step.get("continue-on-error", False) for step in steps)
+
+
+def test_quality_workflow_pins_tools_and_keeps_secrets_out() -> None:
+    text = _text(".github/workflows/quality.yml")
+    workflow = yaml.safe_load(text)
+    job = workflow["jobs"]["quality"]
+    assert workflow["defaults"]["run"]["shell"] == "bash"
+    assert "permissions" not in job
+    assert "environment" not in job
+    assert "services" not in job
+    actions = [step for step in job["steps"] if "uses" in step]
+    assert len(actions) == 1
+    assert re.fullmatch(r"actions/checkout@[0-9a-f]{40}", actions[0]["uses"])
+    assert actions[0]["with"] == {"persist-credentials": False}
+    install = next(step for step in job["steps"] if step.get("id") == "install")
+    assert "releases/download/v0.8.16/earthly-linux-amd64" in install["run"]
+    assert "sha256sum --check --strict" in install["run"]
+    assert "--retry 3" in install["run"]
+    assert "GITHUB_PATH" in install["run"]
+    for forbidden in (
+        "secrets.",
+        "pull_request_target",
+        "docker compose",
+        "docker-test",
+        "docker-down",
+        "make all",
+        "uv run",
+        "pytest ",
+        "--no-verify",
+        "|| true",
+    ):
+        assert forbidden not in text
+    earthfile = _text("Earthfile")
+    assert "COPY .github/workflows/quality.yml ./.github/workflows/quality.yml" in earthfile
+    assert "COPY .github/main-ruleset.json ./.github/main-ruleset.json" in earthfile
+
+
+def test_main_ruleset_protects_main_without_blocking_direct_push() -> None:
+    ruleset = json.loads(_text(".github/main-ruleset.json"))
+
+    assert ruleset["target"] == "branch"
+    assert ruleset["enforcement"] == "active"
+    assert ruleset["bypass_actors"] == []
+    assert ruleset["conditions"] == {"ref_name": {"include": ["refs/heads/main"], "exclude": []}}
+    rules = {rule["type"]: rule for rule in ruleset["rules"]}
+    assert len(rules) == len(ruleset["rules"]) == 2
+    assert set(rules) == {"deletion", "non_fast_forward"}
+    # 直接 push main 是约定工作方式；加入必需检查或 PR 规则会把检查变成合入拦截。
+    assert "required_status_checks" not in rules
+    assert "pull_request" not in rules
 
 
 def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> None:

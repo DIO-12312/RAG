@@ -383,7 +383,9 @@ after_relay_publish_before_mark
 - 发布前 E2E 必须覆盖 `.md`、`.txt`、代码文件和文本 PDF 各一例；CHM/CHI 使用本地提供且被 Git 忽略的真实手册进行验收，不得把真实手册提交到仓库，也不得把注入 extractor 的 Functional 测试表述为真实解包验收。
 - 离线评测集初始至少 30 个问题，每题提供 `relevant_chunk_ids`；真实评测还必须把固定语料经 gRPC 摄取到真实 ES，并使用真实模型执行 30 问。两者发布门槛均为 `Recall@6 ≥ 0.85`、`MRR@6 ≥ 0.70`、locator accuracy `= 1.0`；不得通过修改向量 snapshot、自由文本 snapshot 或降低阈值消除失败。
 
-### 4.7 本地提交质量门禁（Git Hook）
+### 4.7 本地提交质量门禁（Git Hook，规划）
+
+当前仓库尚未交付 `.githooks/pre-commit`；以下为后续 Hook 约束，不代表已启用。本次团队门禁通过 §4.8 的服务端检查与分支规则实现，开发者可先手动执行 `make ci`。
 
 仓库将版本控制 `.githooks/pre-commit`，使质量检查与源码一同演进；不得把唯一 hook 实现放在未提交的 `.git/hooks/`。每位开发者 clone 后执行一次：
 
@@ -399,7 +401,7 @@ git config core.hooksPath .githooks
 make ci
 ```
 
-`make ci` 通过 Earthly 固定 Python、uv、依赖与完整底层命令，并使用独立空白 env 文件，不能读取运行时 `.env`。hook 只做检查，不运行会改写工作区的 `ruff format` 或 `gofmt -w`；否则格式化后的内容不会自动进入本次暂存区，检查对象与提交对象可能不一致。开发者应先显式执行格式化命令并重新 `git add`。hook 中的 resilience 与 eval 分别只运行 Fake 和离线集合；真实 Integration、Model Integration、E2E、Docker Resilience 与 Real Eval 依赖容器、Secret、耗时或模型资源，不进入每次提交 hook，改由 `.github/workflows/docker-quality.yml` 在 main push、手动或夜间执行。
+`make ci` 通过 Earthly 固定 Python、uv、依赖与完整底层命令，并使用独立空白 env 文件，不能读取运行时 `.env`。hook 只做检查，不运行会改写工作区的 `ruff format` 或 `gofmt -w`；否则格式化后的内容不会自动进入本次暂存区，检查对象与提交对象可能不一致。开发者应先显式执行格式化命令并重新 `git add`。hook 中的 resilience 与 eval 分别只运行 Fake 和离线集合；真实 Integration、Model Integration、E2E、Docker Resilience 与 Real Eval 依赖容器、Secret、耗时或模型资源，不进入每次提交 hook。`.github/workflows/docker-quality.yml` 尚未交付，当前仍通过 `make docker-test SUITE=integration|resilience|eval|all` 显式验收；后续自动化与 PR 必需检查分离。
 
 未来引入 Go 产品控制面后，应在 Earthfile 中增加 Go 的 format check、vet 与 test target，再由现有 `make ci` 聚合；不得把底层 Go 命令复制到 Hook、CI 或 README。预期检查仍包括：
 
@@ -410,6 +412,14 @@ go test ./...
 ```
 
 `gofmt -l` 的任何输出都必须使 hook 失败；`go vet` 和 `go test` 分别阻止明显的静态问题和失败的 Go 测试进入提交。Python/Go 的完整检查命令必须同时由 CI 执行，CI 是不可绕过的最终门禁：本地 hook 提供快速反馈，CI 防止 `git commit --no-verify`、未配置 hook 或不同开发环境导致的漏检。
+
+### 4.8 Push/PR 流水线与团队合入规则
+
+`.github/workflows/quality.yml` 在所有分支 push、目标为 `main` 的 PR 以及手动触发时执行 `make ci`。固定 check 名为 `python-quality`，使用托管临时 Linux runner、固定 Earthly 0.8.16 与下载校验、只读仓库权限；不注入业务 Secret、不部署、不吞检查失败。并发取消仅限同一事件和同一分支/PR，避免 push 取消 PR 的合并结果检查。必需检查不采用路径过滤或 job 条件跳过。
+
+`.github/main-ruleset.json` 是管理员导入 GitHub Rulesets 的分支规则模板：仅保护 `main` 不被删除和强推覆盖，不要求 PR 或必需检查，成员可以直接 push `main`。由于 GitHub 的 `required_status_checks` 会拒绝尚未通过检查的直接推送，与本仓库约定冲突，因此不启用；相应地 `python-quality` 是 push 后的事后检查，不构成合入拦截，真正的推送前拦截依赖本地 Git Hook 或团队约定。默认 bypass 列表为空。配置文件不自动修改远端规则，必须先验证真实 Actions 成功，再由管理员保存启用；不能仅凭本地测试宣称远端门禁已生效。
+
+本次门禁仅接入已有 Python 离线集合与 85% 聚合覆盖率；Go/前端质量检查、Go 生成物一致性、新增代码覆盖率独立门槛以及真实模型套件的自动化尚未纳入。它们是明确的后续工作，不能将 Python 绿灯当作全产品或真实基础设施验收。真实套件继续独立显式运行，不作为本次 PR required check。启用顺序、运行边界和门禁故障处置见 `docs/test/testing-guide.md` §7。
 
 ---
 
@@ -687,7 +697,9 @@ sequenceDiagram
 
 2026-09-06 后续迭代：Embedding URL/模型/API Key/超时/Top-K 由个人设置写入 Go MySQL，API Key 加密存储，不再要求运行环境提供模型凭据。创建 Dataset 时 Go 将配置加密快照经 gRPC 传给 Python，Python MySQL 随 Dataset 持久化，Worker 与 Retrieve 使用同一快照。仅基础设施加密密钥通过只读 secret 提供给 Python，不将 API Key 放入 NATS/日志或返回前端。已有 Dataset 的模型与维度不变；空快照可经 BindEmbeddingProfile 在行锁下首次绑定匹配配置，已绑定快照不可被该 RPC 覆盖。当前 ES 索引为 1024 维，前端清楚标明并校验维度。修改个人配置影响之后创建的知识库，避免不同模型的向量混用。批量上传按单文件调用已有上传 RPC、每文件独立幂等键；目录仅展开文件，不改变 Python Task/Outbox 语义。Go 历史会话返回创建/最近消息时间并稳定倒序；前端右侧模态抽屉展示。回答 Markdown 禁止原始 HTML并清洗输出，引用证据保留原文。
 
-2026-09-06 产品控制面迭代开始实施：`backend/go-api` 使用独立 MySQL 保存个人用户、模型配置、资源所有权索引和会话，单用户拥有多个 Dataset，无租户角色。网络 API 使用根路径与 24 小时 JWT cookie。Go Agent 通过现有 `Retrieve` RPC 执行只读工具调用，绑定已鉴权 Dataset，限制轮数/时间并支持取消。知识库创建、文档管理和知识库删除均经 Python RPC；Go 不读写 Python 表。Embedding 已改为用户配置及 Dataset 加密快照；用户级 Rerank 仍只保存配置，暂不参与检索。实施与验收跟踪见 `docs/superpowers/plans/2026-09-06-live-product-plane.md`。
+2026-09-06 产品控制面迭代开始实施：`backend/go-api` 使用独立 MySQL 保存个人用户、模型配置、资源所有权索引和会话，单用户拥有多个 Dataset，无租户角色。网络 API 使用根路径与 24 小时 JWT cookie。Go Agent 通过现有 `Retrieve` RPC 执行只读工具调用，绑定已鉴权 Dataset，限制轮数/时间并支持取消。知识库创建、文档管理和知识库删除均经 Python RPC；Go 不读写 Python 表。Embedding 已改为用户配置及 Dataset 加密快照。实施与验收记录见 `docs/development/live-product-plane.md`。
+
+2026-09-11 用户级 Rerank：复用产品 `agent_settings.rerank_enabled` 持久化开关，默认关闭，前端关闭时隐藏配置并保留已保存凭据。保存完整配置后才允许启用。Go 对已授权 Dataset 的每次问答读取当前用户的 Rerank 配置，以共享 AES-GCM 密钥封装 Base URL、模型名、API Key 和超时；AAD 为 `rag/rerank-profile/v1/<dataset_id>`。密文仅经 `RetrieveRequest.encrypted_rerank_profile`（新增字段 8）传递，不落入 Python 数据库、日志或 evidence；关闭时不传配置、不调用模型。Python 通过 ModelGateway 的请求级工厂接收配置，在 adapter 内解密并调用 HTTPS 专用 `/rerank` 接口，继续执行公网 DNS/IP 校验及禁用重定向。模型返回的 `results[index,relevance_score]` 必须完整、索引唯一且分数有限，先恢复输入顺序，再交给纯排序函数。最多重排 20 个 RRF 候选；启用时 Top-N（1–20）作为最终直接命中数量，仍受上下文预算及来源扩展规则约束。超时、429、5xx 和无效分数响应可降级至 RRF；无效密文、认证失败及其他不可重试请求错误必须明确失败。已有无配置的 RPC 调用保持兼容，用户配置不修改 Dataset Embedding 快照，不在共享客户端上存储请求级状态。
 
 本节描述最终产品路径，不是 Python RAG Worker 的职责。Python 只经 gRPC 执行 `Retrieve` 并返回 evidence；Go 负责会话、Agent 决策、Prompt、Chat Model 调用和向浏览器发送 SSE。
 
