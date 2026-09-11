@@ -11,6 +11,7 @@ from rag_mvp.adapters.parsers.markdown import MarkdownParser
 from rag_mvp.adapters.parsers.pdf import PdfParser
 from rag_mvp.adapters.parsers.router import SourceParserRouter
 from rag_mvp.domain.errors import DomainError
+from rag_mvp.ports.parser import PdfParserMode
 
 
 @pytest.mark.asyncio
@@ -58,12 +59,13 @@ def _text_pdf() -> bytes:
 @pytest.mark.asyncio
 async def test_pdf_parser_returns_one_traceable_segment_per_text_page() -> None:
     """验证本测试场景的预期行为与边界条件。"""
-    segments = await PdfParser().parse("guide.pdf", _text_pdf())
+    segments = await PdfParser(mode=PdfParserMode.PLAIN).parse("guide.pdf", _text_pdf())
 
     assert [segment.locator.page_number for segment in segments] == [1, 2]
     assert "First page evidence" in segments[0].text
     assert "Second page provenance" in segments[1].text
-    assert all(segment.metadata == {"source_type": "pdf"} for segment in segments)
+    assert all(segment.metadata["source_type"] == "pdf" for segment in segments)
+    assert all(segment.metadata["parser_mode"] == "plain" for segment in segments)
 
 
 @pytest.mark.asyncio

@@ -65,7 +65,10 @@ def test_runtime_image_and_context_exclude_secrets_and_test_artifacts() -> None:
     assert "AS runtime" in dockerfile
     assert "AS test" in dockerfile
     assert "UV_CACHE_DIR=/tmp/uv-cache" in dockerfile
-    assert "apt-get install -y --no-install-recommends libchm-bin" in dockerfile
+    assert "apt-get install -y --no-install-recommends" in dockerfile
+    assert "libchm-bin" in dockerfile
+    assert "poppler-utils" in dockerfile
+    assert "tesseract-ocr-chi-sim" in dockerfile
     assert "USER rag" in dockerfile
     assert "COPY tests" not in dockerfile
     assert "migrations /app/migrations" in dockerfile

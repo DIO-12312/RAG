@@ -132,7 +132,8 @@ tests/
 │  ├─ test_mysql_outbox_worker.py
 │  ├─ test_mysql_submission.py
 │  ├─ test_nats_jetstream_adapter.py
-│  └─ test_real_embedding_model.py
+│  ├─ test_real_embedding_model.py
+│  └─ test_real_pdf_ocr.py                 # 容器内 Poppler + Tesseract 扫描 PDF 闭环
 ├─ object/                                  # Git 忽略的本地真实 E2E 输入；不属于仓库 fixture
 │  └─ 计组复习.pdf                           # 可选；可由 RAG_E2E_PDF_PATH 覆盖
 ├─ resilience/                              # 故障、竞态、重投与恢复矩阵
@@ -169,6 +170,7 @@ tests/
    │  ├─ test_chm_parser.py
    │  ├─ test_failpoints.py
    │  ├─ test_multiformat_parsers.py
+   │  ├─ test_pdf_deepdoc_parser.py        # PDF 版面、OCR、页眉页脚、表格和安全上限
    │  ├─ test_pipeline.py
    │  ├─ test_recursive_chunker.py
    │  ├─ test_text_parser.py
@@ -277,6 +279,12 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_router_selects_supported_parser` | Router 为各受支持后缀选择正确 parser。 |
 | 同上 | `test_router_rejects_unsupported_source_type` | 不支持的类型返回稳定错误。 |
 | 同上 | `test_pdf_parser_rejects_corrupt_bytes` | 损坏 PDF 返回稳定错误。 |
+| `ingestion/test_pdf_deepdoc_parser.py` | `test_deepdoc_pdf_preserves_heading_bbox_table_and_removes_repeated_margins` | 复杂文本 PDF 恢复标题路径、表格型行和 bbox，删除跨页重复页眉页脚，并避免目录点线条目污染标题层级。 |
+| 同上 | `test_deepdoc_pdf_uses_ocr_for_a_scanned_page_and_keeps_confidence` | 原生文字不足时只对扫描页调用 OCR，并保留页码、坐标和置信度。 |
+| 同上 | `test_forced_deepdoc_rejects_scanned_pdf_when_ocr_is_unavailable` | 强制 DeepDoc 且缺少 OCR 工具时返回稳定错误，不把空内容伪装成成功。 |
+| 同上 | `test_auto_mode_degrades_to_native_content_without_ocr_tools` | auto 模式缺少 OCR 工具时仍保留已有原生文字。 |
+| 同上 | `test_pdf_page_limit_fails_before_ocr` | 超过页数安全上限时在渲染/OCR 前拒绝文档。 |
+| `test_config.py` | `test_pdf_content_settings_change_the_parser_fingerprint` | 会改变 PDF 索引正文的配置必须改变 parser fingerprint，防止错误复用旧索引。 |
 | `ingestion/test_chm_parser.py` | `test_chm_parser_orders_topics_and_preserves_heading_provenance` | CHM 按 HHC 目录稳定排列 Topic，按标题层级分段，过滤脚本/样式并保留 Topic、标题路径与锚点。 |
 | 同上 | `test_chm_parser_prefers_main_content_and_removes_navigation_noise` | 优先语义化正文区域，并过滤 Doxygen/产品手册的导航、面包屑和页脚噪声。 |
 | 同上 | `test_chm_topic_and_heading_segments_are_hard_chunk_boundaries` | Topic 与标题段均为不可跨越的切块边界；正文切分保持上限与全局稳定 ordinal，每个 CHM Chunk 的检索文本稳定加入 Topic、Heading 与 Symbol 前缀。 |
@@ -377,7 +385,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_verify_existing_returns_false_on_timeout` | ES 未就绪导致 `get-config` 超时时安全回退到首次初始化路径。 |
 | 同上 | `test_initialize_retries_on_timeout_instead_of_aborting` | `update-config` 超时属于瞬态故障，必须继续重试而非终止 bootstrap。 |
 | 同上 | `test_search_guard_operator_docs_preserve_private_tls_runbook` | SPEC、安全设计、AGENTS、Earthfile 与 Linux/Windows runbook 一致区分 development/test 材料拓扑和尚待平台化的生产编排：生产只读挂载外部材料、先 fail closed 验证，禁止定义/启动材料服务；bootstrap/health 后必须在新受保护目标卷/集群恢复已确认 snapshot，核验索引/文档完整性与一次 RAG 可检索性，失败保持停止，不能验证空集群。 |
-| `test_container_artifacts.py` | `test_runtime_image_and_context_exclude_secrets_and_test_artifacts` | runtime/test 镜像目标、非 root 用户及 build context 排除规则正确。 |
+| `test_container_artifacts.py` | `test_runtime_image_and_context_exclude_secrets_and_test_artifacts` | runtime/test 镜像目标、非 root 用户、PDF OCR 所需 Poppler/Tesseract 运行工具及 build context 排除规则正确。 |
 | 同上 | `test_compose_declares_migration_health_role_secrets_and_shared_storage` | Compose 固定迁移顺序、健康依赖、共享对象卷及模型密钥角色边界。 |
 | 同上 | `test_compose_keeps_infrastructure_private_and_orders_search_guard_bootstrap` | 默认 Compose 不发布 MySQL/NATS/ES，且安全材料、ES、Search Guard bootstrap 与下游服务按 fail-closed 顺序启动。 |
 | 同上 | `test_debug_override_binds_elasticsearch_to_loopback_only` | 调试 override 仅将受 TLS/认证保护的 ES 绑定到 `127.0.0.1`。 |
@@ -458,6 +466,7 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | 同上 | `test_exception_before_commit_rolls_back_all_submission_rows` | Outbox INSERT 前异常使 Document/Fingerprint/Job/Task/Outbox/IndexBuild/幂等记录全部回滚。 |
 | 同上 | `test_same_idempotency_key_replays_result_and_rejects_changed_command` | 同 key 同命令回放首次结果，同 key 不同命令返回稳定冲突且不产生额外状态。 |
 | `test_real_embedding_model.py` | `test_real_embedding_returns_finite_declared_dimension_and_stable_duplicates` | 真实 API 分批返回声明维度的有限向量，相同中文文本向量保持高度一致。 |
+| `test_real_pdf_ocr.py` | `test_runtime_poppler_tesseract_ocr_extracts_a_scanned_pdf` | 在 runtime/test 镜像内生成无文字层扫描 PDF，经 Poppler 渲染和 `chi_sim+eng` Tesseract OCR 后验证正文与来源元数据。 |
 | 同上 | `test_real_embedding_ranks_related_chinese_text_above_unrelated_text` | 真实模型对中文相关语句的余弦相似度高于无关语句。 |
 
 ## E2E 测试函数

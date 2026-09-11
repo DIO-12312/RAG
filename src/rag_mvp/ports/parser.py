@@ -4,9 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Protocol
 
 from rag_mvp.domain.models import Locator
+
+
+class PdfParserMode(StrEnum):
+    """Select the cost and capability level of PDF parsing."""
+
+    PLAIN = "plain"
+    DEEPDOC = "deepdoc"
+    AUTO = "auto"
 
 
 @dataclass(frozen=True, slots=True)
