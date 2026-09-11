@@ -104,6 +104,40 @@ func (s *Server) createDataset(c *gin.Context) {
 	}
 	c.JSON(201, gin.H{"id": id, "name": p.Name, "status": "EMPTY", "documentCount": 0, "updatedAt": time.Now().UTC().Format(time.RFC3339)})
 }
+
+func (s *Server) deleteDataset(c *gin.Context) {
+	r, e := s.Store.Resource(c.Request.Context(), uid(c), c.Param("id"))
+	if e != nil || (r.Kind != "dataset" && r.Kind != "deleting_dataset") {
+		fail(c, 404, "NOT_FOUND", "资源不存在。")
+		return
+	}
+	if r.Kind == "deleting_dataset" {
+		c.JSON(202, gin.H{"datasetId": r.ID, "jobId": r.JobID})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+	result, e := s.RAG.DeleteDataset(ctx, r.ID, uid(c)+"-"+key(c))
+	if e != nil || result == nil {
+		fail(c, 502, "DELETE_FAILED", "知识库删除失败，请稍后重试。")
+		return
+	}
+	if _, e = s.Store.DB.ExecContext(
+		ctx,
+		"UPDATE resource_index SET kind=CASE WHEN id=? THEN 'deleting_dataset' ELSE 'deleted' END, job_id=CASE WHEN id=? THEN ? ELSE job_id END WHERE user_id=? AND (id=? OR dataset_id=?)",
+		r.ID,
+		r.ID,
+		result.JobId,
+		uid(c),
+		r.ID,
+		r.ID,
+	); e != nil {
+		fail(c, 503, "SAVE_FAILED", "删除任务已受理，请刷新知识库列表。")
+		return
+	}
+	c.JSON(202, gin.H{"datasetId": result.DatasetId, "jobId": result.JobId})
+}
+
 func (s *Server) upload(c *gin.Context) {
 	r, ok := s.owned(c, c.Param("id"), "dataset")
 	if !ok {

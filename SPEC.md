@@ -174,6 +174,8 @@ Outbox Relay 必须同时支持两种触发方式：一是按固定间隔轮询 
 
 `DeleteDataset` 是不可恢复的级联物理删除命令，必须携带 `RequestContext` 和 `dataset_id`。Dataset 新增生命周期 `ACTIVE → DELETING` 与单调递增的 `lifecycle_generation`；创建后为 `ACTIVE`。在 Dataset 行锁内把它置为 `DELETING` 并递增 generation 后，`GetDataset`（若未来提供）、`SubmitDocument`、`Retrieve`、Document 重建和 `DeleteDocument` 都必须拒绝该 Dataset；`visible_document_versions` 只返回 `ACTIVE` Dataset 下 `READY` Document，因此已经在 ES 中存在的向量也立刻不可见。该事务必须将所有 Document 标为 `DELETED` 并递增其 generation，释放 fingerprint，取消未终态摄取/文档清理 Task 与未发布 Outbox，随后创建 `DELETE_DATASET` Job、`CLEANUP_DATASET` Task 和 `READY_TO_PUBLISH` OutboxEvent。已发布的旧 delivery 只能因 Dataset/Document generation fence 失败后 ACK，不能复活数据。
 
+Go 产品后端必须通过鉴权后的 `DELETE /datasets/:id` 暴露该能力：先用产品资源索引校验 Dataset 归属，再把 `Idempotency-Key` 加用户前缀转发给 gRPC `DeleteDataset`。RPC 接受删除任务后，Go 立即把该 Dataset 及其 Document/Job 引用从当前用户的可见资源索引隐藏并返回 `202` 与清理 `job_id`；Dataset 所有权索引保留不可见的 `deleting_dataset` 墓碑和 `job_id`，使响应丢失后的重复请求仍返回同一结果。ES、对象和 Python MySQL 聚合仍由既有 `CLEANUP_DATASET` Worker 异步物理删除。前端必须使用明确的不可恢复二次确认，不得因单次误触直接发起删除。
+
 `CLEANUP_DATASET` 由 Worker 通过既有 Outbox/JetStream 路径执行，而不是由 RPC 直接删除基础设施数据：它先以 dataset_id 幂等删除 Elasticsearch 中该 Dataset 的全部 chunk，再按元数据快照逐个幂等删除 Document 正式对象和 Outbox 记录的 staging 对象；两者都成功后，MetadataRepository 在同一 MySQL 事务中验证 Dataset 仍为 `DELETING` 且 generation 相符，并删除该 Dataset 的 Outbox、Task、Job、Chunk manifest、IndexBuild、IngestionFingerprint、Document、操作幂等记录以及 Dataset 行本身。删除前后可能到达的 NATS 消息因查不到 Task 而只 ACK。清理失败保持 Dataset 为 `DELETING`，Worker 以 `DATASET_CLEANUP_RETRYABLE` 持续 NAK 且不写失败终态；不可通过 `RetryJob` 重新激活 Dataset。相同幂等键在 Dataset 仍存在时复用同一清理 Job；不同键在删除进行中返回 `DATASET_DELETION_IN_PROGRESS`；物理删除完成后再次请求返回 `DATASET_NOT_FOUND`。因此该 API 不保留墓碑、审计记录或可轮询的完成 Job，调用方若需确认最终清空，应轮询已返回的 Job，并将其后出现的 `JOB_NOT_FOUND` 视为清理完成。
 
 真实 30 问和本地 PDF 50 问 eval 只能通过 generated gRPC client 创建与删除自己的随机 Dataset。Dataset 创建成功后，测试必须立即进入 `try/finally`：主体先完成日志写入和指标断言，finally 调用 `DeleteDataset` 并持续轮询删除 Job；观察到 `FAILED/CANCELLED` 必须失败，观察到 `JOB_NOT_FOUND` 才表示 MySQL、ES 与对象数据已完成最终 purge。连续运行 eval 不得依赖删除 Docker volume，也不得积累上一次运行的数据。
@@ -682,7 +684,7 @@ sequenceDiagram
 
 2026-09-06 后续迭代：Embedding URL/模型/API Key/超时/Top-K 由个人设置写入 Go MySQL，API Key 加密存储，不再要求运行环境提供模型凭据。创建 Dataset 时 Go 将配置加密快照经 gRPC 传给 Python，Python MySQL 随 Dataset 持久化，Worker 与 Retrieve 使用同一快照。仅基础设施加密密钥通过只读 secret 提供给 Python，不将 API Key 放入 NATS/日志或返回前端。已有 Dataset 的模型与维度不变；空快照可经 BindEmbeddingProfile 在行锁下首次绑定匹配配置，已绑定快照不可被该 RPC 覆盖。当前 ES 索引为 1024 维，前端清楚标明并校验维度。修改个人配置影响之后创建的知识库，避免不同模型的向量混用。批量上传按单文件调用已有上传 RPC、每文件独立幂等键；目录仅展开文件，不改变 Python Task/Outbox 语义。Go 历史会话返回创建/最近消息时间并稳定倒序；前端右侧模态抽屉展示。回答 Markdown 禁止原始 HTML并清洗输出，引用证据保留原文。
 
-2026-09-06 产品控制面迭代开始实施：`backend/go-api` 使用独立 MySQL 保存个人用户、模型配置、资源所有权索引和会话，单用户拥有多个 Dataset，无租户角色。网络 API 使用根路径与 24 小时 JWT cookie。Go Agent 通过现有 `Retrieve` RPC 执行只读工具调用，绑定已鉴权 Dataset，限制轮数/时间并支持取消。知识库创建和文档管理仍经 Python RPC；Go 不读写 Python 表。Embedding 已改为用户配置及 Dataset 加密快照；用户级 Rerank 仍只保存配置，暂不参与检索。实施与验收跟踪见 `docs/superpowers/plans/2026-09-06-live-product-plane.md`。
+2026-09-06 产品控制面迭代开始实施：`backend/go-api` 使用独立 MySQL 保存个人用户、模型配置、资源所有权索引和会话，单用户拥有多个 Dataset，无租户角色。网络 API 使用根路径与 24 小时 JWT cookie。Go Agent 通过现有 `Retrieve` RPC 执行只读工具调用，绑定已鉴权 Dataset，限制轮数/时间并支持取消。知识库创建、文档管理和知识库删除均经 Python RPC；Go 不读写 Python 表。Embedding 已改为用户配置及 Dataset 加密快照；用户级 Rerank 仍只保存配置，暂不参与检索。实施与验收跟踪见 `docs/superpowers/plans/2026-09-06-live-product-plane.md`。
 
 本节描述最终产品路径，不是 Python RAG Worker 的职责。Python 只经 gRPC 执行 `Retrieve` 并返回 evidence；Go 负责会话、Agent 决策、Prompt、Chat Model 调用和向浏览器发送 SSE。
 

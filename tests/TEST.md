@@ -4,6 +4,23 @@
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
 
+### 2026-09-10 产品端知识库删除
+
+```text
+apps/web/tests/
+└─ dataset-delete.spec.ts  # 二次确认、真实 DELETE 请求、列表隐藏与路由返回
+backend/go-api/internal/
+├─ ragclient/client_test.go            # DeleteDataset gRPC 转发及错误响应
+└─ httpapi/integration_test.go          # 真实产品链路删除、归属隐藏与结果契约
+```
+
+| 文件 | 用例 / 职责 | 运行边界 |
+|---|---|---|
+| `apps/web/tests/dataset-delete.spec.ts` | `requires confirmation, removes the dataset, and returns to the library`：详情页显示知识库名、文档数和不可恢复提示；确认后调用删除接口、从列表移除并返回知识库页 | Vitest/jsdom + MSW，离线产品交互测试 |
+| `backend/go-api/internal/ragclient/client_test.go` | `TestDeleteDatasetForwardsIdempotentCommand`、`TestDeleteDatasetRejectsBusinessErrorAndMissingResult`：验证 Dataset 作用域、幂等键、清理 Job 返回及异常响应 fail closed | Go 离线单元测试 |
+| `backend/go-api/internal/httpapi/server_test.go` | `TestUnauthenticatedAndCrossOrigin`：未登录用户不能调用知识库删除路由 | Go 离线 HTTP 测试 |
+| `backend/go-api/internal/httpapi/integration_test.go` | `TestLiveProductFlow` 的删除阶段：真实调用 HTTP → Go → gRPC，验证 `202`、清理 Job、详情 404 与列表即时隐藏 | 显式真实产品集成测试；依赖 MySQL、Python RAG、Worker、ES 和模型配置 |
+
 ### 2026-09-08 聊天行内来源引用
 
 ```text

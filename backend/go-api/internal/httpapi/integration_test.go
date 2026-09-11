@@ -232,7 +232,11 @@ func TestLiveProductFlow(t *testing.T) {
 		ID string `json:"id"`
 	}
 	_ = json.Unmarshal(created, &dataset)
+	datasetDeleted := false
 	defer func() {
+		if datasetDeleted {
+			return
+		}
 		cleanup, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		r, e := rag.RPC.DeleteDataset(cleanup, &pb.DeleteDatasetRequest{Context: ragclient.Context(security.ID()), DatasetId: dataset.ID})
@@ -323,6 +327,19 @@ func TestLiveProductFlow(t *testing.T) {
 		t.Fatal("cross-user dataset list leaked")
 	}
 	jar.SetCookies(base, ownerCookies)
+	deleted := call("DELETE", "/datasets/"+dataset.ID, nil, "", 202)
+	var deletion struct {
+		DatasetID string `json:"datasetId"`
+		JobID     string `json:"jobId"`
+	}
+	if json.Unmarshal(deleted, &deletion) != nil || deletion.DatasetID != dataset.ID || deletion.JobID == "" {
+		t.Fatal("dataset deletion result missing")
+	}
+	datasetDeleted = true
+	call("GET", "/datasets/"+dataset.ID, nil, "", 404)
+	if bytes.Contains(call("GET", "/datasets", nil, "", 200), []byte(dataset.ID)) {
+		t.Fatal("deleted dataset remained visible")
+	}
 	call("POST", "/auth/logout", nil, "", 204)
 	call("GET", "/me", nil, "", 401)
 }

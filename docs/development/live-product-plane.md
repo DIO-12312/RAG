@@ -12,7 +12,7 @@ pnpm --dir apps/web dev --host 127.0.0.1
 浏览器打开 http://127.0.0.1:5173/ 。前端以 hash 路由承载页面，同源根路径 HTTP 请求经 Vite 转发至 127.0.0.1:8080；不要使用原先仅 Mock 的任意密码登录方式。
 
 1. 注册账号（密码 8–128 位），登录后在设置填写对话模型的 Base URL、模型名和 API Key。需要 OpenAI-compatible Chat Completions **function calling** 支持；Base URL 通常含 `/v1`，不要填写 `/chat/completions`。
-2. 创建知识库，上传 PDF、Markdown、TXT 或代码文件，等待任务成功。最大文件 32 MB。
+2. 创建知识库，上传 PDF、Markdown、TXT、代码、CHM 或 CHI 文件，等待任务成功。最大文件 32 MB。知识库详情页提供“删除知识库”，二次确认后立即从列表隐藏，底层索引和原文件由异步清理任务删除且不可恢复。
 3. 对话页选择已完成索引的知识库并提问。Agent 调用 `rag_retrieve`，映射引用并保存问答历史；点击引用展开完整证据。
 4. 停止按钮中断请求并取消后端上下文；失败回答不保存成成功消息。历史会话可以继续提问。
 

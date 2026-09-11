@@ -62,6 +62,23 @@ func (c *Client) Create(ctx context.Context, name, model string, dim uint32, key
 	}
 	return r.GetResult().DatasetId, nil
 }
+
+func (c *Client) DeleteDataset(ctx context.Context, dataset, key string) (*pb.DeleteDatasetResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	r, e := c.RPC.DeleteDataset(ctx, &pb.DeleteDatasetRequest{Context: Context(key), DatasetId: dataset})
+	if e != nil {
+		return nil, e
+	}
+	if e = Error(r.GetError()); e != nil {
+		return nil, e
+	}
+	if r.GetResult() == nil {
+		return nil, fmt.Errorf("missing delete dataset result")
+	}
+	return r.GetResult(), nil
+}
+
 func (c *Client) Upload(ctx context.Context, dataset, name, key string, file io.Reader) (*pb.SubmitDocumentResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()

@@ -57,6 +57,11 @@ export interface CreateDatasetRequest {
   name: string;
 }
 
+export interface DeleteDatasetResult {
+  datasetId: string;
+  jobId: string;
+}
+
 export interface UploadDocumentRequest {
   filename: string;
 }

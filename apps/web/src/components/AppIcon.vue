@@ -10,6 +10,7 @@ const paths: Record<string, string> = {
   file: 'M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 12h8M8 16h5',
   upload: 'M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6', send: 'M12 19V5m-6 6 6-6 6 6',
   shield: 'm12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6Zm-4 9 3 3 5-6',
+  trash: 'M4 7h16M9 7V4h6v3m3 0-1 14H7L6 7m4 4v6m4-6v6',
 };
 </script>
 <template>

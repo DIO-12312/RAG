@@ -12,6 +12,7 @@ import type {
 import {
   createMockDataset,
   createMockUploadJob,
+  deleteMockDataset,
   findMockDataset,
   findMockJob,
   listMockDatasets,
@@ -80,6 +81,19 @@ export const handlers = [
     return dataset
       ? HttpResponse.json(dataset)
       : HttpResponse.json({ code: "DATASET_NOT_FOUND", message: "知识库不存在。" }, { status: 404 });
+  }),
+
+  http.delete("*/datasets/:id", ({ params, request }) => {
+    const unauthorized = requireSignedIn();
+    if (unauthorized) return unauthorized;
+    if (!request.headers.get("Idempotency-Key")) {
+      return HttpResponse.json({ code: "INVALID_INPUT", message: "缺少幂等键。" }, { status: 400 });
+    }
+    const datasetId = String(params.id);
+    if (!deleteMockDataset(datasetId)) {
+      return HttpResponse.json({ code: "DATASET_NOT_FOUND", message: "知识库不存在。" }, { status: 404 });
+    }
+    return HttpResponse.json({ datasetId, jobId: `job-delete-${datasetId}` }, { status: 202 });
   }),
 
   http.post("*/datasets/:id/documents", async ({ params, request }) => {

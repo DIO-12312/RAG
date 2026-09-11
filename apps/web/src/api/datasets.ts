@@ -2,6 +2,7 @@ import type {
   CreateDatasetRequest,
   DatasetDetail,
   DatasetSummary,
+  DeleteDatasetResult,
   Job,
   SourceTopic,
 } from "./contracts";
@@ -21,6 +22,13 @@ export function createDataset(payload: CreateDatasetRequest, key = randomUUID())
     method: "POST",
     headers: { "Idempotency-Key": key },
     body: JSON.stringify(payload),
+  });
+}
+
+export function deleteDataset(datasetId: string, key = randomUUID()): Promise<DeleteDatasetResult> {
+  return request<DeleteDatasetResult>(`/datasets/${datasetId}`, {
+    method: "DELETE",
+    headers: { "Idempotency-Key": key },
   });
 }
 
