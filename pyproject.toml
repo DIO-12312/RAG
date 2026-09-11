@@ -68,6 +68,10 @@ pretty = true
 show_error_codes = true
 exclude = ["^src/rag_mvp/rpc/generated/"]
 
+[[tool.mypy.overrides]]
+module = ["rag_mvp.rpc.generated.*"]
+ignore_errors = true
+
 [tool.pytest.ini_options]
 addopts = "--strict-markers --strict-config"
 testpaths = ["tests"]
