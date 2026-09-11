@@ -64,7 +64,7 @@ tests/
 ├─ embedding_profile.py                    # E2E/真实韧性套件生成加密 RPC 快照；测试专用 env 凭据不进入运行服务
 ├─ conftest.py                              # 共享 pytest 配置与 fixture
 ├─ contract/                                # gRPC、protobuf 与 Port 语义契约
-│  ├─ test_build_entrypoints.py          # Make/Earthly 公共入口与仅前端重启边界
+│  ├─ test_build_entrypoints.py          # Make/Earthly、push/PR workflow、main 规则与仅前端重启边界
 │  ├─ test_container_artifacts.py
 │  ├─ test_delete_document_contract.py
 │  ├─ test_generated_code.py
@@ -359,7 +359,10 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
 | `test_build_entrypoints.py` | `test_makefile_offline_targets_are_commented_earthly_only_entrypoints` | Makefile 的离线公共入口均有说明，并且只负责转发 Earthly target。 |
-| 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界。 |
+| 同上 | `test_quality_workflow_runs_for_push_and_main_pull_requests` | 用 PyYAML 解析 workflow，验证所有分支 push、main PR、手动触发、无路径跳过、独立并发组、固定 check 名及不吞失败的 `make ci`。离线配置契约，不执行 GitHub runner。 |
+| 同上 | `test_quality_workflow_pins_tools_and_keeps_secrets_out` | 检查只读权限、临时托管 runner、固定 Action/Earthly 与下载校验、不保留凭据、不注入 Secret 或启动业务 Compose，以及 Earthly 显式复制所需配置。仅静态契约，不证明下载或远端运行成功。 |
+| 同上 | `test_main_ruleset_protects_main_without_blocking_direct_push` | 用 JSON 解析规则，验证 main 限定、仅禁止删除与强推、且不含 `pull_request` 或 `required_status_checks`，确保直接 push 不被拦截。不会调用 GitHub API 或验证远端规则已启用。 |
+| 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界；lint/test/ci 聚合复用非空工作区基底，避免 Earthly 空状态依赖错误。 |
 | 同上 | `test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes` | Docker 公共入口复用 Function；run 统一由 Earthfile 顺序准备共享卷、等待 RAG、启动产品服务与容器化 Vue 前端；验证 suite、静默校验 Compose、扫描日志和持久卷保护。eval 同时收集既有 30 问与 PDF 五十问。此离线静态契约不替代 Windows/WSL/Linux 的实际启动验收。 |
 | 同上 | `test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths` | Docker 入口构建安全材料/ES/bootstrap 服务，并仅向测试容器传递 ES password file 与 CA path。 |
 | 同上 | `test_containerized_web_upload_limits_match_supported_rag_sources` | 前端与 Go 白名单一致接纳 PDF、CHM/CHI、Markdown、文本和代码；Nginx 为 32 MiB 文件及 multipart 开销设置 34 MiB 请求上限。 |

@@ -140,6 +140,12 @@ make ci     # 聚合完整无 Secret 提交门禁
 make help   # 查看全部公共入口
 ```
 
+## 团队合入门禁
+
+分支 `push` 和目标为 `main` 的 PR 自动运行 `Quality` workflow，检查名为 `python-quality`，执行无密钥 `make ci`；也可在 Actions 页面手动触发。本次覆盖 Python 离线门禁，Go/前端检查和真实模型验收不在其中。
+
+管理员在流水线首次验证成功后，导入 [main 规则配置](.github/main-ruleset.json)，启用禁止删除和强推 `main`。仓库允许成员直接 push `main`，**不要求 PR 和人工审批**；`python-quality` 是 push 后的事后检查，红灯需立即修复或回滚。**JSON 文件不会自动启用 GitHub 服务端保护**，导入步骤与限制见 [测试指南第 7 节](docs/test/testing-guide.md#7-ci-与团队合入门禁)。
+
 ## 测试策略
 
 | 层级                           | 验证重点                                             | 公共入口                               |

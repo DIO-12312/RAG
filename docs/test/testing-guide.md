@@ -43,13 +43,7 @@ make ci
 - `make test`：确定性 unit、contract、functional、Fake resilience、offline eval 与 85% 覆盖率门禁。
 - `make ci`：聚合 `lint` 与 `test`，也是 pre-commit 和无 Secret GitHub Actions 的唯一入口。
 
-为当前 clone 启用版本控制的提交钩子：
-
-```bash
-git config core.hooksPath .githooks
-```
-
-钩子执行 `make ci`。不要使用 `--no-verify` 代替修复失败原因。
+当前仓库尚未交付 `.githooks/pre-commit`，不要将本地 Hook 视为已经启用；开发者提交前手动运行 `make ci`。团队强制合入限制由第 7 节的 GitHub workflow 与服务端 Ruleset 配合完成。
 
 ## 3. 测试分层
 
@@ -107,7 +101,7 @@ make docker-down
 
 `SUITE=all` 固定按 `integration → resilience → eval` 执行；任一步失败即停止后续 suite。`docker-test` 会验证、构建、启动并等待完整 Compose 拓扑，但测试结束或失败后不会自动关闭服务，以便保留日志和现场。真实 suite 会验证 Search Guard TLS、匿名/错误凭据拒绝、`rag_mvp` 的索引最小权限和受保护 ES 上的 RAG 闭环；具体证据在 `tests/integration/test_search_guard_security.py`、`tests/contract/test_search_guard_assets.py` 与 `tests/contract/test_container_artifacts.py`。
 
-无论成功失败，最后都应显式运行 `make docker-down`；该入口先扫描服务日志中的 API Key 与 ES password，再执行不删除持久卷的 `down --remove-orphans`，禁止用 `down -v` 代替。除 MySQL/ES/NATS/object 数据卷外，它也必须保留 `search-guard-node-secrets` 和 `search-guard-client-secrets` 材料卷：删除它们会破坏受控的开发材料、使诊断失去可重现性，不能作为“修复”启动错误的手段。
+无论成功失败，最后都应显式运行 `make docker-down`；该入口先扫描服务日志中的 API Key 与 ES password，再执行不删除持久卷的 `down --remove-orphans`，禁止用 `down -v` 代替。除 MySQL/ES/NATS/object 数据卷外，它也必须保留 `search-guard-node-secrets` 和 `search-guard-client-secrets` 材料卷：删除它们会破坏受控的开发材料、使诊断失去可重现性，不能作为"修复"启动错误的手段。
 
 真实测试注意事项：
 
@@ -134,12 +128,55 @@ make docker-down
 | 真实测试失败 | 保留服务，检查容器状态和脱敏日志；TLS/证书/密码/bootstrap 错误必须 fail closed，随后运行 `make docker-down`，不得关闭 Search Guard 或发布 9200。 |
 | Secret 扫描失败 | 先修复日志泄漏；扫描器只报告命中，不回显密钥。 |
 
-## 7. CI 边界
+## 7. CI 与团队合入门禁
 
-- `.github/workflows/quality.yml`：pull request/push 运行 `make ci`，不接收模型 Secret。
-- `.github/workflows/docker-quality.yml`：main push/手动运行 integration；夜间或手动运行 resilience 与 eval。两个 job 都安装固定 Earthly，只调用 Make 公共入口，并在 `always()` 清理。
-- 必需 Secrets：`EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_MODEL_API_KEY`、`EMBEDDING_MODEL_DIMENSION`。
-- 不使用 `pull_request_target`，避免向不受信任 PR 暴露 Secret。
+### 7.1 自动检查
+
+`.github/workflows/quality.yml` 的 workflow 名为 `Quality`，唯一 job/check 名为 **`python-quality`**，只调用 `make ci`：
+
+| 事件 | 范围 | 行为 |
+| --- | --- | --- |
+| `push` | 所有分支，含 `main`；不包含 tag push | 检查本次推送的代码 |
+| `pull_request` | 目标为 `main` | 检查 GitHub 生成的 PR 合并结果，包含 fork PR |
+| `workflow_dispatch` | Actions 页面手动选择分支 | 用于首次验收和故障复验；需要 workflow 已在默认分支 |
+
+- 不设路径过滤或 job 跳过条件，确保每次 push 都被完整检查；不要使用 `[skip ci]` 等跳过指令，否则 `main` 上的提交会缺少检查结果。
+- 同一事件下同一分支/PR 的旧运行被新运行取消；push 与 PR 并发组分离，不互相取消。PR 触发是可选的额外检查，不构成合入要求。
+- 使用 GitHub 托管的 `ubuntu-24.04` 临时 runner，超时 30 分钟；固定 checkout 提交、Earthly 0.8.16 下载地址和 SHA-256。安装网络请求有限重试，测试不自动重跑到通过。
+- 只有 `contents: read` 权限，checkout 不保留凭据；不注入模型/部署 Secret，不使用 `pull_request_target`，不运行部署或修改 GitHub 规则。
+- `make ci` 包含 Python Ruff、mypy、Python protobuf 同步、unit/contract/functional、Fake resilience、offline eval 与四个核心包的 85% 聚合覆盖率门槛。**不包含 Go/前端检查、Go protobuf 同步或新增代码覆盖率的独立门槛。**
+- "离线"指测试不依赖业务基础设施或模型；首次安装仍需要 Docker/BuildKit、镜像和包下载网络。此 workflow 不启动业务 Compose，无需 `make docker-down`，也不访问或删除开发数据卷。
+- `lint/test/ci` 聚合 target 显式 `FROM +python-workspace`，保持已有检查集合不变；避免 Earthly 0.8.16 在空基底嵌套 BUILD 时出现 `fakecopy2 / failed to get state for index` 内部错误。
+
+### 7.2 启用 main 保护（管理员一次性操作）
+
+**推送后自动检查不等于强制门禁。** `.github/main-ruleset.json` 是可导入配置，不会因文件存在而自动更新 GitHub 服务端设置。
+
+本仓库约定成员直接 push `main`，因此规则只保留防误删与防强推，不要求 PR 或必需检查：
+
+1. 确认 Actions 已启用，并在 `main` 的 push 上看到 `python-quality` 的运行结果。
+2. 在仓库 **Settings → Rules → Rulesets → New ruleset → Import a ruleset** 导入 `.github/main-ruleset.json`。已有同用途规则时优先更新，不重复叠加。
+3. 核对目标仅为 `refs/heads/main`、规则只有禁止删除与禁止强推。保存启用；若尚未准备好，先在导入界面选择 Disabled。
+
+模板启用后的限制：
+
+- 禁止删除 `main` 与强推覆盖历史；正常 push 不受限制，**所有人都可以直接推送 `main`**。
+- **不要求 PR，也不要求必需检查**。GitHub 的 `required_status_checks` 会拒绝尚未通过检查的直接推送，与本仓库约定冲突，因此不启用。
+- 相应地，`python-quality` 是**事后检查**：它在 push 后运行并报告红绿，但**无法阻止未通过检查的提交进入 `main`**。看到红灯必须立即修复或回滚，不能把它当成合入拦截。
+- 需要真正的推送前拦截时，使用本地 Git Hook 执行 `make ci`（见 SPEC §4.7），或在团队内约定推送前先本地跑通 `make ci`。
+
+规则需要仓库管理员或可编辑规则的角色；公开仓库可使用 Free 计划的分支 Rulesets，私有仓库需确认 Pro/Team/Enterprise 等计划支持。仅提交本地 JSON 不能证明远端规则已启用；管理员应在 GitHub Rules 页面核实。管理员仍能修改规则，代码评审需特别审查 workflow、Earthfile、测试和规则配置的弱化改动。
+
+### 7.3 失败处理与范围
+
+- **检查失败**：从 Actions 第一处失败步骤定位；代码错误本地运行 `make ci` 复现并修复，不能靠 `continue-on-error`、降低阈值或删除用例变绿。
+- **基础环境失败**：安装下载、镜像拉取或 runner 故障与代码失败分开定位；确认服务恢复后重跑失败 job。
+- **门禁自身回归**：由维护者评审修复或回滚门禁改动。确需解锁时，由管理员记录原因、范围和恢复期限，临时调整对应服务端检查并在修复后恢复；不把永久 bypass 作为解决方法。
+- **长期 Pending**：检查 Actions 开关/预算、fork workflow 审批、提交跳过指令、检查名是否匹配，以及 PR 是否有合并冲突。
+- 修改 check 名或目标分支时，必须同步 JSON 和服务端规则；本地契约只验证文件一致性，不验证远端状态。
+- `.github/workflows/docker-quality.yml` **尚未交付**；真实 integration/resilience/eval 继续通过既有 `make docker-test SUITE=integration|resilience|eval|all` 在隔离环境显式运行，属于独立发布验收。后续自动化应与本门禁分开、限制 Secret，并在 `always()` 中执行保留卷的清理入口。
+
+GitHub 参考：[创建和导入 Ruleset](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository)、[规则字段](https://docs.github.com/en/rest/repos/rules#create-a-repository-ruleset)。
 
 ## 8. 记录验证结果
 
@@ -169,7 +206,7 @@ make docker-down
 | 安全停止 | `make docker-down` 的日志 Secret 扫描成功；停止后 Compose 无运行服务，未执行 `down -v` |
 | 数据持久性 | `rag-mvp_mysql-data`、`rag-mvp_elasticsearch-data`、`rag-mvp_nats-data`、`rag-mvp_object-data` 和 resilience failpoint 卷仍存在 |
 
-未单独执行 `make docker-test SUITE=all`；历史记录中 integration、resilience、eval 是在同一固定顺序下分别完成。这里的历史“通过”仅描述 Search Guard 加固前的未受保护环境，不能推断 TLS、权限最小化或当前安全 Docker 拓扑已验收。原生 Windows shell 下 Earthly `LOCALLY` 对 Windows 路径的转换不稳定；本次 Docker target 按本文推荐路径在 WSL2 中验收，离线 target 可在原生 Windows 运行。
+未单独执行 `make docker-test SUITE=all`；历史记录中 integration、resilience、eval 是在同一固定顺序下分别完成。这里的历史"通过"仅描述 Search Guard 加固前的未受保护环境，不能推断 TLS、权限最小化或当前安全 Docker 拓扑已验收。原生 Windows shell 下 Earthly `LOCALLY` 对 Windows 路径的转换不稳定；本次 Docker target 按本文推荐路径在 WSL2 中验收，离线 target 可在原生 Windows 运行。
 
 ### 当前 Search Guard Docker 验收状态（2026-08-29）
 
