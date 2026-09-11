@@ -128,9 +128,28 @@ func (c *Client) Job(ctx context.Context, id string) (*pb.JobResult, error) {
 	return r.GetResult(), Error(r.GetError())
 }
 func (c *Client) Retrieve(ctx context.Context, dataset, query string, k int) ([]agent.Evidence, error) {
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	return c.retrieve(ctx, dataset, query, k, "", 60*time.Second)
+}
+
+type rerankRetriever struct {
+	client  *Client
+	profile string
+	topN    int
+	timeout time.Duration
+}
+
+func (c *Client) WithRerank(profile string, topN, timeoutSeconds int) agent.Retriever {
+	return &rerankRetriever{client: c, profile: profile, topN: topN, timeout: time.Duration(timeoutSeconds+60) * time.Second}
+}
+
+func (r *rerankRetriever) Retrieve(ctx context.Context, dataset, query string, _ int) ([]agent.Evidence, error) {
+	return r.client.retrieve(ctx, dataset, query, r.topN, r.profile, r.timeout)
+}
+
+func (c *Client) retrieve(ctx context.Context, dataset, query string, k int, profile string, timeout time.Duration) ([]agent.Evidence, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	r, e := c.RPC.Retrieve(ctx, &pb.RetrieveRequest{RequestId: security.ID(), DatasetId: dataset, Query: query, TopK: uint32(k), MaxContextTokens: 6000})
+	r, e := c.RPC.Retrieve(ctx, &pb.RetrieveRequest{RequestId: security.ID(), DatasetId: dataset, Query: query, TopK: uint32(k), MaxContextTokens: 6000, EnableRerank: profile != "", EncryptedRerankProfile: profile})
 	if e != nil {
 		return nil, e
 	}
@@ -148,6 +167,9 @@ func (c *Client) Retrieve(ctx context.Context, dataset, query string, k int) ([]
 			loc = append(loc, fmt.Sprintf("L%d–L%d", l.GetStartLine(), l.GetEndLine()))
 		}
 		scores := map[string]float64{"fusionScore": h.GetScores().GetFusionScore()}
+		if h.GetScores() != nil && h.GetScores().RerankScore != nil {
+			scores["rerankScore"] = h.GetScores().GetRerankScore()
+		}
 		content := h.GetDisplayContent()
 		if content == "" {
 			content = h.GetContentWithWeight()

@@ -108,6 +108,11 @@ func (s *Server) chat(c *gin.Context) {
 		return
 	}
 	top, _ := emb["defaultTopK"].(float64)
+	retriever, e := s.retriever(ctx, uid(c), p.DatasetID)
+	if e != nil {
+		fail(c, 409, "RERANK_NOT_CONFIGURED", "Rerank 配置不可用，请重新保存配置或关闭 Rerank。")
+		return
+	}
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("X-Accel-Buffering", "no")
 	c.Header("Cache-Control", "no-cache")
@@ -127,7 +132,7 @@ func (s *Server) chat(c *gin.Context) {
 	}
 	modelClient := agent.ModelClient(s.AllowLocalModels)
 	defer modelClient.CloseIdleConnections()
-	h := agent.Harness{Model: agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}, Tool: s.RAG, MaxRounds: 6, TopK: int(top)}
+	h := agent.Harness{Model: agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}, Tool: retriever, MaxRounds: 6, TopK: int(top)}
 	answer, citations, e := h.Run(ctx, p.DatasetID, p.Question, history, emit)
 	if e != nil {
 		_ = emit("error", gin.H{"code": "CHAT_FAILED", "message": "问答未完成，请检查模型连通性、工具调用支持及知识库状态。"})

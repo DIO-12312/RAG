@@ -16,6 +16,20 @@ var schema embed.FS
 
 type Store struct{ DB *sql.DB }
 
+func (s *Store) RerankEnabled(ctx context.Context, user string) (bool, error) {
+	var enabled bool
+	err := s.DB.QueryRowContext(ctx, "SELECT rerank_enabled FROM agent_settings WHERE user_id=?", user).Scan(&enabled)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return enabled, err
+}
+
+func (s *Store) SetRerankEnabled(ctx context.Context, user string, enabled bool) error {
+	_, err := s.DB.ExecContext(ctx, "INSERT INTO agent_settings(user_id,rerank_enabled) VALUES(?,?) ON DUPLICATE KEY UPDATE rerank_enabled=VALUES(rerank_enabled)", user, enabled)
+	return err
+}
+
 func Open(dsn string) (*Store, error) {
 	db, e := sql.Open("mysql", dsn)
 	if e != nil {

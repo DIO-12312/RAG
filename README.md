@@ -59,8 +59,9 @@ flowchart LR
 
 检索时，服务生成查询向量并向 ES 分别请求 Dense 与 BM25 候选，再用 MySQL 复核文档删除状态和 active version，执行 RRF、上下文预算裁剪和来源规范化。Python 返回 evidence，不生成最终回答或 `[n]` Citation 编号。
 
-**当前限制：** Rerank 的纯排序逻辑和调用接口已存在，但生产模型适配器尚未接入 Rerank 服务；设置可保存，产品端拒绝启用。当前 ES 向量 mapping 固定为 1024 维。Embedding 配置按知识库保存快照，修改个人设置不会替换既有知识库的模型或密钥；更换模型需创建新知识库并重新上传。
+**Rerank：** 设置页默认关闭并隐藏配置。点击“启用 Rerank”填写 HTTPS Base URL、模型名称、API Key、超时和 Top-N，再点击“保存并启用 Rerank”生效。支持第三方专用 `/rerank` 协议（`model/query/documents` → `results[index,relevance_score]`），Base URL 可填到 `/v1` 或完整 `/rerank` 地址；这不是 OpenAI 官方 Chat Completions 接口。最多重排 20 个融合候选，Top-N 为 1–20；关闭后保留配置，后续问答不再调用重排。超时、限流或服务暂不可用时退回 RRF；凭据等不可重试错误会使本次问答失败。
 
+**当前限制：** ES 向量 mapping 固定为 1024 维。Embedding 配置按知识库保存快照，修改个人设置不会替换既有知识库的模型或密钥；更换模型需创建新知识库并重新上传。
 
 ## Docker 快速启动
 
@@ -172,15 +173,16 @@ npm --prefix apps/web run build  # 包含 TypeScript 类型检查
 
 ## 测试策略
 
-| 层级                           | 验证重点                                             | 公共入口                               |
-| ------------------------------ | ---------------------------------------------------- | -------------------------------------- |
-| Unit / Contract / Functional   | 领域规则、RPC/Port 契约、真实 gRPC + Fake ports 闭环 | `make test`                          |
-| Fake Resilience / Offline Eval | 确定性故障编排与固定检索质量门槛                     | `make test`                          |
-| Integration / E2E              | 真实 MySQL、ES、NATS、模型与四格式全链路             | `make docker-test SUITE=integration` |
-| Docker Resilience              | KILL、停启、重投递、并发栅栏与恢复                   | `make docker-test SUITE=resilience`  |
-| Real Eval                      | 真实模型和 ES 上的固定 30 问                         | `make docker-test SUITE=eval`        |
-| Go 产品层                      | 认证、所有权、Agent、RPC 客户端与 HTTP 行为            | 在 `backend/go-api` 执行 `go test ./...` |
-| Vue 前端                       | 页面、引用卡片、状态与 HTTP/SSE 传输                  | `npm --prefix apps/web test -- --run` |
+
+| 层级                           | 验证重点                                             | 公共入口                                |
+| -------------------------------- | ------------------------------------------------------ | ----------------------------------------- |
+| Unit / Contract / Functional   | 领域规则、RPC/Port 契约、真实 gRPC + Fake ports 闭环 | `make test`                             |
+| Fake Resilience / Offline Eval | 确定性故障编排与固定检索质量门槛                     | `make test`                             |
+| Integration / E2E              | 真实 MySQL、ES、NATS、模型与四格式全链路             | `make docker-test SUITE=integration`    |
+| Docker Resilience              | KILL、停启、重投递、并发栅栏与恢复                   | `make docker-test SUITE=resilience`     |
+| Real Eval                      | 真实模型和 ES 上的固定 30 问                         | `make docker-test SUITE=eval`           |
+| Go 产品层                      | 认证、所有权、Agent、RPC 客户端与 HTTP 行为          | 在`backend/go-api` 执行 `go test ./...` |
+| Vue 前端                       | 页面、引用卡片、状态与 HTTP/SSE 传输                 | `npm --prefix apps/web test -- --run`   |
 
 历史验收记录：2026-08-25 离线 195 passed、9 deselected、核心覆盖率 88.01%；Integration/E2E 27 passed；Docker Resilience 8 passed；Real Eval 1 passed，Recall@6、MRR@6、locator accuracy 均为 1.0。这些是当时版本的数据，不是当前分支的最新测试结果。后续 Go 产品联调记录见 [产品开发记录](docs/development/live-product-plane.md)。分层边界、费用、安全与失败定位见 [测试指南](docs/test/testing-guide.md)。
 

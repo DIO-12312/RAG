@@ -13,7 +13,7 @@ from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.models import Chunk, Evidence, ScoreBreakdown
 from rag_mvp.observability import emit_event
 from rag_mvp.ports.metadata import MetadataRepository
-from rag_mvp.ports.model import ModelGateway, model_for_dataset
+from rag_mvp.ports.model import ModelGateway, model_for_dataset, model_for_rerank
 from rag_mvp.ports.search_engine import (
     SearchCandidate,
     SearchEngine,
@@ -317,7 +317,9 @@ class RetrievalService:
 
         candidates = tuple(fused[:20])
         try:
-            scores = await self._model.rerank(
+            scores = await model_for_rerank(
+                self._model, query.encrypted_rerank_profile, query.dataset_id
+            ).rerank(
                 query.query,
                 [candidate.chunk.content_with_weight for candidate in candidates],
             )

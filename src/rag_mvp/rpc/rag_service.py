@@ -465,6 +465,7 @@ class RagService:
                     filters=_filters(request),
                     max_context_tokens=request.max_context_tokens or 4000,
                     enable_rerank=request.enable_rerank,
+                    encrypted_rerank_profile=request.encrypted_rerank_profile,
                 )
             )
             return rag_service_pb2.RetrieveResponse(result=_retrieve_result(plan))

@@ -26,6 +26,72 @@ class FailingRerankModel(FakeModelGateway):
         raise ConnectionError("reranker unavailable")
 
 
+class ScopedRerankModel(FakeModelGateway):
+    def for_rerank(self, encrypted_profile: str, dataset_id: str) -> FakeModelGateway:
+        assert (encrypted_profile, dataset_id) == ("sealed-profile", "dataset-1")
+        return self
+
+    async def rerank(self, query: str, passages: list[str]) -> list[float]:
+        assert query == "retrieval"
+        return [0.9 if "second" in text else 0.1 for text in passages]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_request_rerank_changes_evidence_order_only_when_enabled(enabled: bool) -> None:
+    now = datetime.now(UTC)
+    repository = FakeMetadataRepository()
+    model = ScopedRerankModel(8)
+    search = FakeSearchEngine()
+    await repository.create_dataset(Dataset("dataset-1", "Docs", "fake", 8, now))
+    repository.documents["document-1"] = Document(
+        id="document-1",
+        dataset_id="dataset-1",
+        source_name="guide.txt",
+        file_sha256="0" * 64,
+        status=DocumentStatus.READY,
+        active_version=1,
+        next_index_version=2,
+        lifecycle_generation=0,
+        created_at=now,
+        object_key="objects/document-1/source",
+    )
+    vector = (await model.embed(["retrieval"]))[0]
+    await search.upsert_chunks(
+        tuple(
+            IndexedChunk(
+                f"record-{index}",
+                "dataset-1",
+                _chunk(
+                    "document-1",
+                    1,
+                    text,
+                    chunk_id=f"chunk-{index}",
+                    ordinal=index,
+                ),
+                vector,
+            )
+            for index, text in enumerate(["retrieval first", "retrieval second"])
+        )
+    )
+    result = await RetrievalService(repository, search, model).retrieve(
+        RetrieveQuery(
+            "request",
+            "dataset-1",
+            "retrieval",
+            1,
+            {},
+            100,
+            enabled,
+            "sealed-profile" if enabled else "ignored-invalid-profile",
+        )
+    )
+    assert result.evidence[0].content_with_weight == (
+        "retrieval second" if enabled else "retrieval first"
+    )
+    assert result.evidence[0].scores.rerank_score == (0.9 if enabled else None)
+
+
 class RecordingSearchEngine(FakeSearchEngine):
     def __init__(self) -> None:
         super().__init__()

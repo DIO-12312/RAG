@@ -1,0 +1,33 @@
+import { flushPromises, mount } from "@vue/test-utils";
+import { createPinia } from "pinia";
+import { expect, it } from "vitest";
+import { login } from "../src/api/auth";
+import { getSettings } from "../src/api/settings";
+import { createAppRouter } from "../src/router";
+import SettingsView from "../src/views/SettingsView.vue";
+
+it("reveals rerank configuration on enable and persists disabling without deleting configuration", async () => {
+  await login({ email: "demo@example.test", password: "password" });
+  const router = createAppRouter({ isAuthenticated: true, restore: async () => {} });
+  await router.push("/settings");
+  const wrapper = mount(SettingsView, { global: { plugins: [createPinia(), router] } });
+  await flushPromises();
+  const card = wrapper.findAll("article")[2]!;
+  expect(card.find("form").exists()).toBe(false);
+  await card.get('[role="switch"]').trigger("click");
+  await flushPromises();
+  expect(card.find("form").exists()).toBe(true);
+  await card.get('input[type="url"]').setValue("https://provider.test/v1");
+  await card.get('input:not([type])').setValue("reranker");
+  await card.get('input[type="password"]').setValue("test-key");
+  await card.get("form").trigger("submit");
+  await flushPromises();
+  expect((await getSettings()).rerankEnabled).toBe(true);
+  await card.get('[role="switch"]').trigger("click");
+  await flushPromises();
+  expect(card.find("form").exists()).toBe(false);
+  const saved = await getSettings();
+  expect(saved.rerankEnabled).toBe(false);
+  expect(saved.rerank.modelName).toBe("reranker");
+  wrapper.unmount();
+});

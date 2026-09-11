@@ -318,7 +318,7 @@ class MetadataFilter(_message.Message):
     def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
 
 class RetrieveRequest(_message.Message):
-    __slots__ = ("request_id", "dataset_id", "query", "filters", "top_k", "enable_rerank", "max_context_tokens")
+    __slots__ = ("request_id", "dataset_id", "query", "filters", "top_k", "enable_rerank", "max_context_tokens", "encrypted_rerank_profile")
     REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
     DATASET_ID_FIELD_NUMBER: _ClassVar[int]
     QUERY_FIELD_NUMBER: _ClassVar[int]
@@ -326,6 +326,7 @@ class RetrieveRequest(_message.Message):
     TOP_K_FIELD_NUMBER: _ClassVar[int]
     ENABLE_RERANK_FIELD_NUMBER: _ClassVar[int]
     MAX_CONTEXT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    ENCRYPTED_RERANK_PROFILE_FIELD_NUMBER: _ClassVar[int]
     request_id: str
     dataset_id: str
     query: str
@@ -333,7 +334,8 @@ class RetrieveRequest(_message.Message):
     top_k: int
     enable_rerank: bool
     max_context_tokens: int
-    def __init__(self, request_id: _Optional[str] = ..., dataset_id: _Optional[str] = ..., query: _Optional[str] = ..., filters: _Optional[_Iterable[_Union[MetadataFilter, _Mapping]]] = ..., top_k: _Optional[int] = ..., enable_rerank: _Optional[bool] = ..., max_context_tokens: _Optional[int] = ...) -> None: ...
+    encrypted_rerank_profile: str
+    def __init__(self, request_id: _Optional[str] = ..., dataset_id: _Optional[str] = ..., query: _Optional[str] = ..., filters: _Optional[_Iterable[_Union[MetadataFilter, _Mapping]]] = ..., top_k: _Optional[int] = ..., enable_rerank: _Optional[bool] = ..., max_context_tokens: _Optional[int] = ..., encrypted_rerank_profile: _Optional[str] = ...) -> None: ...
 
 class Locator(_message.Message):
     __slots__ = ("page_number", "start_line", "end_line", "symbol", "language", "metadata")

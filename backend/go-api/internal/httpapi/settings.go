@@ -21,7 +21,12 @@ func defaults(kind string) map[string]any {
 	return m
 }
 func (s *Server) settings(c *gin.Context) {
-	out := gin.H{"rerankEnabled": false, "embeddingManagedByServer": false, "rerankAvailable": false}
+	enabled, err := s.Store.RerankEnabled(c.Request.Context(), uid(c))
+	if err != nil {
+		fail(c, 503, "CONFIG_UNAVAILABLE", "配置暂不可用。")
+		return
+	}
+	out := gin.H{"rerankEnabled": enabled, "embeddingManagedByServer": false, "rerankAvailable": true}
 	for _, kind := range []string{"chat", "embedding", "rerank"} {
 		m, _, e := s.Store.Model(c.Request.Context(), uid(c), kind)
 		if e != nil {
@@ -76,7 +81,7 @@ func (s *Server) saveModel(c *gin.Context) {
 			return
 		}
 	}
-	if !validURL(p.BaseURL, s.AllowLocalModels) || strings.TrimSpace(p.Name) == "" {
+	if !validURL(p.BaseURL, s.AllowLocalModels && kind != "rerank") || strings.TrimSpace(p.Name) == "" {
 		fail(c, 400, "INVALID_INPUT", "请输入有效模型名称和 API Base URL。")
 		return
 	}
@@ -99,7 +104,7 @@ func (s *Server) saveModel(c *gin.Context) {
 		m["apiKeyHint"] = hint
 	}
 	m["apiKeyConfigured"] = encrypted != ""
-	if kind == "embedding" && encrypted == "" {
+	if (kind == "embedding" || kind == "rerank") && encrypted == "" {
 		fail(c, 400, "API_KEY_REQUIRED", "首次配置需要填写 API Key。")
 		return
 	}
@@ -110,8 +115,8 @@ func (s *Server) saveModel(c *gin.Context) {
 		m["defaultTopK"] = p.TopK
 		m["embeddingDimension"] = p.Dimension
 	case "rerank":
-		if p.TopN < 1 || p.TopN > 30 {
-			fail(c, 400, "INVALID_INPUT", "Top-N 应为 1–30。")
+		if p.TopN < 1 || p.TopN > 20 {
+			fail(c, 400, "INVALID_INPUT", "Top-N 应为 1–20。")
 			return
 		}
 		m["topN"] = p.TopN

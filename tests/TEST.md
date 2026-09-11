@@ -4,6 +4,28 @@
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
 
+### 2026-09-11 用户级 Rerank
+
+```text
+tests/unit/adapters/test_rerank_profile.py
+tests/unit/application/test_retrieval_service.py
+tests/contract/test_proto_contract.py
+backend/go-api/internal/ragclient/rerank_test.go
+backend/go-api/internal/httpapi/rerank_test.go
+apps/web/tests/rerank-settings.spec.ts
+```
+
+| 文件 | 用例 / 职责 | 运行边界 |
+|---|---|---|
+| `tests/unit/adapters/test_rerank_profile.py` | `test_rerank_profile_validates_scores_and_scope`：真实 AES-GCM 解密、Dataset AAD 隔离、输入顺序恢复、重复/缺失/非法分数、认证与服务故障、空候选不调用，错误不泄露密钥 | pytest + httpx MockTransport，仅替代外部模型 HTTP |
+| `tests/unit/application/test_retrieval_service.py` | `test_request_rerank_changes_evidence_order_only_when_enabled`、`ScopedRerankModel`：开关控制排序与分数，关闭时忽略配置；保留已有降级测试 | Fake metadata/search/model，真实检索编排，不替代 ES 验收 |
+| `tests/contract/test_proto_contract.py` | 现有请求契约测试增加字段 8 的加密 Rerank profile 类型和编号检查 | 离线 protobuf 描述符 |
+| `backend/go-api/internal/ragclient/rerank_test.go` | `TestRequestScopedRerankDoesNotMutateSharedClient`、`rerankRPC`：请求级 Top-N、密文、enable 转发与分数返回，不污染共享客户端 | Go 离线 RPC 替身 |
+| `backend/go-api/internal/httpapi/rerank_test.go` | `TestRerankSettingsPersistence`：缺配置拒绝启用、密钥脱敏、开关持久化、用户隔离、关闭不丢配置、非法请求拒绝 | 独立 MySQL；显式设置 `RERANK_TEST_MYSQL_DSN` 后运行 `go test ./internal/httpapi -run TestRerankSettingsPersistence -count=1`，未设置时跳过；不连接运行中的产品库，不调用真实模型 |
+| `apps/web/tests/rerank-settings.spec.ts` | `reveals rerank configuration on enable and persists disabling without deleting configuration`：开关控制表单、保存启用与关闭保留配置 | Vitest/jsdom + MSW，不替代浏览器或真实模型验收 |
+
+运行 Python 用例使用既有 `make ci`；前端使用 `npm --prefix apps/web test -- --run`，Go 在 `backend/go-api` 下执行 `go test ./...`。第三方真实 Rerank 凭据与模型效果需单独验收，离线 HTTP 响应不代表真实服务可用。
+
 ### 2026-09-10 产品端知识库删除
 
 ```text

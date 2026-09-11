@@ -129,6 +129,7 @@ class RetrieveQuery:
     filters: Mapping[str, str]
     max_context_tokens: int
     enable_rerank: bool = False
+    encrypted_rerank_profile: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True, slots=True)

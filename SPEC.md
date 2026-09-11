@@ -694,7 +694,9 @@ sequenceDiagram
 
 2026-09-06 后续迭代：Embedding URL/模型/API Key/超时/Top-K 由个人设置写入 Go MySQL，API Key 加密存储，不再要求运行环境提供模型凭据。创建 Dataset 时 Go 将配置加密快照经 gRPC 传给 Python，Python MySQL 随 Dataset 持久化，Worker 与 Retrieve 使用同一快照。仅基础设施加密密钥通过只读 secret 提供给 Python，不将 API Key 放入 NATS/日志或返回前端。已有 Dataset 的模型与维度不变；空快照可经 BindEmbeddingProfile 在行锁下首次绑定匹配配置，已绑定快照不可被该 RPC 覆盖。当前 ES 索引为 1024 维，前端清楚标明并校验维度。修改个人配置影响之后创建的知识库，避免不同模型的向量混用。批量上传按单文件调用已有上传 RPC、每文件独立幂等键；目录仅展开文件，不改变 Python Task/Outbox 语义。Go 历史会话返回创建/最近消息时间并稳定倒序；前端右侧模态抽屉展示。回答 Markdown 禁止原始 HTML并清洗输出，引用证据保留原文。
 
-2026-09-06 产品控制面迭代开始实施：`backend/go-api` 使用独立 MySQL 保存个人用户、模型配置、资源所有权索引和会话，单用户拥有多个 Dataset，无租户角色。网络 API 使用根路径与 24 小时 JWT cookie。Go Agent 通过现有 `Retrieve` RPC 执行只读工具调用，绑定已鉴权 Dataset，限制轮数/时间并支持取消。知识库创建、文档管理和知识库删除均经 Python RPC；Go 不读写 Python 表。Embedding 已改为用户配置及 Dataset 加密快照；用户级 Rerank 仍只保存配置，暂不参与检索。实施与验收跟踪见 `docs/superpowers/plans/2026-09-06-live-product-plane.md`。
+2026-09-06 产品控制面迭代开始实施：`backend/go-api` 使用独立 MySQL 保存个人用户、模型配置、资源所有权索引和会话，单用户拥有多个 Dataset，无租户角色。网络 API 使用根路径与 24 小时 JWT cookie。Go Agent 通过现有 `Retrieve` RPC 执行只读工具调用，绑定已鉴权 Dataset，限制轮数/时间并支持取消。知识库创建、文档管理和知识库删除均经 Python RPC；Go 不读写 Python 表。Embedding 已改为用户配置及 Dataset 加密快照。实施与验收记录见 `docs/development/live-product-plane.md`。
+
+2026-09-11 用户级 Rerank：复用产品 `agent_settings.rerank_enabled` 持久化开关，默认关闭，前端关闭时隐藏配置并保留已保存凭据。保存完整配置后才允许启用。Go 对已授权 Dataset 的每次问答读取当前用户的 Rerank 配置，以共享 AES-GCM 密钥封装 Base URL、模型名、API Key 和超时；AAD 为 `rag/rerank-profile/v1/<dataset_id>`。密文仅经 `RetrieveRequest.encrypted_rerank_profile`（新增字段 8）传递，不落入 Python 数据库、日志或 evidence；关闭时不传配置、不调用模型。Python 通过 ModelGateway 的请求级工厂接收配置，在 adapter 内解密并调用 HTTPS 专用 `/rerank` 接口，继续执行公网 DNS/IP 校验及禁用重定向。模型返回的 `results[index,relevance_score]` 必须完整、索引唯一且分数有限，先恢复输入顺序，再交给纯排序函数。最多重排 20 个 RRF 候选；启用时 Top-N（1–20）作为最终直接命中数量，仍受上下文预算及来源扩展规则约束。超时、429、5xx 和无效分数响应可降级至 RRF；无效密文、认证失败及其他不可重试请求错误必须明确失败。已有无配置的 RPC 调用保持兼容，用户配置不修改 Dataset Embedding 快照，不在共享客户端上存储请求级状态。
 
 本节描述最终产品路径，不是 Python RAG Worker 的职责。Python 只经 gRPC 执行 `Retrieve` 并返回 evidence；Go 负责会话、Agent 决策、Prompt、Chat Model 调用和向浏览器发送 SSE。
 
