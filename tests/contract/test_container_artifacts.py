@@ -115,6 +115,24 @@ def test_compose_declares_migration_health_role_secrets_and_shared_storage() -> 
         assert "EMBEDDING_MODEL_URL" not in blocks[role]
 
 
+def test_compose_exposes_pdf_parser_settings_to_server_and_worker() -> None:
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    environment = compose.split("services:", maxsplit=1)[0]
+
+    for name in (
+        "RAG_PARSER_VERSION",
+        "RAG_PDF_PARSER_MODE",
+        "RAG_PDF_NATIVE_TEXT_MIN_CHARS_PER_PAGE",
+        "RAG_PDF_OCR_LANGUAGE",
+        "RAG_PDF_OCR_DPI",
+        "RAG_PDF_OCR_TIMEOUT_SECONDS",
+        "RAG_PDF_MAX_PAGES",
+        "RAG_PDF_HEADER_FOOTER_MARGIN_RATIO",
+        "RAG_PDF_REPEATED_MARGIN_MIN_PAGES",
+    ):
+        assert name in environment
+
+
 def test_compose_keeps_infrastructure_private_and_orders_search_guard_bootstrap() -> None:
     """安全启动前不能暴露中间件，且下游必须等待 Search Guard 初始化。"""
 

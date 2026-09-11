@@ -386,6 +386,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_initialize_retries_on_timeout_instead_of_aborting` | `update-config` 超时属于瞬态故障，必须继续重试而非终止 bootstrap。 |
 | 同上 | `test_search_guard_operator_docs_preserve_private_tls_runbook` | SPEC、安全设计、AGENTS、Earthfile 与 Linux/Windows runbook 一致区分 development/test 材料拓扑和尚待平台化的生产编排：生产只读挂载外部材料、先 fail closed 验证，禁止定义/启动材料服务；bootstrap/health 后必须在新受保护目标卷/集群恢复已确认 snapshot，核验索引/文档完整性与一次 RAG 可检索性，失败保持停止，不能验证空集群。 |
 | `test_container_artifacts.py` | `test_runtime_image_and_context_exclude_secrets_and_test_artifacts` | runtime/test 镜像目标、非 root 用户、PDF OCR 所需 Poppler/Tesseract 运行工具及 build context 排除规则正确。 |
+| 同上 | `test_compose_exposes_pdf_parser_settings_to_server_and_worker` | Compose 共享环境显式透传 DeepDoc 模式、OCR 与版面阈值，使 `.env` 配置对 Server/Worker 同时生效。 |
 | 同上 | `test_compose_declares_migration_health_role_secrets_and_shared_storage` | Compose 固定迁移顺序、健康依赖、共享对象卷及模型密钥角色边界。 |
 | 同上 | `test_compose_keeps_infrastructure_private_and_orders_search_guard_bootstrap` | 默认 Compose 不发布 MySQL/NATS/ES，且安全材料、ES、Search Guard bootstrap 与下游服务按 fail-closed 顺序启动。 |
 | 同上 | `test_debug_override_binds_elasticsearch_to_loopback_only` | 调试 override 仅将受 TLS/认证保护的 ES 绑定到 `127.0.0.1`。 |
