@@ -126,6 +126,22 @@ def test_production_material_validator_rejects_permissive_node_password(
     assert materials._validate_production(node_output, client_output) is False
 
 
+def test_client_secret_permissions_match_the_non_root_rag_runtime_identity() -> None:
+    """运行时密码目录必须只允许实际 RAG 容器身份读取。"""
+
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    entrypoint = (
+        ROOT / "docker" / "search-guard" / "entrypoints" / "prepare-materials.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "addgroup --system --gid 10001 rag" in dockerfile
+    assert "adduser --system --uid 10001 --ingroup rag --no-create-home rag" in dockerfile
+    assert "chown 10001:10001 /client-secrets" in entrypoint
+    assert "chown 10001:10001 /client-secrets/rag_mvp_password" in entrypoint
+    assert "chmod 0700 /client-secrets" in entrypoint
+    assert "chmod 0600 /client-secrets/rag_mvp_password" in entrypoint
+
+
 def test_search_guard_assets_pin_tls_and_least_privilege() -> None:
     """错误版本、缺 TLS 或全权限角色必须使安全构建契约失败。"""
 

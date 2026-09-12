@@ -396,6 +396,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_development_material_validator_rejects_malformed_existing_files` | 开发命名卷中的畸形或不完整 TLS 材料不得仅因文件齐全而被复用。 |
 | 同上 | `test_production_material_generator_refuses_to_self_sign_missing_material` | production 缺失外部 Search Guard 材料时 fail closed，禁止生成自签名替代品。 |
 | 同上 | `test_production_material_validator_rejects_permissive_node_password` | production 材料校验必须同时拒绝 ES node 侧权限过宽的运行时密码副本，不能只检查 client 副本。 |
+| 同上 | `test_client_secret_permissions_match_the_non_root_rag_runtime_identity` | Search Guard 客户端 Secret 目录与密码文件的属主必须和 Dockerfile 中实际 RAG 非 root 运行 UID/GID 一致，并保持目录 0700、密码 0600。 |
 | 同上 | `test_search_guard_assets_pin_tls_and_least_privilege` | Search Guard 镜像固定 ES/插件校验和，TLS、节点 DN、`rag-chunks-v1*` 最小权限及 index/ping/bulk/refresh 的必要主与 shard action 齐全，且不开放独立测试索引前缀。 |
 | 同上 | `test_first_bootstrap_declares_search_guard_principals_in_extractor_order` | 首次 SG11 初始化时，`admin_dn` 与 `nodes_dn` 必须使用 Search Guard principal extractor 的逆序 RDN。 |
 | 同上 | `test_first_bootstrap_uploads_all_required_search_guard_config_types` | bootstrap 必须上传 internal users、action groups、authc、roles、roles mapping 与 tenants 所需的配置文件。 |

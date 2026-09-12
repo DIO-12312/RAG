@@ -16,9 +16,9 @@ chmod 0644 /node-secrets/ca.pem /node-secrets/node.pem
 chmod 0600 /node-secrets/node-key.pem /node-secrets/rag_mvp_password
 chmod 0600 /node-secrets/admin-key.pem
 
-# The application image runs as UID 100:GID 101. Only it can read its password.
-chown 100:101 /client-secrets
+# The application image runs as UID/GID 10001. Only it can read its password.
+chown 10001:10001 /client-secrets
 chmod 0700 /client-secrets
-chown 100:101 /client-secrets/rag_mvp_password
+chown 10001:10001 /client-secrets/rag_mvp_password
 chmod 0644 /client-secrets/ca.pem
 chmod 0600 /client-secrets/rag_mvp_password
