@@ -4,7 +4,7 @@ EARTHLY_FLAGS ?=
 SUITE ?= all
 EVAL_FIXTURE ?= rephrased
 PRODUCTION_ENV_FILE ?= /etc/rag-mvp/.env.production
-CADDY_SCALE ?= 0
+PUBLIC_MODE ?= ip
 
 .PHONY: all proto lint test ci docker-up docker-test docker-down run production-run web-restart clear help
 
@@ -43,9 +43,9 @@ docker-down:
 run:
 	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +run
 
-# 校验外部生产材料、构建镜像并启动生产栈；裸 IP 阶段默认不启动 Caddy
+# 校验外部生产材料、构建镜像并启动生产栈；默认提供公网 IP HTTP 入口
 production-run:
-	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +production-run --PRODUCTION_ENV_FILE="$(PRODUCTION_ENV_FILE)" --CADDY_SCALE="$(CADDY_SCALE)"
+	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +production-run --PRODUCTION_ENV_FILE="$(PRODUCTION_ENV_FILE)" --PUBLIC_MODE="$(PUBLIC_MODE)"
 
 # 重新构建并仅重启前端容器，保留后端服务与数据卷
 web-restart:
@@ -64,8 +64,8 @@ help:
 	@echo make ci     - 运行完整的免密钥质量门禁
 	@echo make docker-up                  - 校验、构建并启动所有服务
 	@echo make run                        - 一键启动 RAG、Go 后端、产品 MySQL 和 Vue 前端容器
-	@echo make production-run             - 校验材料、构建并启动生产栈（默认 Caddy 副本数为 0）
-	@echo make production-run CADDY_SCALE=1 - 域名与 HTTPS 就绪后启动生产公网入口
+	@echo make production-run             - 校验材料、构建并启动生产栈（默认公网 IP HTTP 入口）
+	@echo make production-run PUBLIC_MODE=domain - 域名与 HTTPS 配置就绪后启动生产入口
 	@echo make web-restart                - 重新构建并仅重启 Vue 前端容器
 	@echo make docker-test SUITE=VALUE EVAL_FIXTURE=original	实际评估数据集选择器
 	@echo make docker-down                - 扫描日志并停止服务（不删除数据卷）

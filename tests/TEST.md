@@ -381,7 +381,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
 | `test_build_entrypoints.py` | `test_makefile_offline_targets_are_commented_earthly_only_entrypoints` | Makefile 的离线公共入口均有说明，并且只负责转发 Earthly target。 |
-| 同上 | `test_production_run_is_earthly_only_fail_closed_entrypoint` | `make production-run` 只能转发 Earthfile；生产 target 从当前源码构建材料检查器，按顺序完成校验、私网启动和健康检查后才可启用 Caddy，并移除孤儿容器但不删除卷。 |
+| 同上 | `test_production_run_is_earthly_only_fail_closed_entrypoint` | `make production-run` 只能转发 Earthfile；生产 target 校验 `PUBLIC_MODE`，IP 模式提供公网 HTTP 入口，按顺序完成材料校验、启动和健康检查，并移除孤儿容器但不删除卷。 |
 | 同上 | `test_quality_workflow_runs_for_push_and_main_pull_requests` | 用 PyYAML 解析 workflow，验证所有分支 push、main PR、手动触发、无路径跳过、独立并发组、固定 check 名及不吞失败的 `make ci`。离线配置契约，不执行 GitHub runner。 |
 | 同上 | `test_quality_workflow_pins_tools_and_keeps_secrets_out` | 检查只读权限、临时托管 runner、固定 Action/Earthly 与下载校验、不保留凭据、不注入 Secret 或启动业务 Compose，以及 Earthly 显式复制所需配置。仅静态契约，不证明下载或远端运行成功。 |
 | 同上 | `test_main_ruleset_protects_main_without_blocking_direct_push` | 用 JSON 解析规则，验证 main 限定、仅禁止删除与强推、且不含 `pull_request` 或 `required_status_checks`，确保直接 push 不被拦截。不会调用 GitHub API 或验证远端规则已启用。 |
@@ -410,11 +410,11 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_compose_declares_migration_health_role_secrets_and_shared_storage` | Compose 固定迁移顺序、健康依赖、共享对象卷及模型密钥角色边界。 |
 | 同上 | `test_compose_keeps_infrastructure_private_and_orders_search_guard_bootstrap` | 默认 Compose 不发布 MySQL/NATS/ES，且安全材料、ES、Search Guard bootstrap 与下游服务按 fail-closed 顺序启动。 |
 | 同上 | `test_debug_override_binds_elasticsearch_to_loopback_only` | 调试 override 仅将受 TLS/认证保护的 ES 绑定到 `127.0.0.1`。 |
-| 同上 | `test_production_compose_keeps_services_private_and_uses_external_secret_material` | P0-2 生产 Compose 保持 Caddy 之外的服务无宿主端口、使用私网网络和外部 file-backed Secret，并关闭 Reflection、启用 Secure Cookie；不连接服务器。 |
-| 同上 | `test_production_caddy_is_only_public_entrypoint` | P0-3 仅允许 Caddy 发布宿主机 80/443，固定域名与 ACME 配置、34 MiB 上传上限、`/api` 前缀转发和 SSE 禁止缓冲；不签发真实证书。 |
+| 同上 | `test_production_compose_keeps_services_private_and_uses_external_secret_material` | P0-2 生产 Compose 保持 Caddy 之外的服务无宿主端口、使用私网网络和外部 file-backed Secret，并关闭 Reflection；IP 模式默认使用 HTTP Cookie，域名模式由入口校验强制 Secure Cookie；不连接服务器。 |
+| 同上 | `test_production_caddy_is_only_public_entrypoint` | P0-3 仅允许 Caddy 发布宿主机 80/443，支持公网 IP HTTP 与域名 ACME 路由、34 MiB 上传上限、`/api` 前缀转发和 SSE 禁止缓冲；不签发真实证书。 |
 | 同上 | `test_production_model_callers_have_egress_without_exposing_infrastructure` | 生产 Compose 为调用公网 Embedding/Rerank 的 RAG Server/Worker 提供独立出网网络，同时保持 MySQL、NATS、Elasticsearch 仅连接隔离后端且所有这些服务均不发布宿主机端口。 |
 | 同上 | `test_production_uses_one_shared_encryption_key_for_go_and_python` | Go 产品 API 与 Python RAG Server/Worker 必须挂载同一个产品加密 Secret，保证 Dataset 模型配置可跨进程解密，禁止定义易漂移的第二份密钥。 |
-| 同上 | `test_production_runbook_supports_snapshot_restore_and_ip_only_staging` | P0-4 生产 Compose 为 ES 声明宿主机持久化 snapshot repository；runbook 将裸 IP 私网预启动与域名公网启用分开，并保留 snapshot restore 和禁止删卷边界。 |
+| 同上 | `test_production_runbook_supports_snapshot_restore_and_ip_only_staging` | P0-4 生产 Compose 为 ES 声明宿主机持久化 snapshot repository；runbook 覆盖裸 IP 公网 HTTP、域名 HTTPS 切换、snapshot restore 和禁止删卷边界。 |
 | 同上 | `test_secret_scanner_fails_without_echoing_the_secret` | 日志命中模型密钥时扫描失败且不回显 Secret。 |
 | 同上 | `test_secret_scanner_detects_elasticsearch_password_without_echoing_it` | 日志命中 Elasticsearch password file 的内容时扫描失败且不回显该密码。 |
 | 同上 | `test_healthcheck_parses_ndjson_and_requires_every_process_to_be_healthy` | 健康检查要求基础设施和应用健康、迁移成功退出。 |

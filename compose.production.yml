@@ -302,10 +302,10 @@ services:
     entrypoint: ["/bin/sh", "-ec", "export PRODUCT_MYSQL_DSN=\"$$(cat /run/secrets/product_mysql_dsn)\"; exec product"]
     environment:
       PRODUCT_HTTP_ADDR: 0.0.0.0:8080
-      PRODUCT_ORIGIN: https://${RAG_PUBLIC_DOMAIN:?set RAG_PUBLIC_DOMAIN in .env.production}
+      PRODUCT_ORIGIN: ${RAG_PUBLIC_ORIGIN:-http://49.235.110.118}
       PRODUCT_RAG_TARGET: rag-server:50051
       PRODUCT_KEY_DIR: /run/model-keys
-      PRODUCT_COOKIE_SECURE: "true"
+      PRODUCT_COOKIE_SECURE: "${PRODUCT_COOKIE_SECURE:-false}"
       PRODUCT_ALLOW_LOCAL_MODELS: "false"
     group_add: ["10001"]
     secrets:
@@ -340,8 +340,8 @@ services:
   caddy:
     image: caddy:2.10.2-alpine
     environment:
-      RAG_PUBLIC_DOMAIN: ${RAG_PUBLIC_DOMAIN:?set RAG_PUBLIC_DOMAIN in .env.production}
-      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:?set CADDY_ACME_EMAIL in .env.production}
+      RAG_PUBLIC_SITE_ADDRESS: ${RAG_PUBLIC_SITE_ADDRESS:-http://49.235.110.118}
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:-}
     ports:
       - "80:80"
       - "443:443"

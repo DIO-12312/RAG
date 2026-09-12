@@ -64,19 +64,19 @@ def test_makefile_offline_targets_are_commented_earthly_only_entrypoints() -> No
 
 
 def test_production_run_is_earthly_only_fail_closed_entrypoint() -> None:
-    """生产启动必须经 Earthfile 校验外部材料，并支持显式控制 Caddy。"""
+    """生产启动必须经 Earthfile 校验材料，并默认提供公网 IP 入口。"""
 
     makefile = _text("Makefile")
     earthfile = _text("Earthfile")
 
     assert "PRODUCTION_ENV_FILE ?= /etc/rag-mvp/.env.production" in makefile
-    assert "CADDY_SCALE ?= 0" in makefile
+    assert "PUBLIC_MODE ?= ip" in makefile
     assert "production-run" in _make_targets(makefile)
     assert re.search(
         r"^# .+\nproduction-run:\n\t\$\(EARTHLY\) --env-file-path "
         r"\$\(EARTHLY_ENV_FILE\) \$\(EARTHLY_FLAGS\) \+production-run "
         r'--PRODUCTION_ENV_FILE="\$\(PRODUCTION_ENV_FILE\)" '
-        r'--CADDY_SCALE="\$\(CADDY_SCALE\)"$',
+        r'--PUBLIC_MODE="\$\(PUBLIC_MODE\)"$',
         makefile,
         re.MULTILINE,
     )
@@ -84,17 +84,17 @@ def test_production_run_is_earthly_only_fail_closed_entrypoint() -> None:
     target = earthfile.split("\nproduction-run:\n", maxsplit=1)[1].split("\n# ", maxsplit=1)[0]
     assert "    LOCALLY" in target
     assert "ARG PRODUCTION_ENV_FILE=/etc/rag-mvp/.env.production" in target
-    assert "ARG CADDY_SCALE=0" in target
+    assert "ARG PUBLIC_MODE=ip" in target
     steps = [
-        'case "$CADDY_SCALE" in 0|1)',
+        'case "$PUBLIC_MODE" in ip|domain)',
         'test -f "$PRODUCTION_ENV_FILE"',
+        "domain mode requires PRODUCT_COOKIE_SECURE=true",
         '--env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml config --quiet',
         "build production-material-check",
         "run --pull never --rm --no-deps production-material-check",
         "up -d --build --scale caddy=0 --remove-orphans --wait --wait-timeout 300",
         "http://127.0.0.1:8080/readyz",
         "http://web/healthz",
-        'if [ "$CADDY_SCALE" = 1 ]',
         "up -d --no-deps --scale caddy=1 --wait --wait-timeout 120 caddy",
         "ps --all",
     ]

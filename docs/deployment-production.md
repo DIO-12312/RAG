@@ -1,6 +1,6 @@
 # Ubuntu 公网部署与回滚手册
 
-这份手册对应单机 `compose.production.yml`，不替代高可用、Kubernetes 或托管数据库方案。只有公网 IP 时可以完成主机预检、镜像构建、材料校验和不启动 Caddy 的私网预启动，但不能完成浏览器登录或公网 HTTPS 验收。不得将公网 IP 填入 `RAG_PUBLIC_DOMAIN` 冒充域名；启用 Caddy 前必须确认域名的 A/AAAA 记录已经指向服务器。
+这份手册对应单机 `compose.production.yml`，不替代高可用、Kubernetes 或托管数据库方案。只有公网 IP 时可以启动 Caddy 的 HTTP 入口并通过 `http://49.235.110.118` 验收页面，但不能完成浏览器认可的公网 HTTPS 验收。域名模式必须使用真实域名的 A/AAAA 记录，不得将公网 IP 填入域名 HTTPS 配置。
 
 ## 主机预检
 
@@ -29,7 +29,7 @@ sudo ufw status numbered
 
 ## Secret 与配置
 
-将仓库的 `.env.production.example` 复制为 `/etc/rag-mvp/.env.production`，填写域名、ACME 邮箱、本地镜像名、`/etc/rag-mvp/secrets` 和 `/var/backups/rag-mvp`。裸 IP 预启动阶段仍填写一个明确的待启用域名占位值，但必须保持 Caddy 副本数为 0。配置文件和目录均不可提交。本期 Compose 在主机从当前源码构建 production 镜像；后续可独立改为 registry 的不可变 digest。按照 [Secret 布局](../deploy/production/secrets/README.md) 从 Secret Manager 写入所需文件；生产材料验证器会拒绝缺失、权限过宽或主体不匹配的 Search Guard 材料，绝不会自签名补齐。这里的 Compose `secrets:` 是只读 bind mount，不是 Swarm 的加密 Secret，文件来源的 `uid/gid/mode` 字段会被 Compose 忽略。宿主机必须按 Secret 布局中的 UID/权限矩阵落盘，否则非 root 的 Elasticsearch、Python 或 Go 进程无法读取；宿主机 root 与 Docker 管理组仍可读取全部 Secret。
+将仓库的 `.env.production.example` 复制为 `/etc/rag-mvp/.env.production`，填写本地镜像名、`/etc/rag-mvp/secrets` 和 `/var/backups/rag-mvp`。IP 模式默认使用 `http://49.235.110.118`，不填写域名变量，明文 HTTP 仅适合临时演示或受控网络，不能承载正式生产登录流量；域名模式才填写 `RAG_PUBLIC_ORIGIN=https://...`、`RAG_PUBLIC_SITE_ADDRESS=...`、ACME 邮箱，并设置 `PRODUCT_COOKIE_SECURE=true`，入口会强制检查该值。配置文件和目录均不可提交。本期 Compose 在主机从当前源码构建 production 镜像；后续可独立改为 registry 的不可变 digest。按照 [Secret 布局](../deploy/production/secrets/README.md) 从 Secret Manager 写入所需文件；生产材料验证器会拒绝缺失、权限过宽或主体不匹配的 Search Guard 材料，绝不会自签名补齐。这里的 Compose `secrets:` 是只读 bind mount，不是 Swarm 的加密 Secret，文件来源的 `uid/gid/mode` 字段会被 Compose 忽略。宿主机必须按 Secret 布局中的 UID/权限矩阵落盘，否则非 root 的 Elasticsearch、Python 或 Go 进程无法读取；宿主机 root 与 Docker 管理组仍可读取全部 Secret。
 
 ES snapshot 目录必须在启动前创建，所有备份随后还要复制到另一台主机或对象存储；同机目录不能抵御整机损坏：
 
@@ -39,7 +39,7 @@ sudo install -d -o 1000 -g 1000 -m 0700 /var/backups/rag-mvp/elasticsearch
 
 `product/encryption.key` 与 `product/jwt.key` 必须在恢复时与产品 MySQL 一起恢复。遗失 encryption key 会使已保存的模型配置无法解密；不要以删除 key 或数据库来“修复”。
 
-## 裸 IP 阶段：私网预启动
+## 裸 IP 阶段：公网 HTTP 启动
 
 在仓库根目录执行生产入口；它会经 Earthfile 依次校验参数和生产配置、从当前源码构建无状态材料检查器并校验外部材料，随后构建镜像、移除同项目孤儿容器、启动私网服务并检查 API/web 健康状态。任一检查失败都会停止，持久卷不会被删除：
 
@@ -47,14 +47,14 @@ sudo install -d -o 1000 -g 1000 -m 0700 /var/backups/rag-mvp/elasticsearch
 make production-run
 ```
 
-默认 `CADDY_SCALE=0`，此时所有业务服务仍只在 Docker 网络内。公网 IP 上没有可用产品页面是预期行为；不得临时发布 8080、50051 或其他内部端口绕过 HTTPS。若生产 env 不在默认路径，可显式传入 `PRODUCTION_ENV_FILE=/absolute/path`。
+默认 `PUBLIC_MODE=ip`，页面地址为 `http://49.235.110.118`。IP 模式不申请 ACME 证书，浏览器应使用 HTTP 访问；不得临时发布 8080、50051 或其他内部端口。若生产 env 不在默认路径，可显式传入 `PRODUCTION_ENV_FILE=/absolute/path`。
 
 ## 域名就绪后：公网启动与健康检查
 
-确认 A/AAAA 解析正确并填写真实域名和 ACME 邮箱后，在仓库根目录执行。Earthfile 仍会先以 Caddy 副本数 0 完成私网服务和 API/web 健康检查，全部通过后才启动 Caddy：
+确认 A/AAAA 解析正确、填写真实域名 Origin 和 ACME 邮箱，并设置 `PRODUCT_COOKIE_SECURE=true` 后，在仓库根目录执行：
 
 ```bash
-make production-run CADDY_SCALE=1
+make production-run PUBLIC_MODE=domain
 curl --fail --show-error --location "https://YOUR_DOMAIN/healthz"
 ```
 

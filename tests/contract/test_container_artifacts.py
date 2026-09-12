@@ -160,7 +160,7 @@ def test_production_compose_keeps_services_private_and_uses_external_secret_mate
     assert "file: ${PRODUCTION_SECRETS_DIR" in production
     assert "internal: true" in production
     assert 'RAG_GRPC_REFLECTION: "false"' in production
-    assert 'PRODUCT_COOKIE_SECURE: "true"' in production
+    assert 'PRODUCT_COOKIE_SECURE: "${PRODUCT_COOKIE_SECURE:-false}"' in production
     elasticsearch_secret_sources = {
         item["source"] for item in production_config["services"]["elasticsearch"]["secrets"]
     }
@@ -183,12 +183,14 @@ def test_production_caddy_is_only_public_entrypoint() -> None:
         "caddy-data:/data",
         "caddy-config:/config",
     ]
-    assert "RAG_PUBLIC_DOMAIN:?set RAG_PUBLIC_DOMAIN" in production_text
-    assert "CADDY_ACME_EMAIL:?set CADDY_ACME_EMAIL" in production_text
-    assert "PRODUCT_ORIGIN: https://${RAG_PUBLIC_DOMAIN" in production_text
+    assert "RAG_PUBLIC_SITE_ADDRESS:-http://49.235.110.118" in production_text
+    assert "CADDY_ACME_EMAIL:-" in production_text
+    assert "PRODUCT_ORIGIN: ${RAG_PUBLIC_ORIGIN:-http://49.235.110.118}" in production_text
+    assert 'PRODUCT_COOKIE_SECURE: "${PRODUCT_COOKIE_SECURE:-false}"' in production_text
 
     caddyfile = (ROOT / "deploy" / "production" / "Caddyfile").read_text(encoding="utf-8")
-    assert "{$RAG_PUBLIC_DOMAIN}" in caddyfile
+    assert "email {$CADDY_ACME_EMAIL}" not in caddyfile
+    assert "{$RAG_PUBLIC_SITE_ADDRESS}" in caddyfile
     assert "max_size 34MB" in caddyfile
     assert "uri strip_prefix /api" in caddyfile
     assert caddyfile.count("flush_interval -1") == 2
@@ -248,9 +250,9 @@ def test_production_runbook_supports_snapshot_restore_and_ip_only_staging() -> N
 
     runbook = (ROOT / "docs" / "deployment-production.md").read_text(encoding="utf-8")
     assert "make production-run" in runbook
-    assert "默认 `CADDY_SCALE=0`" in runbook
-    assert "make production-run CADDY_SCALE=1" in runbook
-    assert "不得将公网 IP 填入 `RAG_PUBLIC_DOMAIN`" in runbook
+    assert "默认 `PUBLIC_MODE=ip`" in runbook
+    assert "make production-run PUBLIC_MODE=domain" in runbook
+    assert "不得将公网 IP 填入域名 HTTPS 配置" in runbook
     assert '"type": "fs"' in runbook
     assert "_snapshot/rag_production" in runbook
     assert "docker compose down -v" in runbook

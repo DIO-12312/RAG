@@ -132,18 +132,20 @@ run:
 production-run:
     LOCALLY
     ARG PRODUCTION_ENV_FILE=/etc/rag-mvp/.env.production
-    ARG CADDY_SCALE=0
-    RUN case "$CADDY_SCALE" in 0|1) ;; *) echo "CADDY_SCALE must be 0 or 1" >&2; exit 2 ;; esac
+    ARG PUBLIC_MODE=ip
+    RUN case "$PUBLIC_MODE" in ip|domain) ;; *) echo "PUBLIC_MODE must be ip or domain" >&2; exit 2 ;; esac
     RUN test -f "$PRODUCTION_ENV_FILE"
+    RUN if [ "$PUBLIC_MODE" = ip ] && grep -Eq '^(RAG_PUBLIC_ORIGIN|RAG_PUBLIC_SITE_ADDRESS)=' "$PRODUCTION_ENV_FILE"; then echo "ip mode must not define domain public variables" >&2; exit 2; fi
+    RUN if [ "$PUBLIC_MODE" = domain ] && ! grep -Eq '^RAG_PUBLIC_ORIGIN=https://[^[:space:]]+$' "$PRODUCTION_ENV_FILE"; then echo "domain mode requires RAG_PUBLIC_ORIGIN=https://..." >&2; exit 2; fi
+    RUN if [ "$PUBLIC_MODE" = domain ] && ! grep -Eq '^RAG_PUBLIC_SITE_ADDRESS=[^[:space:]]+$' "$PRODUCTION_ENV_FILE"; then echo "domain mode requires RAG_PUBLIC_SITE_ADDRESS=..." >&2; exit 2; fi
+    RUN if [ "$PUBLIC_MODE" = domain ] && ! grep -Eq '^PRODUCT_COOKIE_SECURE=true$' "$PRODUCTION_ENV_FILE"; then echo "domain mode requires PRODUCT_COOKIE_SECURE=true" >&2; exit 2; fi
     RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml config --quiet
     RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml build production-material-check
     RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml run --pull never --rm --no-deps production-material-check
     RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml up -d --build --scale caddy=0 --remove-orphans --wait --wait-timeout 300
     RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml exec -T api wget -q -O - http://127.0.0.1:8080/readyz
     RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml exec -T api wget -q -O - http://web/healthz
-    RUN if [ "$CADDY_SCALE" = 1 ]; then \
-            docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml up -d --no-deps --scale caddy=1 --wait --wait-timeout 120 caddy; \
-        fi
+    RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml up -d --no-deps --scale caddy=1 --wait --wait-timeout 120 caddy
     RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml ps --all
 
 # Rebuild and recreate only the frontend container without starting dependencies or removing volumes.

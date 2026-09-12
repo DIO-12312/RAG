@@ -1,5 +1,4 @@
 {
-	email {$CADDY_ACME_EMAIL}
 	servers {
 		timeouts {
 			read_body 10m
@@ -9,7 +8,7 @@
 	}
 }
 
-{$RAG_PUBLIC_DOMAIN} {
+{$RAG_PUBLIC_SITE_ADDRESS} {
 	encode zstd gzip
 	request_body {
 		max_size 34MB
