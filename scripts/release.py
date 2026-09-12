@@ -1,4 +1,4 @@
-"""GHCR release construction and serialized, application-only Compose deployment.
+"""Approved-registry release construction and serialized, application-only Compose deployment.
 
 Uses only the standard library so the production host needs Python, Docker and Earthly.
 Rendered Compose and credentials are host-local; release.json contains no secrets.
@@ -35,6 +35,10 @@ APP_IMAGE = {
     "api": "api",
     "web": "web",
 }
+# 唯一受控的发布仓库前缀：发布与部署都只接受该前缀下的 digest 引用。
+# 切换到本机能高速访问的同地域 registry（例如腾讯云 TCR）时只改这一处，
+# 并同步 GitHub Secrets 与文档；不做按环境动态切换，避免部署端接受未批准仓库。
+REGISTRY = "ghcr.io/dio-12312"
 # Conservative guard: changes here need a maintenance release and a new baseline.
 PROTECTED = (
     "compose.production.yml",
@@ -116,9 +120,9 @@ def validate_release(value: dict[str, Any], sha: str, root: Path) -> None:
         raise ReleaseError("release image set mismatch")
     for name, ref in images.items():
         if not isinstance(ref, str) or not re.fullmatch(
-            rf"ghcr\.io/dio-12312/rag-{name}@sha256:[0-9a-f]{{64}}", ref
+            rf"{re.escape(REGISTRY)}/rag-{re.escape(name)}@sha256:[0-9a-f]{{64}}", ref
         ):
-            raise ReleaseError("release requires approved GHCR digest references")
+            raise ReleaseError("release requires approved registry digest references")
 
 
 def publish(root: Path, sha: str, output: Path) -> None:
@@ -130,7 +134,7 @@ def publish(root: Path, sha: str, output: Path) -> None:
     with tempfile.TemporaryDirectory() as temp:
         for name, (dockerfile, context, target) in IMAGES.items():
             print(f"Building and publishing {name}", flush=True)
-            tag = f"ghcr.io/dio-12312/rag-{name}:{sha}"
+            tag = f"{REGISTRY}/rag-{name}:{sha}"
             metadata = Path(temp) / f"{name}.json"
             command = [
                 "docker",
@@ -384,7 +388,7 @@ def deploy(root: Path, manifest: Path, state: Path, sha: str, sequence: int) -> 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("publish", "baseline", "deploy", "recover"))
+    parser.add_argument("action", choices=("publish", "baseline", "deploy", "recover", "registry"))
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--sha", default="")
     parser.add_argument("--sequence", type=int, default=0)
@@ -394,6 +398,10 @@ def main() -> None:
     args = parser.parse_args()
     os.umask(0o077)
     try:
+        if args.action == "registry":
+            # 供 CI 推导 docker login 主机；与发布/校验共用同一唯一来源。
+            print(REGISTRY)
+            return
         if args.action == "publish":
             publish(args.root, args.sha, args.manifest)
             return

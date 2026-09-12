@@ -71,6 +71,8 @@ apps/web/tests/
 production-baseline/production-deploy/production-recover；仍校验 Earthfile 委托及卷保护。
 `quality.yml` 的 push/PR 门禁改为 `make release-check`，使 Python、Go 与前端发布门禁在合入 main 前
 就常设执行，而不是只在真正发布时才首次运行；前端统一使用 npm 与 `apps/web/package-lock.json`。
+发布仓库前缀统一由 `scripts/release.py` 的 `REGISTRY` 与 `registry` 子命令提供，发布、部署校验、
+CI/主机登录、契约断言都从它推导；切换到同地域 registry（如腾讯云 TCR）只改这一处并同步 Secrets。
 
 | 测试文件 / 函数 | 职责与运行边界 |
 | --- | --- |
@@ -78,16 +80,17 @@ production-baseline/production-deploy/production-recover；仍校验 Earthfile �
 | `test_release_failure_restores_images_and_preserves_active_state` | 拉取、部分更新、代理 reload 失败的回退，拉取失败不停止应用 |
 | `test_failed_rollback_keeps_journal_for_next_recovery` | 回退再次失败保留 journal，下次恢复旧镜像 |
 | `test_schema_change_and_stale_release_fail_before_stop` | 兼容边界变化及过期序号在停服前拒绝 |
-| `test_manifest_rejects_mutable_tag_wrong_sha_and_registry` | 错误 SHA、浮动标签、非批准镜像仓库拒绝 |
-| `test_deploy_workflow_requires_checks_and_uses_existing_secret_names` | main 触发、门禁顺序、部署不取消、门禁步骤使用 Earthly `--ci` 而 LOCALLY 发布步骤不得继承（`--ci` 隐含 `--strict`）、已有 Secret 名称和 SSH 主机校验 |
+| `test_manifest_rejects_mutable_tag_wrong_sha_and_registry` | 错误 SHA、浮动标签、非批准镜像仓库（含同主机其他命名空间）拒绝 |
+| `test_deploy_workflow_requires_checks_and_uses_existing_secret_names` | main 触发、门禁顺序、部署不取消、门禁步骤使用 Earthly `--ci` 而 LOCALLY 发布步骤不得继承（`--ci` 隐含 `--strict`）、`MIRROR`/`HOST`/`REGISTRY_*` Secret 名称与 SSH 主机校验 |
+| `test_release_registry_is_one_approved_prefix_shared_by_publish_and_ci` | `REGISTRY` 形状为 `host/namespace`，workflow 的 docker login/logout 与 `send-release.sh` 都通过 `scripts/release.py registry` 推导主机而不硬编码，并核对 CLI 输出与常量一致 |
 | `test_health_failure_after_switch_rolls_back` | 新版探针失败后恢复旧镜像和 active 状态 |
 | `test_image_drift_and_revision_mismatch_block_before_stopping` | 手工镜像漂移或拉取镜像 revision 不匹配时停服前拒绝 |
 | `test_baseline_uses_actual_image_ids_and_refuses_overwrite` | 首次基线使用实际运行 Image ID，加保留标签且不替换容器；禁止覆盖 |
 | `test_publish_injects_release_sha_into_web_image` | 发布 web 镜像必须携带 `--build-arg VITE_GIT_COMMIT=<sha>`，其他镜像不注入，digest 清单仍来自 buildx metadata |
-| `DockerSimulator` | 仅 Docker 命令边界替身，使用真实临时文件与状态 journal；不代表真实 Docker/SSH/GHCR 验收 |
+| `DockerSimulator` | 仅 Docker 命令边界替身，使用真实临时文件与状态 journal；不代表真实 Docker/SSH/registry 验收 |
 
 以上纳入 `make ci`，不连接生产服务。Go/前端发布门禁由 `make release-check` 经 Earthfile 运行；
-真实 GHCR push 与生产切换需合入 main 后单独验收，不由离线测试结果推断。
+真实 registry push、主机拉取速度与生产切换需合入 main 后单独验收，不由离线测试结果推断。
 
 ### 2026-09-12 部署版本可见性
 
