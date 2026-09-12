@@ -24,6 +24,8 @@ P0-1 与 P0-4b 需要真实服务器和云账号权限，不能由仓库内静�
 - P0-3 的仓库实现和离线门禁已完成；当前改为 `PUBLIC_MODE=ip` 启动 Caddy HTTP 入口，真实 ACME/公网 HTTPS 验收仍待域名就绪。
 - P0-4a 已完成并部署 snapshot 宿主机挂载。P0-4b 已创建 `rag_production` repository 和 `baseline-20260912-1438` 基线快照，16/16 shards 成功且无失败；异机备份和新受保护卷/集群 restore 演练仍待执行。
 - 生产手工启动已收敛为 `make production-run` → Earthfile `+production-run`；它先构建并运行可信材料检查器，再以当前公网模式启动并验证服务，移除同项目孤儿容器但不删除卷。默认 `PUBLIC_MODE=ip` 提供 `http://49.235.110.118`，域名配置完成后使用 `PUBLIC_MODE=domain`。
+- P0-5 进展（2026-09-13）：`make production-baseline` 已在主机记录基线（`/var/lib/rag-deploy`，sha `7474c27`、13 个 rollback 标签）；`deploy.yml` 首次真实运行已跑通门禁、构建并推送 5 个 GHCR 镜像、SSH 与 systemd 接管，随后**在镜像拉取阶段失败**：主机直连 GHCR CDN 实测仅 28.7 KB/s，单次发布需拉约 153 MiB，超过单镜像 1200s 超时。失败发生在写 `pending.json` 之前，生产未被改动。
+- P0-5 后续：发布仓库改为单一受控前缀（`scripts/release.py` 的 `REGISTRY` + `registry` 子命令，Secrets 统一为 `REGISTRY_USERNAME`/`REGISTRY_TOKEN`），并把前缀切到主机可高速拉取的同地域 registry（腾讯云 TCR），切换步骤见 `docs/deployment-release.md`；签名/扫描仍未交付。
 
 ## 架构决策
 
