@@ -41,7 +41,8 @@ make ci
 
 - `make lint`：Ruff lint/format check、mypy、protobuf 生成物一致性。
 - `make test`：确定性 unit、contract、functional、Fake resilience、offline eval 与 85% 覆盖率门禁。
-- `make ci`：聚合 `lint` 与 `test`，也是 pre-commit 和无 Secret GitHub Actions 的唯一入口。
+- `make ci`：聚合 `lint` 与 `test`，是 pre-commit 和日常 Python 离线的公共入口。
+- `make release-check`：在 `make ci` 之上聚合 Go 与前端发布门禁（`go test`、前端 test/build），是 `quality.yml` 与 `deploy.yml` 使用的门禁。
 
 当前仓库尚未交付 `.githooks/pre-commit`，不要将本地 Hook 视为已经启用；开发者提交前手动运行 `make ci`。团队强制合入限制由第 7 节的 GitHub workflow 与服务端 Ruleset 配合完成。
 
@@ -132,7 +133,7 @@ make docker-down
 
 ### 7.1 自动检查
 
-`.github/workflows/quality.yml` 的 workflow 名为 `Quality`，唯一 job/check 名为 **`python-quality`**，只调用 `make ci`：
+`.github/workflows/quality.yml` 的 workflow 名为 `Quality`，唯一 job/check 名为 **`release-quality`**，调用 `make release-check`：
 
 | 事件 | 范围 | 行为 |
 | --- | --- | --- |
@@ -144,7 +145,7 @@ make docker-down
 - 同一事件下同一分支/PR 的旧运行被新运行取消；push 与 PR 并发组分离，不互相取消。PR 触发是可选的额外检查，不构成合入要求。
 - 使用 GitHub 托管的 `ubuntu-24.04` 临时 runner，超时 30 分钟；固定 checkout 提交、Earthly 0.8.16 下载地址和 SHA-256。安装网络请求有限重试，测试不自动重跑到通过。
 - 只有 `contents: read` 权限，checkout 不保留凭据；不注入模型/部署 Secret，不使用 `pull_request_target`，不运行部署或修改 GitHub 规则。
-- `make ci` 包含 Python Ruff、mypy、Python protobuf 同步、unit/contract/functional、Fake resilience、offline eval 与四个核心包的 85% 聚合覆盖率门槛。**不包含 Go/前端检查、Go protobuf 同步或新增代码覆盖率的独立门槛。**
+- `make release-check` 先执行 `make ci`（Python Ruff、mypy、Python protobuf 同步、unit/contract/functional、Fake resilience、offline eval 与四个核心包的 85% 聚合覆盖率门槛），再执行 Go 与前端发布门禁：`release-go-check` 运行 `go test ./...`，`release-web-check` 用 `apps/web/package-lock.json` 执行 `npm ci`、前端 test 与 build。**不包含 Go protobuf 同步、`gofmt`/`go vet` 或新增代码覆盖率的独立门槛。**
 - "离线"指测试不依赖业务基础设施或模型；首次安装仍需要 Docker/BuildKit、镜像和包下载网络。此 workflow 不启动业务 Compose，无需 `make docker-down`，也不访问或删除开发数据卷。
 - `lint/test/ci` 聚合 target 显式 `FROM +python-workspace`，保持已有检查集合不变；避免 Earthly 0.8.16 在空基底嵌套 BUILD 时出现 `fakecopy2 / failed to get state for index` 内部错误。
 
@@ -154,7 +155,7 @@ make docker-down
 
 本仓库约定成员直接 push `main`，因此规则只保留防误删与防强推，不要求 PR 或必需检查：
 
-1. 确认 Actions 已启用，并在 `main` 的 push 上看到 `python-quality` 的运行结果。
+1. 确认 Actions 已启用，并在 `main` 的 push 上看到 `release-quality` 的运行结果。
 2. 在仓库 **Settings → Rules → Rulesets → New ruleset → Import a ruleset** 导入 `.github/main-ruleset.json`。已有同用途规则时优先更新，不重复叠加。
 3. 核对目标仅为 `refs/heads/main`、规则只有禁止删除与禁止强推。保存启用；若尚未准备好，先在导入界面选择 Disabled。
 
@@ -162,14 +163,14 @@ make docker-down
 
 - 禁止删除 `main` 与强推覆盖历史；正常 push 不受限制，**所有人都可以直接推送 `main`**。
 - **不要求 PR，也不要求必需检查**。GitHub 的 `required_status_checks` 会拒绝尚未通过检查的直接推送，与本仓库约定冲突，因此不启用。
-- 相应地，`python-quality` 是**事后检查**：它在 push 后运行并报告红绿，但**无法阻止未通过检查的提交进入 `main`**。看到红灯必须立即修复或回滚，不能把它当成合入拦截。
-- 需要真正的推送前拦截时，使用本地 Git Hook 执行 `make ci`（见 SPEC §4.7），或在团队内约定推送前先本地跑通 `make ci`。
+- 相应地，`release-quality` 是**事后检查**：它在 push 后运行并报告红绿，但**无法阻止未通过检查的提交进入 `main`**。看到红灯必须立即修复或回滚，不能把它当成合入拦截。
+- 需要真正的推送前拦截时，使用本地 Git Hook 执行 `make ci`（见 SPEC §4.7），或在团队内约定推送前先本地跑通 `make ci`；改动 Go/前端时至少本地跑通 `make release-check`。
 
 规则需要仓库管理员或可编辑规则的角色；公开仓库可使用 Free 计划的分支 Rulesets，私有仓库需确认 Pro/Team/Enterprise 等计划支持。仅提交本地 JSON 不能证明远端规则已启用；管理员应在 GitHub Rules 页面核实。管理员仍能修改规则，代码评审需特别审查 workflow、Earthfile、测试和规则配置的弱化改动。
 
 ### 7.3 失败处理与范围
 
-- **检查失败**：从 Actions 第一处失败步骤定位；代码错误本地运行 `make ci` 复现并修复，不能靠 `continue-on-error`、降低阈值或删除用例变绿。
+- **检查失败**：从 Actions 第一处失败步骤定位；代码错误本地运行 `make release-check` 复现并修复（纯 Python 失败可用 `make ci`），不能靠 `continue-on-error`、降低阈值或删除用例变绿。
 - **基础环境失败**：安装下载、镜像拉取或 runner 故障与代码失败分开定位；确认服务恢复后重跑失败 job。
 - **门禁自身回归**：由维护者评审修复或回滚门禁改动。确需解锁时，由管理员记录原因、范围和恢复期限，临时调整对应服务端检查并在修复后恢复；不把永久 bypass 作为解决方法。
 - **长期 Pending**：检查 Actions 开关/预算、fork workflow 审批、提交跳过指令、检查名是否匹配，以及 PR 是否有合并冲突。

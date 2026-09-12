@@ -20,7 +20,7 @@ defaults:
 
 jobs:
   quality:
-    name: python-quality
+    name: release-quality
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -53,9 +53,9 @@ jobs:
         id: gate
         env:
           EARTHLY_FLAGS: --ci
-        run: make ci
+        run: make release-check
 
       - name: Explain failure
         if: ${{ failure() }}
         run: |
-          echo '::error::Quality failed. Check the first failing step; reproduce code failures with make ci. See docs/test/testing-guide.md section 7. Do not bypass failing checks.'
+          echo '::error::Quality failed. Check the first failing step; reproduce the failing layer with make release-check, or Python-only failures with make ci. See docs/test/testing-guide.md section 7. Do not bypass failing checks.'

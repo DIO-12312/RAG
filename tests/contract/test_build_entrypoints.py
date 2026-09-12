@@ -182,17 +182,21 @@ def test_quality_workflow_runs_for_push_and_main_pull_requests() -> None:
     }
     assert set(workflow["jobs"]) == {"quality"}
     job = workflow["jobs"]["quality"]
-    assert job["name"] == "python-quality"
+    assert job["name"] == "release-quality"
     assert job["runs-on"] == "ubuntu-24.04"
     assert 10 <= job["timeout-minutes"] <= 30
     assert "if" not in job
     assert not job.get("continue-on-error", False)
     steps = job["steps"]
     gate = next(step for step in steps if step.get("id") == "gate")
-    assert gate["run"] == "make ci"
+    # push/PR 门禁必须与生产发布门禁使用同一聚合，避免 Go/前端只在 main 发布时才首次执行。
+    assert gate["run"] == "make release-check"
     assert "if" not in gate
     assert gate.get("env") == {"EARTHLY_FLAGS": "--ci"}
     assert all(not step.get("continue-on-error", False) for step in steps)
+    release_check = _text("Earthfile").split("\nrelease-check:\n", 1)[1].split("\n# ", 1)[0]
+    for aggregate in ("+ci", "+release-go-check", "+release-web-check"):
+        assert f"BUILD {aggregate}" in release_check
 
 
 def test_quality_workflow_pins_tools_and_keeps_secrets_out() -> None:

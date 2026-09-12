@@ -161,6 +161,8 @@ def test_deploy_workflow_requires_checks_and_uses_existing_secret_names() -> Non
     workflow = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text())
     assert workflow["on"] == {"push": {"branches": ["main"]}}
     assert workflow["concurrency"]["cancel-in-progress"] is False
+    # Earthly 在 CI 中必须使用非交互模式，与 quality.yml 的发布门禁保持一致。
+    assert workflow["jobs"]["release"]["env"]["EARTHLY_FLAGS"] == "--ci"
     steps = workflow["jobs"]["release"]["steps"]
     commands = [step.get("run", "") for step in steps]
     assert commands.index("make release-check") < commands.index(

@@ -69,6 +69,8 @@ apps/web/tests/
 目录新增 `tests/contract/test_release_deployment.py`。既有
 `test_build_entrypoints.py` 的公开 Make target 集合纳入 release-check/release-publish/
 production-baseline/production-deploy/production-recover；仍校验 Earthfile 委托及卷保护。
+`quality.yml` 的 push/PR 门禁改为 `make release-check`，使 Python、Go 与前端发布门禁在合入 main 前
+就常设执行，而不是只在真正发布时才首次运行；前端统一使用 npm 与 `apps/web/package-lock.json`。
 
 | 测试文件 / 函数 | 职责与运行边界 |
 | --- | --- |
@@ -77,7 +79,7 @@ production-baseline/production-deploy/production-recover；仍校验 Earthfile �
 | `test_failed_rollback_keeps_journal_for_next_recovery` | 回退再次失败保留 journal，下次恢复旧镜像 |
 | `test_schema_change_and_stale_release_fail_before_stop` | 兼容边界变化及过期序号在停服前拒绝 |
 | `test_manifest_rejects_mutable_tag_wrong_sha_and_registry` | 错误 SHA、浮动标签、非批准镜像仓库拒绝 |
-| `test_deploy_workflow_requires_checks_and_uses_existing_secret_names` | main 触发、门禁顺序、部署不取消、已有 Secret 名称和 SSH 主机校验 |
+| `test_deploy_workflow_requires_checks_and_uses_existing_secret_names` | main 触发、门禁顺序、部署不取消、Earthly `--ci` 标志、已有 Secret 名称和 SSH 主机校验 |
 | `test_health_failure_after_switch_rolls_back` | 新版探针失败后恢复旧镜像和 active 状态 |
 | `test_image_drift_and_revision_mismatch_block_before_stopping` | 手工镜像漂移或拉取镜像 revision 不匹配时停服前拒绝 |
 | `test_baseline_uses_actual_image_ids_and_refuses_overwrite` | 首次基线使用实际运行 Image ID，加保留标签且不替换容器；禁止覆盖 |
@@ -405,7 +407,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | --- | --- | --- |
 | `test_build_entrypoints.py` | `test_makefile_offline_targets_are_commented_earthly_only_entrypoints` | Makefile 的离线公共入口均有说明，并且只负责转发 Earthly target。 |
 | 同上 | `test_production_run_is_earthly_only_fail_closed_entrypoint` | `make production-run` 只能转发 Earthfile；生产 target 校验 `PUBLIC_MODE`，IP 模式提供公网 HTTP 入口，按顺序完成材料校验、启动和健康检查，并移除孤儿容器但不删除卷。 |
-| 同上 | `test_quality_workflow_runs_for_push_and_main_pull_requests` | 用 PyYAML 解析 workflow，验证所有分支 push、main PR、手动触发、无路径跳过、独立并发组、固定 check 名及不吞失败的 `make ci`。离线配置契约，不执行 GitHub runner。 |
+| 同上 | `test_quality_workflow_runs_for_push_and_main_pull_requests` | 用 PyYAML 解析 workflow，验证所有分支 push、main PR、手动触发、无路径跳过、独立并发组、固定 check 名及不吞失败的 `make release-check`；并核对 Earthfile 的 release-check 聚合确实包含 Python、Go 与前端门禁。离线配置契约，不执行 GitHub runner。 |
 | 同上 | `test_quality_workflow_pins_tools_and_keeps_secrets_out` | 检查只读权限、临时托管 runner、固定 Action/Earthly 与下载校验、不保留凭据、不注入 Secret 或启动业务 Compose，以及 Earthly 显式复制所需配置。仅静态契约，不证明下载或远端运行成功。 |
 | 同上 | `test_main_ruleset_protects_main_without_blocking_direct_push` | 用 JSON 解析规则，验证 main 限定、仅禁止删除与强推、且不含 `pull_request` 或 `required_status_checks`，确保直接 push 不被拦截。不会调用 GitHub API 或验证远端规则已启用。 |
 | 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界；lint/test/ci 聚合复用非空工作区基底，并复制生产 Compose/Caddy 契约输入，避免测试工作区遗漏部署文件。 |

@@ -140,7 +140,7 @@ CHM 文件使用相同的上传命令，只需将 `--file` 指向 `.chm`。Docke
 
 ## 本地开发
 
-Makefile 封装 Earthfile，统一维护 Python 检查与 Docker 编排入口。`make ci` 聚合 Python 的 `lint` 和 `test`，无需模型 Secret；它不包含 Go/前端检查，也不运行真实基础设施或模型验收。
+Makefile 封装 Earthfile，统一维护 Python 检查与 Docker 编排入口。`make ci` 聚合 Python 的 `lint` 和 `test`，无需模型 Secret；`make release-check` 在它之外再聚合 Go 与前端发布门禁（`go test`、前端 test/build），也是 GitHub Actions 与发布流程使用的门禁；两者都不运行真实基础设施或模型验收。
 
 ```bash
 make proto  # 重新生成并校验 protobuf
@@ -153,7 +153,7 @@ make web-restart # 重建并仅重启前端容器
 make help   # 查看全部公共入口
 ```
 
-Go 与前端检查目前单独运行：
+Go 与前端检查已由 `make release-check` 聚合（Go 目前只运行 `go test`，尚未包含 `gofmt`/`go vet`），也可单独运行：
 
 ```bash
 (cd backend/go-api && go test ./... && go vet ./...)
@@ -167,9 +167,9 @@ npm --prefix apps/web run build  # 包含 TypeScript 类型检查
 
 ## 团队合入门禁
 
-当前仓库包含 [Quality workflow](.github/workflows/quality.yml)，配置为在分支 `push`、目标为 `main` 的 PR 和手动触发时执行无密钥 `make ci`，检查名为 `python-quality`。工作流文件的存在不代表远端 Actions 已启用或最近一次运行通过；Go/前端检查和真实模型验收不在其中。
+当前仓库包含 [Quality workflow](.github/workflows/quality.yml)，配置为在分支 `push`、目标为 `main` 的 PR 和手动触发时执行无密钥 `make release-check`（Python、Go 与前端发布门禁），检查名为 `release-quality`。工作流文件的存在不代表远端 Actions 已启用或最近一次运行通过；真实模型与真实基础设施验收不在其中。
 
-管理员在流水线首次验证成功后，导入 [main 规则配置](.github/main-ruleset.json)，启用禁止删除和强推 `main`。仓库允许成员直接 push `main`，**不要求 PR 和人工审批**；`python-quality` 是 push 后的事后检查，红灯需立即修复或回滚。**JSON 文件不会自动启用 GitHub 服务端保护**，导入步骤与限制见 [测试指南第 7 节](docs/test/testing-guide.md#7-ci-与团队合入门禁)。
+管理员在流水线首次验证成功后，导入 [main 规则配置](.github/main-ruleset.json)，启用禁止删除和强推 `main`。仓库允许成员直接 push `main`，**不要求 PR 和人工审批**；`release-quality` 是 push 后的事后检查，红灯需立即修复或回滚。**JSON 文件不会自动启用 GitHub 服务端保护**，导入步骤与限制见 [测试指南第 7 节](docs/test/testing-guide.md#7-ci-与团队合入门禁)。
 
 ## 测试策略
 

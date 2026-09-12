@@ -402,7 +402,7 @@ after_relay_publish_before_mark
 
 - `make lint` 只执行 Ruff lint/format check、mypy 与 protobuf 生成物一致性检查；不运行测试。
 - `make test` 执行全部确定性离线测试、离线评测和核心模块覆盖率门禁；不访问真实模型或 Docker 基础设施。
-- `make ci` 是 `make lint` 与 `make test` 的完整无 Secret 门禁，也是 Git Hook 和快速 GitHub Actions 的唯一公共入口。真实基础设施验收必须另行使用 `make docker-test SUITE=integration|resilience|eval|all`。
+- `make ci` 是 `make lint` 与 `make test` 的完整无 Secret Python 门禁，也是 Git Hook 与日常离线开发的公共入口。GitHub Actions 使用范围更大的 `make release-check`：它在 `make ci` 之外聚合 Go 与前端发布门禁，使发布所依赖的检查在合入 main 前就执行。真实基础设施验收必须另行使用 `make docker-test SUITE=integration|resilience|eval|all`。
 - `domain/`、`application/`、`ingestion/`、`retrieval/` 的 line coverage 不低于 85%；新增代码不低于 90%。
 - `ports/` 所有抽象方法必须至少有一个 contract 测试覆盖。
 - 发布前 E2E 必须覆盖 `.md`、`.txt`、代码文件和文本 PDF 各一例；CHM/CHI 使用本地提供且被 Git 忽略的真实手册进行验收，不得把真实手册提交到仓库，也不得把注入 extractor 的 Functional 测试表述为真实解包验收。
@@ -428,7 +428,7 @@ make ci
 
 `make ci` 通过 Earthly 固定 Python、uv、依赖与完整底层命令，并使用独立空白 env 文件，不能读取运行时 `.env`。hook 只做检查，不运行会改写工作区的 `ruff format` 或 `gofmt -w`；否则格式化后的内容不会自动进入本次暂存区，检查对象与提交对象可能不一致。开发者应先显式执行格式化命令并重新 `git add`。hook 中的 resilience 与 eval 分别只运行 Fake 和离线集合；真实 Integration、Model Integration、E2E、Docker Resilience 与 Real Eval 依赖容器、Secret、耗时或模型资源，不进入每次提交 hook。`.github/workflows/docker-quality.yml` 尚未交付，当前仍通过 `make docker-test SUITE=integration|resilience|eval|all` 显式验收；后续自动化与 PR 必需检查分离。
 
-未来引入 Go 产品控制面后，应在 Earthfile 中增加 Go 的 format check、vet 与 test target，再由现有 `make ci` 聚合；不得把底层 Go 命令复制到 Hook、CI 或 README。预期检查仍包括：
+Go 产品控制面已经引入：Earthfile 的 `release-go-check`（`go test ./...`）与 `release-web-check`（前端 test/build）由 `release-check` 聚合，`quality.yml` 与 `deploy.yml` 都调用该聚合；`gofmt -l` 与 `go vet` 尚未纳入。后续应把 Go 检查并入 `make ci` 的公共聚合，且不得把底层 Go 命令复制到 Hook、CI 或 README。预期检查仍包括：
 
 ```sh
 test -z "$(gofmt -l ./...)"
@@ -440,11 +440,11 @@ go test ./...
 
 ### 4.8 Push/PR 流水线与团队合入规则
 
-`.github/workflows/quality.yml` 在所有分支 push、目标为 `main` 的 PR 以及手动触发时执行 `make ci`。固定 check 名为 `python-quality`，使用托管临时 Linux runner、固定 Earthly 0.8.16 与下载校验、只读仓库权限；不注入业务 Secret、不部署、不吞检查失败。并发取消仅限同一事件和同一分支/PR，避免 push 取消 PR 的合并结果检查。必需检查不采用路径过滤或 job 条件跳过。
+`.github/workflows/quality.yml` 在所有分支 push、目标为 `main` 的 PR 以及手动触发时执行 `make release-check`，即 Python 门禁加 Go 与前端发布门禁。固定 check 名为 `release-quality`，使用托管临时 Linux runner、固定 Earthly 0.8.16 与下载校验、只读仓库权限；不注入业务 Secret、不部署、不吞检查失败。并发取消仅限同一事件和同一分支/PR，避免 push 取消 PR 的合并结果检查。必需检查不采用路径过滤或 job 条件跳过。
 
-`.github/main-ruleset.json` 是管理员导入 GitHub Rulesets 的分支规则模板：仅保护 `main` 不被删除和强推覆盖，不要求 PR 或必需检查，成员可以直接 push `main`。由于 GitHub 的 `required_status_checks` 会拒绝尚未通过检查的直接推送，与本仓库约定冲突，因此不启用；相应地 `python-quality` 是 push 后的事后检查，不构成合入拦截，真正的推送前拦截依赖本地 Git Hook 或团队约定。默认 bypass 列表为空。配置文件不自动修改远端规则，必须先验证真实 Actions 成功，再由管理员保存启用；不能仅凭本地测试宣称远端门禁已生效。
+`.github/main-ruleset.json` 是管理员导入 GitHub Rulesets 的分支规则模板：仅保护 `main` 不被删除和强推覆盖，不要求 PR 或必需检查，成员可以直接 push `main`。由于 GitHub 的 `required_status_checks` 会拒绝尚未通过检查的直接推送，与本仓库约定冲突，因此不启用；相应地 `release-quality` 是 push 后的事后检查，不构成合入拦截，真正的推送前拦截依赖本地 Git Hook 或团队约定。默认 bypass 列表为空。配置文件不自动修改远端规则，必须先验证真实 Actions 成功，再由管理员保存启用；不能仅凭本地测试宣称远端门禁已生效。
 
-本次门禁仅接入已有 Python 离线集合与 85% 聚合覆盖率；Go/前端质量检查、Go 生成物一致性、新增代码覆盖率独立门槛以及真实模型套件的自动化尚未纳入。它们是明确的后续工作，不能将 Python 绿灯当作全产品或真实基础设施验收。真实套件继续独立显式运行，不作为本次 PR required check。启用顺序、运行边界和门禁故障处置见 `docs/test/testing-guide.md` §7。
+本次门禁已接入 Python 离线集合与 85% 聚合覆盖率，以及 Go 与前端发布门禁（`go test`、前端 test/build）；Go 生成物一致性、`gofmt`/`go vet`、新增代码覆盖率独立门槛以及真实模型套件的自动化尚未纳入。它们是明确的后续工作，不能将当前绿灯当作全产品或真实基础设施验收。真实套件继续独立显式运行，不作为本次 PR required check。启用顺序、运行边界和门禁故障处置见 `docs/test/testing-guide.md` §7。
 
 ---
 
