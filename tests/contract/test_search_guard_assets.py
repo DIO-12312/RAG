@@ -113,6 +113,19 @@ def test_production_material_generator_refuses_to_self_sign_missing_material(
     assert "missing required Search Guard material" in completed.stderr
 
 
+def test_production_material_validator_rejects_permissive_node_password(
+    tmp_path: Path,
+) -> None:
+    """ES 使用的 password 副本不得因 client 副本安全就绕过权限校验。"""
+
+    node_output = tmp_path / "node"
+    client_output = tmp_path / "client"
+    materials.generate(node_output, client_output)
+    (node_output / "rag_mvp_password").chmod(0o644)
+
+    assert materials._validate_production(node_output, client_output) is False
+
+
 def test_search_guard_assets_pin_tls_and_least_privilege() -> None:
     """错误版本、缺 TLS 或全权限角色必须使安全构建契约失败。"""
 
@@ -200,7 +213,7 @@ def test_search_guard_operator_docs_preserve_private_tls_runbook() -> None:
     for document in (security_spec, security_design):
         assert "development/test" in document
         assert "rag-security-materials → elasticsearch → rag-search-guard-bootstrap" in document
-        assert "独立、尚待平台化的 deployment manifest/编排" in document
+        assert "compose.production.yml" in document
         assert "只读挂载外部 CA/node/admin/client Secret" in document
         assert "禁止定义或启动 `rag-security-materials`" in document
         assert "--environment production" in document
@@ -332,13 +345,13 @@ def test_verify_existing_uses_output_flag_for_sgctl_get_config(monkeypatch, tmp_
     """sgctl 4.x get-config 必须使用 --output 选项；位置参数会被 sgctl 拒绝。"""
 
     work_dir = tmp_path / "work"
-    _write_matching_config(work_dir)
     calls: list[tuple[str, ...]] = []
 
     def capture_run(
         *arguments: str, input_text: str | None = None
     ) -> subprocess.CompletedProcess[str]:
         calls.append(arguments)
+        _write_matching_config(work_dir)
         return subprocess.CompletedProcess(arguments, 0, "", "")
 
     monkeypatch.setattr(bootstrap, "_run", capture_run)
@@ -351,16 +364,36 @@ def test_verify_existing_uses_output_flag_for_sgctl_get_config(monkeypatch, tmp_
     assert "--output" in get_config_call
 
 
+def test_verify_existing_replaces_stale_download_directory(monkeypatch, tmp_path: Path) -> None:
+    """重启复用容器时，旧下载文件不能阻止 sgctl 拉取当前安全配置。"""
+
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    (work_dir / "stale.yml").write_text("stale\n", encoding="utf-8")
+
+    def download_current_config(
+        *arguments: str, input_text: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        assert arguments[0] == "get-config"
+        assert not work_dir.exists()
+        _write_matching_config(work_dir)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(bootstrap, "_run", download_current_config)
+
+    assert bootstrap._verify_existing(work_dir) is True
+
+
 def test_verify_existing_rejects_missing_security_marker(monkeypatch, tmp_path: Path) -> None:
     """已下载配置缺少关键安全 marker 时必须 fail closed，而非静默接受。"""
 
     work_dir = tmp_path / "work"
-    _write_matching_config(work_dir)
-    (work_dir / "sg_roles.yml").write_text("some_other_role: {}\n", encoding="utf-8")
 
     def capture_run(
         *arguments: str, input_text: str | None = None
     ) -> subprocess.CompletedProcess[str]:
+        _write_matching_config(work_dir)
+        (work_dir / "sg_roles.yml").write_text("some_other_role: {}\n", encoding="utf-8")
         return subprocess.CompletedProcess(arguments, 0, "", "")
 
     monkeypatch.setattr(bootstrap, "_run", capture_run)

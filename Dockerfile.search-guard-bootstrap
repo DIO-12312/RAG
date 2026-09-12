@@ -8,7 +8,8 @@ ARG SGCTL_SHA256=02d46e8166a87a9b524993d3842c59b13a7c7dc52d799e36c33f15e457947d2
 RUN apk add --no-cache curl python3 py3-cryptography \
     && curl --fail --location --silent --show-error "$SGCTL_URL" -o /opt/sgctl-4.1.2-shaded.jar \
     && echo "$SGCTL_SHA256  /opt/sgctl-4.1.2-shaded.jar" | sha256sum --check --strict \
-    && apk del curl
+    && apk del curl \
+    && mkdir -p /node-secrets /client-secrets
 
 WORKDIR /app
 

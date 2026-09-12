@@ -24,9 +24,6 @@ func loadKey(envName, name string) (string, error) {
 		mode = 0640
 	}
 	if b, e := os.ReadFile(path); e == nil {
-		if e = os.Chmod(path, mode); e != nil {
-			return "", e
-		}
 		return string(b), nil
 	}
 	b := make([]byte, 32)

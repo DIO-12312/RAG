@@ -37,10 +37,10 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends libchm-bin && \
     rm -rf /var/lib/apt/lists/* && \
-    addgroup --system rag && \
-    adduser --system --ingroup rag rag && \
-    mkdir -p /app/data/objects && \
-    chown rag:rag /app /app/data /app/data/objects
+    addgroup --system --gid 10001 rag && \
+    adduser --system --uid 10001 --ingroup rag --no-create-home rag && \
+    mkdir -p /app/data/objects /run/secrets /run/model-keys && \
+    chown rag:rag /app /app/data /app/data/objects /run/secrets /run/model-keys
 
 COPY --chown=rag:rag --from=runtime-builder /app/.venv /app/.venv
 COPY --chown=rag:rag scripts/docker_healthcheck.py /app/scripts/docker_healthcheck.py

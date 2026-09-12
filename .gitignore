@@ -32,6 +32,7 @@ ENV/
 # Local configuration and secrets
 .env
 .env.*
+!.env.production.example
 !.env.example
 
 # Test, coverage, type-checker, and linter caches

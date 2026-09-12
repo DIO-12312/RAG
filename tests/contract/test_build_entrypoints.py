@@ -104,6 +104,8 @@ def test_earthfile_pins_tools_and_separates_offline_targets() -> None:
     assert "COPY apps ./apps" in earthfile
     assert "COPY backend ./backend" in earthfile
     assert "compose.product.yml" in earthfile
+    assert "compose.production.yml" in earthfile
+    assert "COPY deploy ./deploy" in earthfile
     for aggregate in ("lint", "test", "ci"):
         assert f"\n{aggregate}:\n    FROM +python-workspace\n" in earthfile
 

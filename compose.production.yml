@@ -1,0 +1,382 @@
+name: rag-production
+
+x-rag-environment: &rag-environment
+  RAG_ENVIRONMENT: production
+  RAG_GRPC_HOST: 0.0.0.0
+  RAG_GRPC_PORT: "50051"
+  RAG_GRPC_REFLECTION: "false"
+  RAG_ELASTICSEARCH_URL: https://elasticsearch:9200
+  RAG_ELASTICSEARCH_USERNAME: rag_mvp
+  RAG_ELASTICSEARCH_PASSWORD_FILE: /run/secrets/rag_mvp_password
+  RAG_ELASTICSEARCH_CA_CERT: /run/secrets/ca.pem
+  RAG_NATS_URL: nats://nats:4222
+  RAG_OBJECT_ROOT: /app/data/objects
+  RAG_MAX_UPLOAD_BYTES: ${RAG_MAX_UPLOAD_BYTES:-33554432}
+  RAG_MODEL_ENCRYPTION_KEY_FILE: /run/model-keys/encryption.key
+
+x-search-guard-node-secrets: &search-guard-node-secrets
+  - source: sg_node_ca
+    target: /node-secrets/ca.pem
+    mode: 0444
+  - source: sg_node_certificate
+    target: /node-secrets/node.pem
+    mode: 0444
+  - source: sg_node_key
+    target: /node-secrets/node-key.pem
+    mode: 0400
+  - source: sg_admin_certificate
+    target: /node-secrets/admin.pem
+    mode: 0444
+  - source: sg_admin_key
+    target: /node-secrets/admin-key.pem
+    mode: 0400
+  - source: sg_node_runtime_password
+    target: /node-secrets/rag_mvp_password
+    mode: 0400
+
+x-search-guard-client-secrets: &search-guard-client-secrets
+  - source: sg_client_ca
+    target: /client-secrets/ca.pem
+    mode: 0444
+  - source: sg_client_runtime_password
+    target: /client-secrets/rag_mvp_password
+    mode: 0400
+
+x-search-guard-all-secrets: &search-guard-all-secrets
+  - source: sg_node_ca
+    target: /node-secrets/ca.pem
+    mode: 0444
+  - source: sg_node_certificate
+    target: /node-secrets/node.pem
+    mode: 0444
+  - source: sg_node_key
+    target: /node-secrets/node-key.pem
+    mode: 0400
+  - source: sg_admin_certificate
+    target: /node-secrets/admin.pem
+    mode: 0444
+  - source: sg_admin_key
+    target: /node-secrets/admin-key.pem
+    mode: 0400
+  - source: sg_node_runtime_password
+    target: /node-secrets/rag_mvp_password
+    mode: 0400
+  - source: sg_client_ca
+    target: /client-secrets/ca.pem
+    mode: 0444
+  - source: sg_client_runtime_password
+    target: /client-secrets/rag_mvp_password
+    mode: 0400
+
+x-elasticsearch-node-secrets: &elasticsearch-node-secrets
+  - source: sg_node_ca
+    target: /usr/share/elasticsearch/config/search-guard/ca.pem
+    mode: 0444
+  - source: sg_node_certificate
+    target: /usr/share/elasticsearch/config/search-guard/node.pem
+    mode: 0444
+  - source: sg_node_key
+    target: /usr/share/elasticsearch/config/search-guard/node-key.pem
+    mode: 0400
+  - source: sg_node_runtime_password
+    target: /usr/share/elasticsearch/config/search-guard/rag_mvp_password
+    mode: 0400
+
+x-rag-runtime-secrets: &rag-runtime-secrets
+  - source: rag_mysql_dsn
+    target: /run/secrets/rag_mysql_dsn
+    mode: 0400
+  - source: sg_client_ca
+    target: /run/secrets/ca.pem
+    mode: 0444
+  - source: sg_client_runtime_password
+    target: /run/secrets/rag_mvp_password
+    mode: 0400
+  - source: product_encryption_key
+    target: /run/model-keys/encryption.key
+    mode: 0440
+
+x-rag-dsn-secret: &rag-dsn-secret
+  - source: rag_mysql_dsn
+    target: /run/secrets/rag_mysql_dsn
+    mode: 0400
+
+services:
+  production-material-check:
+    image: ${RAG_BOOTSTRAP_IMAGE:?set RAG_BOOTSTRAP_IMAGE in .env.production}
+    build:
+      context: .
+      dockerfile: Dockerfile.search-guard-bootstrap
+    entrypoint: ["python3", "/app/scripts/search_guard/materials.py"]
+    command: ["--environment", "production", "--node-output", "/node-secrets", "--client-output", "/client-secrets"]
+    secrets: *search-guard-all-secrets
+    networks: [backend]
+    restart: "no"
+
+  rag-mysql:
+    image: mysql:8.4.6
+    environment:
+      MYSQL_DATABASE: rag
+      MYSQL_USER: rag
+      MYSQL_PASSWORD_FILE: /run/secrets/rag_mysql_password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/rag_mysql_root_password
+    volumes: [rag-mysql-data:/var/lib/mysql]
+    secrets:
+      - source: rag_mysql_password
+        target: /run/secrets/rag_mysql_password
+        mode: 0400
+      - source: rag_mysql_root_password
+        target: /run/secrets/rag_mysql_root_password
+        mode: 0400
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$(cat /run/secrets/rag_mysql_root_password) --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    networks: [backend]
+    restart: unless-stopped
+
+  product-mysql:
+    image: mysql:8.4.6
+    environment:
+      MYSQL_DATABASE: rag_product
+      MYSQL_USER: product
+      MYSQL_PASSWORD_FILE: /run/secrets/product_mysql_password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/product_mysql_root_password
+    volumes: [product-mysql-data:/var/lib/mysql]
+    secrets:
+      - source: product_mysql_password
+        target: /run/secrets/product_mysql_password
+        mode: 0400
+      - source: product_mysql_root_password
+        target: /run/secrets/product_mysql_root_password
+        mode: 0400
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$(cat /run/secrets/product_mysql_root_password) --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    networks: [backend]
+    restart: unless-stopped
+
+  elasticsearch:
+    # Release this image from Dockerfile.elasticsearch; never use the development material generator.
+    image: ${ELASTICSEARCH_IMAGE:?set ELASTICSEARCH_IMAGE in .env.production}
+    build:
+      context: .
+      dockerfile: Dockerfile.elasticsearch
+    environment:
+      discovery.type: single-node
+      ES_JAVA_OPTS: ${RAG_ES_JAVA_OPTS:-Xms1g -Xmx1g}
+    volumes: [elasticsearch-data:/usr/share/elasticsearch/data]
+    secrets: *elasticsearch-node-secrets
+    depends_on:
+      production-material-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "password=$$(cat /usr/share/elasticsearch/config/search-guard/rag_mvp_password) && curl --fail --silent --show-error --cacert /usr/share/elasticsearch/config/search-guard/ca.pem --user rag_mvp:$$password https://localhost:9200/_searchguard/health | grep -q '\"status\"[[:space:]]*:[[:space:]]*\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks: [backend]
+    restart: unless-stopped
+
+  nats:
+    image: nats:2.11.8-alpine
+    command: ["-js", "-m", "8222", "--store_dir", "/data"]
+    volumes: [nats-data:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8222/healthz >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+    restart: unless-stopped
+
+  rag-search-guard-bootstrap:
+    image: ${RAG_BOOTSTRAP_IMAGE:?set RAG_BOOTSTRAP_IMAGE in .env.production}
+    build:
+      context: .
+      dockerfile: Dockerfile.search-guard-bootstrap
+    entrypoint: ["/bin/sh", "/app/docker/search-guard/entrypoints/bootstrap.sh"]
+    depends_on:
+      elasticsearch:
+        condition: service_started
+      production-material-check:
+        condition: service_completed_successfully
+    secrets: *search-guard-all-secrets
+    networks: [backend]
+    restart: "no"
+
+  rag-migrate:
+    image: ${RAG_IMAGE:?set RAG_IMAGE in .env.production}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    entrypoint: ["/bin/sh", "-ec", "export RAG_MYSQL_DSN=\"$$(cat /run/secrets/rag_mysql_dsn)\"; exec rag-migrate upgrade head"]
+    environment:
+      RAG_ENVIRONMENT: production
+      RAG_GRPC_REFLECTION: "false"
+      RAG_MIGRATIONS_ROOT: /app
+    group_add: ["10001"]
+    secrets: *rag-dsn-secret
+    depends_on:
+      rag-mysql: {condition: service_healthy}
+      rag-search-guard-bootstrap: {condition: service_completed_successfully}
+    networks: [backend]
+    restart: "no"
+
+  rag-server:
+    image: ${RAG_IMAGE:?set RAG_IMAGE in .env.production}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    entrypoint: ["/bin/sh", "-ec", "export RAG_MYSQL_DSN=\"$$(cat /run/secrets/rag_mysql_dsn)\"; exec rag-server"]
+    environment: *rag-environment
+    group_add: ["10001"]
+    volumes: [object-data:/app/data/objects]
+    secrets: *rag-runtime-secrets
+    depends_on:
+      rag-mysql: {condition: service_healthy}
+      elasticsearch: {condition: service_healthy}
+      rag-search-guard-bootstrap: {condition: service_completed_successfully}
+      rag-migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "/app/scripts/docker_healthcheck.py", "--grpc-only", "127.0.0.1:50051"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [backend, egress]
+    restart: unless-stopped
+
+  rag-worker:
+    image: ${RAG_IMAGE:?set RAG_IMAGE in .env.production}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    entrypoint: ["/bin/sh", "-ec", "export RAG_MYSQL_DSN=\"$$(cat /run/secrets/rag_mysql_dsn)\"; exec rag-worker"]
+    environment: *rag-environment
+    group_add: ["10001"]
+    volumes: [object-data:/app/data/objects]
+    secrets: *rag-runtime-secrets
+    depends_on:
+      rag-mysql: {condition: service_healthy}
+      elasticsearch: {condition: service_healthy}
+      nats: {condition: service_healthy}
+      rag-search-guard-bootstrap: {condition: service_completed_successfully}
+      rag-migrate: {condition: service_completed_successfully}
+    networks: [backend, egress]
+    restart: unless-stopped
+
+  rag-outbox:
+    image: ${RAG_IMAGE:?set RAG_IMAGE in .env.production}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    entrypoint: ["/bin/sh", "-ec", "export RAG_MYSQL_DSN=\"$$(cat /run/secrets/rag_mysql_dsn)\"; exec rag-outbox"]
+    environment: *rag-environment
+    group_add: ["10001"]
+    volumes: [object-data:/app/data/objects]
+    secrets: *rag-dsn-secret
+    depends_on:
+      rag-mysql: {condition: service_healthy}
+      nats: {condition: service_healthy}
+      rag-search-guard-bootstrap: {condition: service_completed_successfully}
+      rag-migrate: {condition: service_completed_successfully}
+    networks: [backend]
+    restart: unless-stopped
+
+  api:
+    image: ${PRODUCT_API_IMAGE:?set PRODUCT_API_IMAGE in .env.production}
+    build: backend/go-api
+    entrypoint: ["/bin/sh", "-ec", "export PRODUCT_MYSQL_DSN=\"$$(cat /run/secrets/product_mysql_dsn)\"; exec product"]
+    environment:
+      PRODUCT_HTTP_ADDR: 0.0.0.0:8080
+      PRODUCT_ORIGIN: ${PRODUCT_ORIGIN:?set PRODUCT_ORIGIN in .env.production}
+      PRODUCT_RAG_TARGET: rag-server:50051
+      PRODUCT_KEY_DIR: /run/model-keys
+      PRODUCT_COOKIE_SECURE: "true"
+      PRODUCT_ALLOW_LOCAL_MODELS: "false"
+    group_add: ["10001"]
+    secrets:
+      - source: product_mysql_dsn
+        target: /run/secrets/product_mysql_dsn
+        mode: 0400
+      - source: product_encryption_key
+        target: /run/model-keys/encryption.key
+        mode: 0440
+      - source: product_jwt_key
+        target: /run/model-keys/jwt.key
+        mode: 0400
+    depends_on:
+      product-mysql: {condition: service_healthy}
+      rag-server: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    networks: [edge, backend]
+    restart: unless-stopped
+
+  web:
+    image: ${WEB_IMAGE:?set WEB_IMAGE in .env.production}
+    build: apps/web
+    depends_on:
+      api: {condition: service_healthy}
+    networks: [edge]
+    restart: unless-stopped
+
+networks:
+  edge: {}
+  egress: {}
+  backend:
+    internal: true
+
+volumes:
+  rag-mysql-data: {}
+  product-mysql-data: {}
+  elasticsearch-data: {}
+  nats-data: {}
+  object-data: {}
+
+secrets:
+  sg_node_ca:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/search-guard/node/ca.pem
+  sg_node_certificate:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/search-guard/node/node.pem
+  sg_node_key:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/search-guard/node/node-key.pem
+  sg_admin_certificate:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/search-guard/node/admin.pem
+  sg_admin_key:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/search-guard/node/admin-key.pem
+  sg_client_ca:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/search-guard/client/ca.pem
+  sg_node_runtime_password:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/search-guard/node/rag_mvp_password
+  sg_client_runtime_password:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/search-guard/client/rag_mvp_password
+  rag_mysql_password:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/mysql/rag_mysql_password
+  rag_mysql_root_password:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/mysql/rag_mysql_root_password
+  product_mysql_password:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/mysql/product_mysql_password
+  product_mysql_root_password:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/mysql/product_mysql_root_password
+  rag_mysql_dsn:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/runtime/rag_mysql_dsn
+  product_mysql_dsn:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/runtime/product_mysql_dsn
+  product_encryption_key:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/product/encryption.key
+  product_jwt_key:
+    file: ${PRODUCTION_SECRETS_DIR:?set PRODUCTION_SECRETS_DIR}/product/jwt.key

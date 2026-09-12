@@ -168,6 +168,7 @@ def _validate_production(node_output: Path, client_output: Path) -> bool:
     private_paths = (
         node_output / "node-key.pem",
         node_output / "admin-key.pem",
+        node_output / "rag_mvp_password",
         client_output / "rag_mvp_password",
     )
     if any(stat.S_IMODE(path.stat().st_mode) & 0o077 for path in private_paths):

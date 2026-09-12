@@ -384,7 +384,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_quality_workflow_runs_for_push_and_main_pull_requests` | 用 PyYAML 解析 workflow，验证所有分支 push、main PR、手动触发、无路径跳过、独立并发组、固定 check 名及不吞失败的 `make ci`。离线配置契约，不执行 GitHub runner。 |
 | 同上 | `test_quality_workflow_pins_tools_and_keeps_secrets_out` | 检查只读权限、临时托管 runner、固定 Action/Earthly 与下载校验、不保留凭据、不注入 Secret 或启动业务 Compose，以及 Earthly 显式复制所需配置。仅静态契约，不证明下载或远端运行成功。 |
 | 同上 | `test_main_ruleset_protects_main_without_blocking_direct_push` | 用 JSON 解析规则，验证 main 限定、仅禁止删除与强推、且不含 `pull_request` 或 `required_status_checks`，确保直接 push 不被拦截。不会调用 GitHub API 或验证远端规则已启用。 |
-| 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界；lint/test/ci 聚合复用非空工作区基底，避免 Earthly 空状态依赖错误。 |
+| 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界；lint/test/ci 聚合复用非空工作区基底，并复制生产 Compose/Caddy 契约输入，避免测试工作区遗漏部署文件。 |
 | 同上 | `test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes` | Docker 公共入口复用 Function；run 统一由 Earthfile 顺序准备共享卷、等待 RAG、启动产品服务与容器化 Vue 前端；验证 suite、静默校验 Compose、扫描日志和持久卷保护。eval 同时收集既有 30 问与 PDF 五十问。此离线静态契约不替代 Windows/WSL/Linux 的实际启动验收。 |
 | 同上 | `test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths` | Docker 入口构建安全材料/ES/bootstrap 服务，并仅向测试容器传递 ES password file 与 CA path。 |
 | 同上 | `test_containerized_web_upload_limits_match_supported_rag_sources` | 前端与 Go 白名单一致接纳 PDF、CHM/CHI、Markdown、文本和代码；Nginx 为 32 MiB 文件及 multipart 开销设置 34 MiB 请求上限。 |
@@ -393,11 +393,13 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_development_material_generator_writes_certificate_key_identifiers` | development CA 与节点证书生成 SKI/AKI，保证运行时 TLS 链校验可用。 |
 | 同上 | `test_development_material_validator_rejects_malformed_existing_files` | 开发命名卷中的畸形或不完整 TLS 材料不得仅因文件齐全而被复用。 |
 | 同上 | `test_production_material_generator_refuses_to_self_sign_missing_material` | production 缺失外部 Search Guard 材料时 fail closed，禁止生成自签名替代品。 |
+| 同上 | `test_production_material_validator_rejects_permissive_node_password` | production 材料校验必须同时拒绝 ES node 侧权限过宽的运行时密码副本，不能只检查 client 副本。 |
 | 同上 | `test_search_guard_assets_pin_tls_and_least_privilege` | Search Guard 镜像固定 ES/插件校验和，TLS、节点 DN、`rag-chunks-v1*` 最小权限及 index/ping/bulk/refresh 的必要主与 shard action 齐全，且不开放独立测试索引前缀。 |
 | 同上 | `test_first_bootstrap_declares_search_guard_principals_in_extractor_order` | 首次 SG11 初始化时，`admin_dn` 与 `nodes_dn` 必须使用 Search Guard principal extractor 的逆序 RDN。 |
 | 同上 | `test_first_bootstrap_uploads_all_required_search_guard_config_types` | bootstrap 必须上传 internal users、action groups、authc、roles、roles mapping 与 tenants 所需的配置文件。 |
 | 同上 | `test_bootstrap_retries_config_upload_until_elasticsearch_is_ready` | ES 进程已启动但尚未接受 SG 配置时，bootstrap 重试 `update-config`，而非立即阻断下游服务。 |
 | 同上 | `test_verify_existing_uses_output_flag_for_sgctl_get_config` | sgctl 4.x `get-config` 必须使用 `--output` 选项；位置参数会被 sgctl 拒绝。 |
+| 同上 | `test_verify_existing_replaces_stale_download_directory` | bootstrap 容器复用时必须清除上次下载目录，确保 sgctl 可拉取并验证当前安全配置。 |
 | 同上 | `test_verify_existing_rejects_missing_security_marker` | 已下载配置缺少关键安全 marker（角色、权限、映射、认证域）时必须 fail closed，而非静默接受。 |
 | 同上 | `test_verify_existing_returns_false_on_timeout` | ES 未就绪导致 `get-config` 超时时安全回退到首次初始化路径。 |
 | 同上 | `test_initialize_retries_on_timeout_instead_of_aborting` | `update-config` 超时属于瞬态故障，必须继续重试而非终止 bootstrap。 |
@@ -406,6 +408,9 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_compose_declares_migration_health_role_secrets_and_shared_storage` | Compose 固定迁移顺序、健康依赖、共享对象卷及模型密钥角色边界。 |
 | 同上 | `test_compose_keeps_infrastructure_private_and_orders_search_guard_bootstrap` | 默认 Compose 不发布 MySQL/NATS/ES，且安全材料、ES、Search Guard bootstrap 与下游服务按 fail-closed 顺序启动。 |
 | 同上 | `test_debug_override_binds_elasticsearch_to_loopback_only` | 调试 override 仅将受 TLS/认证保护的 ES 绑定到 `127.0.0.1`。 |
+| 同上 | `test_production_compose_keeps_services_private_and_uses_external_secret_material` | P0-2 生产 Compose 保持全部服务无宿主端口、使用私网网络和外部 file-backed Secret，并关闭 Reflection、启用 Secure Cookie；不连接服务器。 |
+| 同上 | `test_production_model_callers_have_egress_without_exposing_infrastructure` | 生产 Compose 为调用公网 Embedding/Rerank 的 RAG Server/Worker 提供独立出网网络，同时保持 MySQL、NATS、Elasticsearch 仅连接隔离后端且所有这些服务均不发布宿主机端口。 |
+| 同上 | `test_production_uses_one_shared_encryption_key_for_go_and_python` | Go 产品 API 与 Python RAG Server/Worker 必须挂载同一个产品加密 Secret，保证 Dataset 模型配置可跨进程解密，禁止定义易漂移的第二份密钥。 |
 | 同上 | `test_secret_scanner_fails_without_echoing_the_secret` | 日志命中模型密钥时扫描失败且不回显 Secret。 |
 | 同上 | `test_secret_scanner_detects_elasticsearch_password_without_echoing_it` | 日志命中 Elasticsearch password file 的内容时扫描失败且不回显该密码。 |
 | 同上 | `test_healthcheck_parses_ndjson_and_requires_every_process_to_be_healthy` | 健康检查要求基础设施和应用健康、迁移成功退出。 |

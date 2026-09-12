@@ -27,7 +27,8 @@ python-workspace:
     COPY docker ./docker
     COPY apps ./apps
     COPY backend ./backend
-    COPY Earthfile Makefile Dockerfile Dockerfile.elasticsearch docker-compose.yml docker-compose.debug.yml compose.product.yml alembic.ini ./
+    COPY Earthfile Makefile Dockerfile Dockerfile.elasticsearch docker-compose.yml docker-compose.debug.yml compose.product.yml compose.production.yml alembic.ini ./
+    COPY deploy ./deploy
     COPY SPEC.md PLAN.md AGENTS.md ./
     COPY .dockerignore .gitattributes .earthly.env ./
     COPY .github/workflows/quality.yml ./.github/workflows/quality.yml

@@ -106,6 +106,9 @@ def _initialize(config_dir: Path, client_dir: Path, work_dir: Path) -> None:
 
 
 def _verify_existing(work_dir: Path) -> bool:
+    # sgctl requires a fresh output directory. Compose may restart this one-shot
+    # container in place after a failed post-bootstrap health check.
+    shutil.rmtree(work_dir, ignore_errors=True)
     try:
         downloaded = _run("get-config", "--output", str(work_dir))
     except subprocess.TimeoutExpired:

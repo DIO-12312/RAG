@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.docker_healthcheck import (
     RUNNING_SERVICES,
@@ -69,6 +70,8 @@ def test_runtime_image_and_context_exclude_secrets_and_test_artifacts() -> None:
     assert "USER rag" in dockerfile
     assert "COPY tests" not in dockerfile
     assert "migrations /app/migrations" in dockerfile
+    assert "addgroup --system --gid 10001 rag" in dockerfile
+    assert "adduser --system --uid 10001 --ingroup rag --no-create-home rag" in dockerfile
     assert {".env", ".env.*", ".git/", "tests/", "data/", "logs/"} <= ignored
 
 
@@ -136,6 +139,66 @@ def test_debug_override_binds_elasticsearch_to_loopback_only() -> None:
 
     assert '"127.0.0.1:9200:9200"' in debug_compose
     assert '"9200:9200"' not in debug_compose.replace('"127.0.0.1:9200:9200"', "")
+
+
+def test_production_compose_keeps_services_private_and_uses_external_secret_material() -> None:
+    """生产私网拓扑不得暴露服务端口或生成开发证书。"""
+
+    production = (ROOT / "compose.production.yml").read_text(encoding="utf-8")
+    production_config = yaml.safe_load(production)
+
+    assert all("ports" not in service for service in production_config["services"].values())
+    assert "production-material-check:" in production
+    assert "rag-security-materials:" not in production
+    assert '"--environment", "production"' in production
+    assert "secrets:" in production
+    assert "PRODUCTION_SECRETS_DIR" in production
+    assert "file: ${PRODUCTION_SECRETS_DIR" in production
+    assert "internal: true" in production
+    assert 'RAG_GRPC_REFLECTION: "false"' in production
+    assert 'PRODUCT_COOKIE_SECURE: "true"' in production
+    elasticsearch_secret_sources = {
+        item["source"] for item in production_config["services"]["elasticsearch"]["secrets"]
+    }
+    assert "sg_admin_certificate" not in elasticsearch_secret_sources
+    assert "sg_admin_key" not in elasticsearch_secret_sources
+
+
+def test_production_model_callers_have_egress_without_exposing_infrastructure() -> None:
+    """调用公网模型的 RAG 进程需可出网，基础设施仍只能留在隔离网络。"""
+
+    production = yaml.safe_load((ROOT / "compose.production.yml").read_text(encoding="utf-8"))
+    services = production["services"]
+
+    assert production["networks"]["backend"]["internal"] is True
+    assert production["networks"]["egress"].get("internal", False) is False
+    for service in ("rag-server", "rag-worker"):
+        assert set(services[service]["networks"]) == {"backend", "egress"}
+        assert "ports" not in services[service]
+    for service in ("rag-mysql", "product-mysql", "elasticsearch", "nats"):
+        assert services[service]["networks"] == ["backend"]
+        assert "ports" not in services[service]
+
+
+def test_production_uses_one_shared_encryption_key_for_go_and_python() -> None:
+    """Go 加密的 Dataset 模型配置必须能由 Python 使用同一密钥解密。"""
+
+    production = yaml.safe_load((ROOT / "compose.production.yml").read_text(encoding="utf-8"))
+
+    def source_for_target(service: str, target: str) -> str:
+        secret = next(
+            item for item in production["services"][service]["secrets"] if item["target"] == target
+        )
+        return secret["source"]
+
+    python_sources = {
+        source_for_target(role, "/run/model-keys/encryption.key")
+        for role in ("rag-server", "rag-worker")
+    }
+    go_source = source_for_target("api", "/run/model-keys/encryption.key")
+
+    assert python_sources == {go_source} == {"product_encryption_key"}
+    assert "rag_model_encryption_key" not in production["secrets"]
 
 
 def test_secret_scanner_fails_without_echoing_the_secret() -> None:

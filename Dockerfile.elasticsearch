@@ -14,4 +14,7 @@ RUN curl --fail --location --silent --show-error "$SEARCH_GUARD_PLUGIN_URL" -o /
 
 COPY docker/search-guard/elasticsearch.yml /usr/share/elasticsearch/config/elasticsearch.yml
 
+RUN mkdir -p /usr/share/elasticsearch/config/search-guard \
+    && chown elasticsearch:root /usr/share/elasticsearch/config/search-guard
+
 USER elasticsearch

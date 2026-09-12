@@ -72,9 +72,9 @@ RAG_ELASTICSEARCH_CA_CERT=/run/secrets/ca.pem
 
 development/test 的 Compose 服务名与顺序为：`rag-security-materials → elasticsearch → rag-search-guard-bootstrap → rag-migrate → rag-server/rag-worker/rag-outbox`。`rag-security-materials` 将 node/admin 材料写入 `search-guard-node-secrets`：它对 bootstrap 挂载为 `/node-secrets`，对 ES 只读挂载为 `/usr/share/elasticsearch/config/search-guard`；将 runtime CA/password 写入 `search-guard-client-secrets`，只读挂载给需要 ES 的应用和测试容器为 `/run/secrets/ca.pem`、`/run/secrets/rag_mvp_password`。Elasticsearch healthcheck 使用 CA、`rag_mvp` Basic 身份和 `/_searchguard/health`，要求 `status=UP`。由于首次初始化前尚不存在 `rag_mvp`，bootstrap 只等待 ES `service_started` 并以管理员证书重试；完成配置后 healthcheck 才会变为健康。这是刻意的两阶段 healthcheck，任何一步失败都阻止下游服务启动。
 
-### 生产编排边界（后续工作）
+### 生产编排边界
 
-production 必须使用独立、尚待平台化的 deployment manifest/编排；本仓库当前没有、也不得宣称已有可执行的 production Compose 或 Helm 文件。该编排只能只读挂载外部 CA/node/admin/client Secret，禁止定义或启动 `rag-security-materials`。部署前必须运行 `--environment production` 的材料校验或等效 fail closed 检查；材料缺失、权限错误或证书主体不匹配时，必须阻断 ES、bootstrap 与下游服务启动。按目标平台实现、集成测试和运维验收该 production manifest 是后续工作；development/test Compose 不能替代或推断为生产部署。
+单机生产基线由根目录 `compose.production.yml` 和 `deploy/production/` 提供；它与 development/test Compose 独立，不能作为 override 混用。该编排只读挂载外部 CA/node/admin/client Secret，禁止定义或启动 `rag-security-materials`；`production-material-check` 在 ES 之前运行 `--environment production` 的材料校验。材料缺失、权限错误或证书主体不匹配时，必须阻断 ES、bootstrap 与下游服务启动。P0-2 基线不发布任何宿主端口；MySQL、NATS、Elasticsearch、Python gRPC、Go API 与 web 仅在 Compose 网络通信，公网入口由独立 P0-3 工作包接入。该编排是单机基线，Kubernetes、HA、跨节点对象存储和平台级 Secret 管理仍是后续工作；development/test Compose 不能替代或推断为生产部署。
 
 已有 `elasticsearch-data` 卷不可原地升级为带插件的集群；迁移 runbook 必须要求维护窗口、备份/快照、停止所有节点、安装插件、挂载证书、初始化、验证，再恢复 shard allocation。测试环境使用独立卷，不得以删除生产卷作为迁移手段。
 
