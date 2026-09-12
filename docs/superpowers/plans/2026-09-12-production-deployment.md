@@ -19,10 +19,10 @@ P0-1 与 P0-4b 需要真实服务器和云账号权限，不能由仓库内静�
 
 ## 2026-09-12 执行状态
 
-- P0-2、P0-3 的仓库实现和离线门禁已完成；P0-3 的真实 ACME/HTTPS 验收待域名。
-- 目标公网 IP `49.235.110.118` 的 TCP 22、80、443 已从外部探测可达；HTTP 返回空响应、HTTPS 尚不能完成 TLS 握手，符合“入口尚未部署”的现状。
-- P0-1 卡在缺少 SSH/云控制台权限，尚不能核验 Ubuntu、Docker/Compose、资源、UFW 或安全组精确规则。
-- P0-4a 可在仓库内完成；P0-4b 卡在主机权限、外部生产 Secret/PKI 材料与域名，禁止以开发自签材料代替。
+- P0-1 主机侧验收已完成：Ubuntu 24.04 LTS、Docker 27.5.1、Compose 2.32.4、7.3 GiB 内存与 148 GiB 可用磁盘；UFW 仅允许 SSH、80、443。云安全组的 80/443 可达性由外部探测和用户确认覆盖，域名检查按本轮“仅公网 IP”范围暂缓。
+- P0-2 已部署：生产材料检查、Search Guard bootstrap 与迁移均成功退出；MySQL、NATS、Elasticsearch、RAG、Go API、web 均在私网正常运行。旧 `rag-product` 栈已停止，宿主机不再监听 5173、8080、3307 等旧端口。
+- P0-3 的仓库实现和离线门禁已完成，但按用户要求保持 `caddy=0`；宿主机当前只监听 SSH 22，真实 ACME/公网 HTTPS 验收暂缓。
+- P0-4a 已完成并部署 snapshot 宿主机挂载。P0-4b 已创建 `rag_production` repository 和 `baseline-20260912-1438` 基线快照，16/16 shards 成功且无失败；异机备份和新受保护卷/集群 restore 演练仍待执行。
 
 ## 架构决策
 
