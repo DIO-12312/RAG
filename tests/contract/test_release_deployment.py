@@ -242,3 +242,35 @@ def test_baseline_uses_actual_image_ids_and_refuses_overwrite(
     assert not any("stop" in call or "up" in call for call in docker.calls)
     with pytest.raises(release.ReleaseError, match="already exists"):
         release.capture(ROOT, tmp_path / "env", state, SHA)
+
+
+def test_publish_injects_release_sha_into_web_image(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Web 镜像必须把发布 SHA 编入前端产物，页面才能确认实际部署的 commit。"""
+
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], **kwargs: object) -> str:
+        calls.append(args)
+        if args[:2] == ["git", "rev-parse"]:
+            return SHA
+        if "--metadata-file" in args:
+            release.write_json(
+                Path(args[args.index("--metadata-file") + 1]),
+                {"containerimage.digest": "sha256:" + "e" * 64},
+            )
+        return ""
+
+    monkeypatch.setattr(release, "run", fake_run)
+    manifest = tmp_path / "release.json"
+    release.publish(ROOT, SHA, manifest)
+
+    web = next(call for call in calls if any("rag-web:" in arg for arg in call))
+    assert f"VITE_GIT_COMMIT={SHA}" in web
+    rag = next(call for call in calls if any("rag-rag:" in arg for arg in call))
+    assert not any("VITE_GIT_COMMIT" in arg for arg in rag)
+    assert release.read_json(manifest)["images"]["web"] == (
+        "ghcr.io/dio-12312/rag-web@sha256:" + "e" * 64
+    )

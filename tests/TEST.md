@@ -83,10 +83,27 @@ production-baseline/production-deploy/production-recover；仍校验 Earthfile �
 | `test_health_failure_after_switch_rolls_back` | 新版探针失败后恢复旧镜像和 active 状态 |
 | `test_image_drift_and_revision_mismatch_block_before_stopping` | 手工镜像漂移或拉取镜像 revision 不匹配时停服前拒绝 |
 | `test_baseline_uses_actual_image_ids_and_refuses_overwrite` | 首次基线使用实际运行 Image ID，加保留标签且不替换容器；禁止覆盖 |
+| `test_publish_injects_release_sha_into_web_image` | 发布 web 镜像必须携带 `--build-arg VITE_GIT_COMMIT=<sha>`，其他镜像不注入，digest 清单仍来自 buildx metadata |
 | `DockerSimulator` | 仅 Docker 命令边界替身，使用真实临时文件与状态 journal；不代表真实 Docker/SSH/GHCR 验收 |
 
 以上纳入 `make ci`，不连接生产服务。Go/前端发布门禁由 `make release-check` 经 Earthfile 运行；
 真实 GHCR push 与生产切换需合入 main 后单独验收，不由离线测试结果推断。
+
+### 2026-09-12 部署版本可见性
+
+```text
+apps/web/tests/
+└─ build-version.spec.ts  # VITE_GIT_COMMIT 注入、缺失回退与侧栏版本展示
+```
+
+| 文件 / 函数 | 用例 / 职责 | 运行边界 |
+|---|---|---|
+| `apps/web/tests/build-version.spec.ts` | `uses the commit injected at build time and shortens it for display`、`falls back to unknown when no commit was injected`、`renders the short revision in the sidebar so a deployment can be identified`：解析构建注入的 commit、缺失时回落 `unknown`，并在应用侧栏渲染短 SHA 与完整 title | Vitest/jsdom，离线工具与组件测试 |
+| `contract/test_release_deployment.py::test_publish_injects_release_sha_into_web_image` | 发布 web 镜像必须携带 `--build-arg VITE_GIT_COMMIT=<sha>`，其他镜像不得注入，清单 digest 不受影响 | 离线 Docker 命令替身，不实际构建或推送 |
+
+发布镜像内嵌 commit 由 `apps/web/Dockerfile` 的 `VITE_GIT_COMMIT` 构建参数与
+`scripts/release.py publish` 共同保证；侧栏显示短 SHA，本地直接构建显示 `unknown`。
+运行 `npm --prefix apps/web test -- --run`；静态契约不代表真实 GHCR 镜像已按该参数构建。
 
 ### 2026-09-06 产品体验与模型配置补充
 

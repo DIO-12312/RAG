@@ -33,6 +33,10 @@ GitHub GITHUB_TOKEN 用于构建发布，工作流仅授予 contents:read/packag
 的 release.json。镜像命名为 ghcr.io/dio-12312/rag-{rag,api,web,search-guard,elasticsearch}。
 实际部署只拉取和替换 rag/api/web 对应的 5 个应用容器。bootstrap/ES 镜像发布供维护升级使用。
 
+Web 镜像在发布时以 `--build-arg VITE_GIT_COMMIT=<sha>` 内嵌发布 commit；发布完成后页面左侧栏
+会显示短 SHA（如 `386f681`），用于确认线上镜像是否是自己推送的那次提交。现场 `production-run`
+本地构建的镜像没有该参数，显示 `unknown`，不能据此判断自动发布结果。
+
 工作流用固定主机公钥连接，先确认主机已有 active.json，发送该 SHA 的源码 archive 和 release.json，
 然后由 systemd 调用 `make production-deploy`。健康检查包括生产依赖、gRPC 容器、API DB readiness、
 Web 页面/JSON 与 Caddy 路由；没有真实模型调用，健康通过不代表所有模型供应商可用。

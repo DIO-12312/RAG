@@ -3,6 +3,10 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+# 发布镜像由 scripts/release.py 以 --build-arg VITE_GIT_COMMIT=<sha> 注入，
+# 页面据此确认真实部署的 commit；缺失时显示 unknown。
+ARG VITE_GIT_COMMIT=unknown
+ENV VITE_GIT_COMMIT=${VITE_GIT_COMMIT}
 RUN npm run build
 
 FROM nginx:1.27-alpine

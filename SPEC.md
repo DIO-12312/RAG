@@ -261,7 +261,8 @@ GitHub Actions `deploy.yml` 仅响应 `DIO-12312/RAG` 的 main push；以 `make 
 经 Earthfile 执行 Python/Go/前端门禁后，`make release-publish` 发布 linux/amd64 的 RAG、
 Go API、Web、Search Guard bootstrap、Elasticsearch 镜像至 GHCR。每个版本以完整 commit SHA
 标记，`release.json` 记录实际 registry digest，生产应用只接受批准仓库的 digest 引用，拉取后
-验证镜像 revision 与事件 SHA 一致。镜像发布使用 GITHUB_TOKEN 的 packages:write；部署登录使用
+验证镜像 revision 与事件 SHA 一致。Web 镜像同时以 `--build-arg VITE_GIT_COMMIT=<sha>` 把发布
+commit 编入前端产物，页面侧栏显示短 SHA 供人工核对线上版本，缺失该参数时显示 `unknown`。镜像发布使用 GITHUB_TOKEN 的 packages:write；部署登录使用
 已有 `MIRROR` 私钥与 `HOST` known_hosts，服务器拉取使用 `GHCR_USERNAME`/`GHCR_TOKEN`。
 
 自动发布是单机短暂停服切换，不保证 SSE 连接不中断。部署服务端由 systemd 托管，GitHub

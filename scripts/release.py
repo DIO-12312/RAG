@@ -152,6 +152,9 @@ def publish(root: Path, sha: str, output: Path) -> None:
             ]
             if target:
                 command += ["--target", target]
+            if name == "web":
+                # 前端把 commit 编入产物，页面才能确认线上镜像对应的推送版本。
+                command += ["--build-arg", f"VITE_GIT_COMMIT={sha}"]
             run([*command, context], cwd=root, timeout=2400, visible=True)
             images[name] = (
                 tag.rsplit(":", 1)[0] + "@" + read_json(metadata)["containerimage.digest"]
