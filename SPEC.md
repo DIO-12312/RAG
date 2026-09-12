@@ -443,6 +443,8 @@ go test ./...
 
 `.github/workflows/quality.yml` 在所有分支 push、目标为 `main` 的 PR 以及手动触发时执行 `make release-check`，即 Python 门禁加 Go 与前端发布门禁。固定 check 名为 `release-quality`，使用托管临时 Linux runner、固定 Earthly 0.8.16 与下载校验、只读仓库权限；不注入业务 Secret、不部署、不吞检查失败。并发取消仅限同一事件和同一分支/PR，避免 push 取消 PR 的合并结果检查。必需检查不采用路径过滤或 job 条件跳过。
 
+`.github/workflows/deploy.yml` 只响应 `DIO-12312/RAG` 的 main push，负责镜像发布与生产部署。它的门禁步骤可传 Earthly `--ci`，但 `release-publish`/`production-*` 等 `LOCALLY` target 绝不能继承 `--ci`：该标志隐含 `--strict`，Earthly 会以 `LOCALLY cannot be used when --strict is specified or otherwise implied` 直接拒绝执行。因此 `EARTHLY_FLAGS` 只能挂在纯 BUILD 的门禁步骤上，不得放在 job 级 env。
+
 `.github/main-ruleset.json` 是管理员导入 GitHub Rulesets 的分支规则模板：仅保护 `main` 不被删除和强推覆盖，不要求 PR 或必需检查，成员可以直接 push `main`。由于 GitHub 的 `required_status_checks` 会拒绝尚未通过检查的直接推送，与本仓库约定冲突，因此不启用；相应地 `release-quality` 是 push 后的事后检查，不构成合入拦截，真正的推送前拦截依赖本地 Git Hook 或团队约定。默认 bypass 列表为空。配置文件不自动修改远端规则，必须先验证真实 Actions 成功，再由管理员保存启用；不能仅凭本地测试宣称远端门禁已生效。
 
 本次门禁已接入 Python 离线集合与 85% 聚合覆盖率，以及 Go 与前端发布门禁（`go test`、前端 test/build）；Go 生成物一致性、`gofmt`/`go vet`、新增代码覆盖率独立门槛以及真实模型套件的自动化尚未纳入。它们是明确的后续工作，不能将当前绿灯当作全产品或真实基础设施验收。真实套件继续独立显式运行，不作为本次 PR required check。启用顺序、运行边界和门禁故障处置见 `docs/test/testing-guide.md` §7。

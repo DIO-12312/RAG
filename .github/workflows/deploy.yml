@@ -26,7 +26,6 @@ jobs:
       packages: write
     env:
       EARTHLY_DISABLE_ANALYTICS: "1"
-      EARTHLY_FLAGS: --ci
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -43,6 +42,9 @@ jobs:
           echo "$RUNNER_TEMP/earthly-bin" >> "$GITHUB_PATH"
 
       - name: Test all application layers
+        # --ci 隐含 --strict，只可用于纯 BUILD 聚合；发布步骤是 LOCALLY，不能被继承。
+        env:
+          EARTHLY_FLAGS: --ci
         run: make release-check
 
       - name: Authenticate publisher

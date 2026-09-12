@@ -161,9 +161,16 @@ def test_deploy_workflow_requires_checks_and_uses_existing_secret_names() -> Non
     workflow = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text())
     assert workflow["on"] == {"push": {"branches": ["main"]}}
     assert workflow["concurrency"]["cancel-in-progress"] is False
-    # Earthly 在 CI 中必须使用非交互模式，与 quality.yml 的发布门禁保持一致。
-    assert workflow["jobs"]["release"]["env"]["EARTHLY_FLAGS"] == "--ci"
-    steps = workflow["jobs"]["release"]["steps"]
+    job = workflow["jobs"]["release"]
+    # --ci 隐含 --strict，Earthly 会拒绝 LOCALLY；发布工作区不得在 job 级继承它。
+    assert "EARTHLY_FLAGS" not in job["env"]
+    steps = job["steps"]
+    checks = next(step for step in steps if step.get("run") == "make release-check")
+    assert checks["env"] == {"EARTHLY_FLAGS": "--ci"}
+    publish = next(step for step in steps if "make release-publish" in step.get("run", ""))
+    assert "EARTHLY_FLAGS" not in publish.get("env", {})
+    release_publish = (ROOT / "Earthfile").read_text().split("\nrelease-publish:\n", 1)[1]
+    assert "    LOCALLY" in release_publish.split("\n# ", 1)[0]
     commands = [step.get("run", "") for step in steps]
     assert commands.index("make release-check") < commands.index(
         'make release-publish RELEASE_SHA="$GITHUB_SHA"'
