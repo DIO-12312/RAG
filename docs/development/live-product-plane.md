@@ -6,7 +6,7 @@
 
 ```powershell
 docker compose -f compose.product.yml up -d --build
-pnpm --dir apps/web dev --host 127.0.0.1
+npm --prefix apps/web run dev -- --host 127.0.0.1
 ```
 
 浏览器打开 http://127.0.0.1:5173/ 。前端以 hash 路由承载页面，同源根路径 HTTP 请求经 Vite 转发至 127.0.0.1:8080；不要使用原先仅 Mock 的任意密码登录方式。
@@ -61,7 +61,7 @@ go test ./internal/httpapi -run TestLiveProductFlow -v -count=1
 
 DeepSeek 的思考开关使用 `thinking.type`；开启时工具选择为 auto，工具轮次保留其返回的 reasoning_content。其他兼容模型仍使用可选的 enable_thinking 扩展。详情见 `docs/bug/2026-09-06-deepseek-thinking-tool-choice.md`。
 
-前端 `pnpm --dir apps/web lint`、`typecheck`、`test --run`、`build`；Mock 仅在显式 `VITE_USE_MOCK=true` 时启动。HTTP/SSE 传输测试覆盖分段 UTF-8 与缺失 final 的断流。
+前端 `npm --prefix apps/web run lint`、`typecheck`、`test -- --run`、`build`；前端唯一包管理器是 npm，锁文件为 `apps/web/package-lock.json`（不再维护 pnpm 锁）。Mock 仅在显式 `VITE_USE_MOCK=true` 时启动。HTTP/SSE 传输测试覆盖分段 UTF-8 与缺失 final 的断流。
 
 Go protobuf 重新生成（在 backend/go-api 下）：
 

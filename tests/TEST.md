@@ -108,7 +108,7 @@ tests/
 ├─ embedding_profile.py                    # E2E/真实韧性套件生成加密 RPC 快照；测试专用 env 凭据不进入运行服务
 ├─ conftest.py                              # 共享 pytest 配置与 fixture
 ├─ contract/                                # gRPC、protobuf 与 Port 语义契约
-│  ├─ test_build_entrypoints.py          # Make/Earthly、push/PR workflow、main 规则与仅前端重启边界
+│  ├─ test_build_entrypoints.py          # Make/Earthly、push/PR workflow、main 规则、前端锁与仅前端重启边界
 │  ├─ test_container_artifacts.py
 │  ├─ test_delete_document_contract.py
 │  ├─ test_generated_code.py
@@ -413,6 +413,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths` | Docker 入口构建安全材料/ES/bootstrap 服务，并仅向测试容器传递 ES password file 与 CA path。 |
 | 同上 | `test_containerized_web_upload_limits_match_supported_rag_sources` | 前端与 Go 白名单一致接纳 PDF、CHM/CHI、Markdown、文本和代码；Nginx 为 32 MiB 文件及 multipart 开销设置 34 MiB 请求上限。 |
 | 同上 | `test_containerized_web_proxies_product_health_checks` | 容器化 Nginx 必须将 `/healthz`、`/readyz` 转发到 Go API，防止 SPA fallback 返回 HTML 造成公网健康假阳性。 |
+| 同上 | `test_web_lockfile_is_complete_and_single_toolchain` | 前端 `package-lock.json` 必须为完整 npm v3 锁（npmjs 条目均带 integrity，且含 Linux rollup/esbuild 原生包），不得并存 pnpm 锁或 pnpm 专属 `.npmrc`，并核对 Dockerfile/Earthfile 使用 `npm ci`；静态契约，不执行安装。 |
 | `test_container_artifacts.py` | `test_package_and_container_use_canonical_root_readme` | GitHub 首页、Python package、Docker 镜像与 Earthly 依赖安装统一使用仓库根 README，禁止保留重复入口。 |
 | `test_search_guard_assets.py` | `test_development_material_generator_creates_separate_node_and_client_secrets` | development 材料生成器使用独立 node/admin 私钥，客户端密码不回显到进程输出。 |
 | 同上 | `test_development_material_generator_writes_certificate_key_identifiers` | development CA 与节点证书生成 SKI/AKI，保证运行时 TLS 链校验可用。 |

@@ -361,6 +361,32 @@ def test_containerized_web_proxies_product_health_checks() -> None:
     )
 
 
+def test_web_lockfile_is_complete_and_single_toolchain() -> None:
+    """前端发布必须使用完整 npm 锁；残缺锁或并存的 pnpm 锁会让 npm ci 装出坏依赖树。"""
+
+    lock = json.loads(_text("apps/web/package-lock.json"))
+    assert lock["lockfileVersion"] == 3
+    packages = lock["packages"]
+    # 缺少 integrity 或平台可选依赖的锁会让 npm ci 安装出 rollup/esbuild 原生模块缺失的树。
+    for name, entry in packages.items():
+        if entry.get("resolved", "").startswith("https://registry.npmjs.org/"):
+            assert entry.get("integrity", "").startswith("sha512-"), name
+    for required in (
+        "node_modules/rollup",
+        "node_modules/@rollup/rollup-linux-x64-gnu",
+        "node_modules/esbuild",
+        "node_modules/@esbuild/linux-x64",
+    ):
+        assert required in packages
+    assert not (ROOT / "apps/web/pnpm-lock.yaml").exists()
+    assert not (ROOT / "apps/web/.npmrc").exists()
+    dockerfile = _text("apps/web/Dockerfile")
+    assert "COPY package.json package-lock.json ./" in dockerfile
+    assert "RUN npm ci" in dockerfile
+    web_check = _text("Earthfile").split("\nrelease-web-check:\n", 1)[1].split("\n# ", 1)[0]
+    assert "npm ci" in web_check
+
+
 def test_web_restart_only_rebuilds_web_through_earthly(tmp_path: Path) -> None:
     """Make delegates to Earthly; local Docker commands only recreate web."""
     recorder = tmp_path / "recorder"
