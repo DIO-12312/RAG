@@ -9,7 +9,7 @@
 | 工作包 | 交付物 | 验收 |
 | --- | --- | --- |
 | P0-1 基线检查 | Ubuntu/Docker/Compose/资源/安全组/UFW 清单 | 仅 22、80、443 入站；DNS A/AAAA 指向主机；内存、磁盘满足镜像与数据容量预算。 |
-| P0-2 生产拓扑 | `compose.production.yml`、`.env.production.example`、外部 Secret 布局 | 无基础设施 `ports`；私网网络；不含 `rag-security-materials`；生产材料校验 fail closed。 |
+| P0-2 生产拓扑 | `compose.production.yml`、`.env.production.example`、外部 Secret 布局 | 无基础设施 `ports`；固定 edge 网段；私网网络；不含 `rag-security-materials`；生产材料校验 fail closed。 |
 | P0-3 公网入口 | Caddyfile 与 web/api 路由 | IP 模式 HTTP 公网访问；域名模式自动 HTTPS/HTTP→HTTPS；34 MiB 上传上限、SSE 不缓冲、SPA fallback、转发头正确。 |
 | P0-4a 运维基线 | 部署、健康、备份、升级、回滚 runbook 与 ES snapshot 宿主机路径 | 静态契约覆盖裸 IP 安全停点、snapshot repository、证书失败停止及禁止删卷。 |
 | P0-4b 主机演练 | 在真实主机执行启动、备份、恢复和回滚 | 可演练启动、恢复、证书失败停止及旧镜像/snapshot 回滚，并保存脱敏验收记录。 |

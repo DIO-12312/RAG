@@ -355,7 +355,10 @@ services:
     restart: unless-stopped
 
 networks:
-  edge: {}
+  edge:
+    ipam:
+      config:
+        - subnet: 172.19.0.0/16
   egress: {}
   backend:
     internal: true

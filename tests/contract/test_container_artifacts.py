@@ -175,6 +175,7 @@ def test_production_caddy_is_only_public_entrypoint() -> None:
     production = yaml.safe_load(production_text)
     services = production["services"]
 
+    assert production["networks"]["edge"]["ipam"]["config"] == [{"subnet": "172.19.0.0/16"}]
     assert services["caddy"]["ports"] == ["80:80", "443:443"]
     assert all("ports" not in service for name, service in services.items() if name != "caddy")
     assert services["caddy"]["networks"] == ["edge"]

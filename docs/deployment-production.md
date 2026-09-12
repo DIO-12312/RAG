@@ -15,7 +15,7 @@ free -h
 sudo ss -ltnp
 ```
 
-安全组和 UFW 只保留 TCP 22、80、443；先保证现有 SSH 会话可用，再修改防火墙。禁止为排障开放 50051、3306、3307、4222、9200、5173 或 8080。Docker Compose 生产文件不会发布这些端口，仍应以 `ss -ltnp` 在启动后复核。
+安全组和 UFW 只保留 TCP 22、80、443；先保证现有 SSH 会话可用，再修改防火墙。禁止为排障开放 50051、3306、3307、4222、9200、5173 或 8080。Docker Compose 生产文件不会发布这些端口，仍应以 `ss -ltnp` 在启动后复核。生产 `edge` 网桥固定使用 `172.19.0.0/16`，供公网回程策略路由使用；若该网段与主机其他网络冲突，必须先调整 Compose、systemd 回程规则和防火墙策略后再启动。
 
 ```bash
 sudo ufw allow OpenSSH
@@ -26,6 +26,19 @@ sudo ufw status numbered
 ```
 
 云安全组也必须做相同限制；UFW 不是云防火墙的替代品。
+
+### Mihomo TUN 与公网回程
+
+生产 `edge` 固定为 `172.19.0.0/16`。启用 TUN 的主机仅应让该网段中源端口为 TCP 80/443 的回复优先查主路由：
+
+```bash
+ip rule add pref 8988 from 172.19.0.0/16 ipproto tcp sport 80 lookup main
+ip rule add pref 8989 from 172.19.0.0/16 ipproto tcp sport 443 lookup main
+```
+
+当前主机由 `/etc/systemd/system/rag-public-return-route.service` 持久化这两条规则。不得使用整个 `edge` 网段无条件直连的规则：Go API 也连接此网络，模型域名若解析为 Mihomo Fake-IP，主动模型请求必须继续经 TUN。上述范围仅覆盖当前 TCP 公网入口，不覆盖未来 UDP/HTTP3。
+
+首次从自动分配改为固定 IPAM 时，Compose 可能重建网络，使已有 API/Web 容器引用旧网络 ID。确认报错后可在维护窗口重建这些无状态容器，再运行 `make production-run`；不得删除数据库或持久卷。
 
 ## Secret 与配置
 
