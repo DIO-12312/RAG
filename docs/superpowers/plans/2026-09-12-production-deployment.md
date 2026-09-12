@@ -23,6 +23,7 @@ P0-1 与 P0-4b 需要真实服务器和云账号权限，不能由仓库内静�
 - P0-2 已部署：生产材料检查、Search Guard bootstrap 与迁移均成功退出；MySQL、NATS、Elasticsearch、RAG、Go API、web 均在私网正常运行。旧 `rag-product` 栈已停止，宿主机不再监听 5173、8080、3307 等旧端口。
 - P0-3 的仓库实现和离线门禁已完成，但按用户要求保持 `caddy=0`；宿主机当前只监听 SSH 22，真实 ACME/公网 HTTPS 验收暂缓。
 - P0-4a 已完成并部署 snapshot 宿主机挂载。P0-4b 已创建 `rag_production` repository 和 `baseline-20260912-1438` 基线快照，16/16 shards 成功且无失败；异机备份和新受保护卷/集群 restore 演练仍待执行。
+- 生产手工启动已收敛为 `make production-run` → Earthfile `+production-run`；它先构建并运行可信材料检查器，再以 `caddy=0` 启动和验证私网服务，移除同项目孤儿容器，只有显式请求且内部健康后才启用 Caddy。默认 `CADDY_SCALE=0` 保持裸 IP 私网预启动。
 
 ## 架构决策
 
@@ -34,8 +35,8 @@ P0-1 与 P0-4b 需要真实服务器和云账号权限，不能由仓库内静�
 2. 在云安全组和 UFW 只允许 TCP 22、80、443。SSH 应限制可信源或使用密钥/MFA；Docker 不应把未声明端口自动公开。
 3. 本期在主机从已审查的源码构建本地 production 镜像；填充主机私有 `.env.production` 的本地镜像名、域名、ACME 邮箱和绝对 Secret 目录。后续 registry/不可变 digest 发布是独立工作包，不影响本期启动链路。
 4. 由 Secret Manager/受控运维过程创建 `deploy/production/secrets/README.md` 中列出的文件。生产不会生成任何 Search Guard 证书或密码；先单独运行 material check，失败即停止。
-5. 用 `docker compose --env-file /etc/rag-mvp/.env.production -f compose.production.yml config --quiet` 只校验语法；不得将 `config` 渲染结果重定向到文件或日志，因为其中会包含敏感路径/配置。
-6. 在维护窗口按 runbook 启动，先验证 bootstrap、数据库、RAG 服务和 Go `/readyz`，最后验证 HTTPS。仅从浏览器访问域名；不映射或探测私网端口。
+5. 用 `make production-run` 经 Earthfile 校验生产 env 和 Compose 配置、从当前源码构建无状态材料检查器并以禁止拉取的本地镜像校验外部材料，再以 `caddy=0` 构建、移除同项目孤儿容器并启动私网服务；不得将 `config` 渲染结果重定向到文件或日志，因为其中会包含敏感路径/配置。裸 IP 阶段保留默认 `CADDY_SCALE=0`。
+6. 域名与 ACME 条件就绪后，在维护窗口执行 `make production-run CADDY_SCALE=1`，先验证 bootstrap、数据库、RAG 服务和 Go `/readyz`，最后验证 HTTPS。仅从浏览器访问域名；不映射或探测私网端口。
 
 ## 运行边界与未决事项
 

@@ -381,6 +381,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 文件 | 测试函数 | 职责 |
 | --- | --- | --- |
 | `test_build_entrypoints.py` | `test_makefile_offline_targets_are_commented_earthly_only_entrypoints` | Makefile 的离线公共入口均有说明，并且只负责转发 Earthly target。 |
+| 同上 | `test_production_run_is_earthly_only_fail_closed_entrypoint` | `make production-run` 只能转发 Earthfile；生产 target 从当前源码构建材料检查器，按顺序完成校验、私网启动和健康检查后才可启用 Caddy，并移除孤儿容器但不删除卷。 |
 | 同上 | `test_quality_workflow_runs_for_push_and_main_pull_requests` | 用 PyYAML 解析 workflow，验证所有分支 push、main PR、手动触发、无路径跳过、独立并发组、固定 check 名及不吞失败的 `make ci`。离线配置契约，不执行 GitHub runner。 |
 | 同上 | `test_quality_workflow_pins_tools_and_keeps_secrets_out` | 检查只读权限、临时托管 runner、固定 Action/Earthly 与下载校验、不保留凭据、不注入 Secret 或启动业务 Compose，以及 Earthly 显式复制所需配置。仅静态契约，不证明下载或远端运行成功。 |
 | 同上 | `test_main_ruleset_protects_main_without_blocking_direct_push` | 用 JSON 解析规则，验证 main 限定、仅禁止删除与强推、且不含 `pull_request` 或 `required_status_checks`，确保直接 push 不被拦截。不会调用 GitHub API 或验证远端规则已启用。 |

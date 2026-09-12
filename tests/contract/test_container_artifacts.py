@@ -247,7 +247,9 @@ def test_production_runbook_supports_snapshot_restore_and_ip_only_staging() -> N
     assert "PRODUCTION_BACKUP_DIR:?set PRODUCTION_BACKUP_DIR" in production_text
 
     runbook = (ROOT / "docs" / "deployment-production.md").read_text(encoding="utf-8")
-    assert "--scale caddy=0" in runbook
+    assert "make production-run" in runbook
+    assert "默认 `CADDY_SCALE=0`" in runbook
+    assert "make production-run CADDY_SCALE=1" in runbook
     assert "不得将公网 IP 填入 `RAG_PUBLIC_DOMAIN`" in runbook
     assert '"type": "fs"' in runbook
     assert "_snapshot/rag_production" in runbook

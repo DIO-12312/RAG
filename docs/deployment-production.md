@@ -41,32 +41,26 @@ sudo install -d -o 1000 -g 1000 -m 0700 /var/backups/rag-mvp/elasticsearch
 
 ## 裸 IP 阶段：私网预启动
 
-先解析配置并单独执行生产材料检查；该命令失败时不得继续：
+在仓库根目录执行生产入口；它会经 Earthfile 依次校验参数和生产配置、从当前源码构建无状态材料检查器并校验外部材料，随后构建镜像、移除同项目孤儿容器、启动私网服务并检查 API/web 健康状态。任一检查失败都会停止，持久卷不会被删除：
 
 ```bash
-docker compose --env-file /etc/rag-mvp/.env.production -f compose.production.yml config --quiet
-docker compose --env-file /etc/rag-mvp/.env.production -f compose.production.yml run --rm --no-deps production-material-check
-docker compose --env-file /etc/rag-mvp/.env.production -f compose.production.yml up -d --scale caddy=0
-docker compose --env-file /etc/rag-mvp/.env.production -f compose.production.yml ps
-docker compose --env-file /etc/rag-mvp/.env.production -f compose.production.yml exec -T api wget -q -O - http://127.0.0.1:8080/readyz
+make production-run
 ```
 
-此时所有业务服务仍只在 Docker 网络内。公网 IP 上没有可用产品页面是预期行为；不得临时发布 8080、50051 或其他内部端口绕过 HTTPS。
+默认 `CADDY_SCALE=0`，此时所有业务服务仍只在 Docker 网络内。公网 IP 上没有可用产品页面是预期行为；不得临时发布 8080、50051 或其他内部端口绕过 HTTPS。若生产 env 不在默认路径，可显式传入 `PRODUCTION_ENV_FILE=/absolute/path`。
 
 ## 域名就绪后：公网启动与健康检查
 
-确认 A/AAAA 解析正确并填写真实域名和 ACME 邮箱后，在仓库根目录执行：
+确认 A/AAAA 解析正确并填写真实域名和 ACME 邮箱后，在仓库根目录执行。Earthfile 仍会先以 Caddy 副本数 0 完成私网服务和 API/web 健康检查，全部通过后才启动 Caddy：
 
 ```bash
-docker compose --env-file /etc/rag-mvp/.env.production -f compose.production.yml config --quiet
-docker compose --env-file /etc/rag-mvp/.env.production -f compose.production.yml up -d --scale caddy=1
-docker compose --env-file /etc/rag-mvp/.env.production -f compose.production.yml ps
+make production-run CADDY_SCALE=1
 curl --fail --show-error --location "https://YOUR_DOMAIN/healthz"
 ```
 
 先检查 `production-material-check` 和 `rag-search-guard-bootstrap` 为成功退出，再要求所有长期服务 healthy/running。Caddy 自动将 HTTP 重定向到 HTTPS，并传递 `X-Forwarded-*`；Caddy 的 `/api/*` 会移除前缀后转发 Go API，现有 Vue 根路径 API 继续由 web 容器转发。验证一次注册、上传、Job 成功和有 evidence 的问答，确认 SSE 在代理后能完成。
 
-若材料校验、bootstrap 或健康检查失败，保持服务停止并检查不含 Secret 的容器状态/日志。不得通过关闭 TLS、Search Guard 或新增私网端口映射来继续。
+若材料校验失败，任何有状态服务都不得启动；若后续 bootstrap 或内部健康检查失败，必须保持 Caddy 停止，私网服务可保留用于检查不含 Secret 的容器状态/日志。不得通过关闭 TLS、Search Guard 或新增私网端口映射来继续。
 
 ## 备份、恢复、升级与回滚
 

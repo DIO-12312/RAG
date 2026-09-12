@@ -41,6 +41,7 @@ def test_makefile_offline_targets_are_commented_earthly_only_entrypoints() -> No
         "docker-test",
         "docker-down",
         "run",
+        "production-run",
         "web-restart",
     }
     execution_recipes = [
@@ -60,6 +61,54 @@ def test_makefile_offline_targets_are_commented_earthly_only_entrypoints() -> No
         assert re.search(rf"^# .+\n{re.escape(target)}:", makefile, re.MULTILINE)
     for target in {"proto", "lint", "test", "ci"}:
         assert f"+{target}" in makefile
+
+
+def test_production_run_is_earthly_only_fail_closed_entrypoint() -> None:
+    """生产启动必须经 Earthfile 校验外部材料，并支持显式控制 Caddy。"""
+
+    makefile = _text("Makefile")
+    earthfile = _text("Earthfile")
+
+    assert "PRODUCTION_ENV_FILE ?= /etc/rag-mvp/.env.production" in makefile
+    assert "CADDY_SCALE ?= 0" in makefile
+    assert "production-run" in _make_targets(makefile)
+    assert re.search(
+        r"^# .+\nproduction-run:\n\t\$\(EARTHLY\) --env-file-path "
+        r"\$\(EARTHLY_ENV_FILE\) \$\(EARTHLY_FLAGS\) \+production-run "
+        r'--PRODUCTION_ENV_FILE="\$\(PRODUCTION_ENV_FILE\)" '
+        r'--CADDY_SCALE="\$\(CADDY_SCALE\)"$',
+        makefile,
+        re.MULTILINE,
+    )
+
+    target = earthfile.split("\nproduction-run:\n", maxsplit=1)[1].split("\n# ", maxsplit=1)[0]
+    assert "    LOCALLY" in target
+    assert "ARG PRODUCTION_ENV_FILE=/etc/rag-mvp/.env.production" in target
+    assert "ARG CADDY_SCALE=0" in target
+    steps = [
+        'case "$CADDY_SCALE" in 0|1)',
+        'test -f "$PRODUCTION_ENV_FILE"',
+        '--env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml config --quiet',
+        "build production-material-check",
+        "run --pull never --rm --no-deps production-material-check",
+        "up -d --build --scale caddy=0 --remove-orphans --wait --wait-timeout 300",
+        "http://127.0.0.1:8080/readyz",
+        "http://web/healthz",
+        'if [ "$CADDY_SCALE" = 1 ]',
+        "up -d --no-deps --scale caddy=1 --wait --wait-timeout 120 caddy",
+        "ps --all",
+    ]
+    positions = [target.index(step) for step in steps]
+    assert positions == sorted(positions)
+    compose_commands = [line for line in target.splitlines() if "docker compose" in line]
+    assert compose_commands
+    assert all(
+        '--env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml' in line
+        for line in compose_commands
+    )
+    assert "compose.product.yml" not in target
+    assert "docker-compose.yml" not in target
+    assert "down -v" not in target
 
 
 def test_earthfile_pins_tools_and_separates_offline_targets() -> None:
@@ -206,6 +255,7 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
         "docker-test",
         "docker-down",
         "run",
+        "production-run",
         "web-restart",
         "clear",
         "help",

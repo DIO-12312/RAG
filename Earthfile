@@ -128,6 +128,24 @@ run:
     DO +DOCKER_START
     RUN docker compose -f compose.product.yml up -d --build --wait --wait-timeout 240
 
+# Validate external material, build images, and start the production-only topology.
+production-run:
+    LOCALLY
+    ARG PRODUCTION_ENV_FILE=/etc/rag-mvp/.env.production
+    ARG CADDY_SCALE=0
+    RUN case "$CADDY_SCALE" in 0|1) ;; *) echo "CADDY_SCALE must be 0 or 1" >&2; exit 2 ;; esac
+    RUN test -f "$PRODUCTION_ENV_FILE"
+    RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml config --quiet
+    RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml build production-material-check
+    RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml run --pull never --rm --no-deps production-material-check
+    RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml up -d --build --scale caddy=0 --remove-orphans --wait --wait-timeout 300
+    RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml exec -T api wget -q -O - http://127.0.0.1:8080/readyz
+    RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml exec -T api wget -q -O - http://web/healthz
+    RUN if [ "$CADDY_SCALE" = 1 ]; then \
+            docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml up -d --no-deps --scale caddy=1 --wait --wait-timeout 120 caddy; \
+        fi
+    RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml ps --all
+
 # Rebuild and recreate only the frontend container without starting dependencies or removing volumes.
 web-restart:
     LOCALLY
