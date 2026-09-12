@@ -290,6 +290,17 @@ def test_containerized_web_upload_limits_match_supported_rag_sources() -> None:
     assert "client_max_body_size 34m;" in nginx
 
 
+def test_containerized_web_proxies_product_health_checks() -> None:
+    """公网健康路径必须到达 Go API，不能被 SPA fallback 伪装成成功。"""
+
+    nginx = _text("apps/web/nginx.conf")
+
+    assert (
+        "location ~ ^/(healthz|readyz|auth|me|datasets|jobs|documents|settings|chat|conversations)"
+        in nginx
+    )
+
+
 def test_web_restart_only_rebuilds_web_through_earthly(tmp_path: Path) -> None:
     """Make delegates to Earthly; local Docker commands only recreate web."""
     recorder = tmp_path / "recorder"

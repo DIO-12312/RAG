@@ -388,6 +388,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes` | Docker 公共入口复用 Function；run 统一由 Earthfile 顺序准备共享卷、等待 RAG、启动产品服务与容器化 Vue 前端；验证 suite、静默校验 Compose、扫描日志和持久卷保护。eval 同时收集既有 30 问与 PDF 五十问。此离线静态契约不替代 Windows/WSL/Linux 的实际启动验收。 |
 | 同上 | `test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths` | Docker 入口构建安全材料/ES/bootstrap 服务，并仅向测试容器传递 ES password file 与 CA path。 |
 | 同上 | `test_containerized_web_upload_limits_match_supported_rag_sources` | 前端与 Go 白名单一致接纳 PDF、CHM/CHI、Markdown、文本和代码；Nginx 为 32 MiB 文件及 multipart 开销设置 34 MiB 请求上限。 |
+| 同上 | `test_containerized_web_proxies_product_health_checks` | 容器化 Nginx 必须将 `/healthz`、`/readyz` 转发到 Go API，防止 SPA fallback 返回 HTML 造成公网健康假阳性。 |
 | `test_container_artifacts.py` | `test_package_and_container_use_canonical_root_readme` | GitHub 首页、Python package、Docker 镜像与 Earthly 依赖安装统一使用仓库根 README，禁止保留重复入口。 |
 | `test_search_guard_assets.py` | `test_development_material_generator_creates_separate_node_and_client_secrets` | development 材料生成器使用独立 node/admin 私钥，客户端密码不回显到进程输出。 |
 | 同上 | `test_development_material_generator_writes_certificate_key_identifiers` | development CA 与节点证书生成 SKI/AKI，保证运行时 TLS 链校验可用。 |
