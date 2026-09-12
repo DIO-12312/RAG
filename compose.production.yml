@@ -170,7 +170,10 @@ services:
     environment:
       discovery.type: single-node
       ES_JAVA_OPTS: ${RAG_ES_JAVA_OPTS:-Xms1g -Xmx1g}
-    volumes: [elasticsearch-data:/usr/share/elasticsearch/data]
+      path.repo: /mnt/snapshots
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+      - ${PRODUCTION_BACKUP_DIR:?set PRODUCTION_BACKUP_DIR}/elasticsearch:/mnt/snapshots
     secrets: *elasticsearch-node-secrets
     depends_on:
       production-material-check:

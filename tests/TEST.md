@@ -412,6 +412,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_production_caddy_is_only_public_entrypoint` | P0-3 仅允许 Caddy 发布宿主机 80/443，固定域名与 ACME 配置、34 MiB 上传上限、`/api` 前缀转发和 SSE 禁止缓冲；不签发真实证书。 |
 | 同上 | `test_production_model_callers_have_egress_without_exposing_infrastructure` | 生产 Compose 为调用公网 Embedding/Rerank 的 RAG Server/Worker 提供独立出网网络，同时保持 MySQL、NATS、Elasticsearch 仅连接隔离后端且所有这些服务均不发布宿主机端口。 |
 | 同上 | `test_production_uses_one_shared_encryption_key_for_go_and_python` | Go 产品 API 与 Python RAG Server/Worker 必须挂载同一个产品加密 Secret，保证 Dataset 模型配置可跨进程解密，禁止定义易漂移的第二份密钥。 |
+| 同上 | `test_production_runbook_supports_snapshot_restore_and_ip_only_staging` | P0-4 生产 Compose 为 ES 声明宿主机持久化 snapshot repository；runbook 将裸 IP 私网预启动与域名公网启用分开，并保留 snapshot restore 和禁止删卷边界。 |
 | 同上 | `test_secret_scanner_fails_without_echoing_the_secret` | 日志命中模型密钥时扫描失败且不回显 Secret。 |
 | 同上 | `test_secret_scanner_detects_elasticsearch_password_without_echoing_it` | 日志命中 Elasticsearch password file 的内容时扫描失败且不回显该密码。 |
 | 同上 | `test_healthcheck_parses_ndjson_and_requires_every_process_to_be_healthy` | 健康检查要求基础设施和应用健康、迁移成功退出。 |

@@ -253,7 +253,7 @@ development/test 的 Compose 最终服务顺序固定为 `rag-security-materials
 
 生产使用根目录 `compose.production.yml` 与 `deploy/production/` 的单机 Compose 编排；它不是 development/test Compose 的 override，且只能只读挂载外部 CA/node/admin/client Secret，禁止定义或启动 `rag-security-materials`。`production-material-check` 必须先以 `--environment production` 验证材料；任何材料缺失、权限不正确或证书主体不匹配都必须阻断 ES、bootstrap 与下游服务启动。该 manifest 只发布 Caddy 的 80/443，将 MySQL、NATS、Elasticsearch、Python gRPC、Go API 与 web 放在 Compose 私网；Caddy 是唯一 HTTPS 入口，并负责 34 MiB 请求上限与 SSE 立即转发。公网证书要求可解析到部署主机的域名，只有裸公网 IP 时不得宣称 HTTPS 已验收。它是单机部署基线，不等同 Kubernetes/多节点高可用，也不得从 development/test Compose 推断其安全性。
 
-生产升级是维护窗口中的全量重启 runbook：先创建并验证 snapshot、禁用 shard allocation、停止全部节点并备份 data volume；再校验精确 ES/插件镜像与 checksum，预置外部 CA/node/admin/client 密钥并完成上述生产材料校验；只在其成功后由 production 编排启动 ES 和 bootstrap。bootstrap/health 通过后、恢复 allocation/业务前，必须创建新的受保护目标数据卷/集群，执行并验证已确认 snapshot restore，核对预期索引、文档计数/完整性与一次 RAG 可检索性；restore 或核验失败必须保持停止。只有这些恢复验证及 `rag_mvp` 索引边界通过后才启动下游服务并恢复 allocation。证书、密码或 bootstrap 失败立即停止；回滚仅使用已验证 snapshot 与旧镜像，始终保留私网端口策略。若怀疑历史 9200 暴露，必须轮换密码/证书、审查操作日志并重建可信索引。完整操作步骤见 Linux/Windows 安装手册。
+生产升级是维护窗口中的全量重启 runbook：先通过 `PRODUCTION_BACKUP_DIR` 挂载的宿主机持久化 repository 创建并验证 snapshot、禁用 shard allocation、停止全部节点并备份 data volume；再校验精确 ES/插件镜像与 checksum，预置外部 CA/node/admin/client 密钥并完成上述生产材料校验；只在其成功后由 production 编排启动 ES 和 bootstrap。bootstrap/health 通过后、恢复 allocation/业务前，必须创建新的受保护目标数据卷/集群，执行并验证已确认 snapshot restore，核对预期索引、文档计数/完整性与一次 RAG 可检索性；restore 或核验失败必须保持停止。只有这些恢复验证及 `rag_mvp` 索引边界通过后才启动下游服务并恢复 allocation。证书、密码或 bootstrap 失败立即停止；回滚仅使用已验证 snapshot 与旧镜像，始终保留私网端口策略。若怀疑历史 9200 暴露，必须轮换密码/证书、审查操作日志并重建可信索引。完整操作步骤见生产部署手册及 Linux/Windows 安装手册。
 
 ### 3.5 不直接复制 RAGFlow 的部分
 

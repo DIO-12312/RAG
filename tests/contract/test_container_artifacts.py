@@ -231,6 +231,30 @@ def test_production_uses_one_shared_encryption_key_for_go_and_python() -> None:
     assert "rag_model_encryption_key" not in production["secrets"]
 
 
+def test_production_runbook_supports_snapshot_restore_and_ip_only_staging() -> None:
+    """运维手册必须给出可持久化 snapshot 路径和裸 IP 阶段的安全停点。"""
+
+    production_text = (ROOT / "compose.production.yml").read_text(encoding="utf-8")
+    production = yaml.safe_load(production_text)
+    elasticsearch = production["services"]["elasticsearch"]
+
+    assert "path.repo" in elasticsearch["environment"]
+    assert elasticsearch["environment"]["path.repo"] == "/mnt/snapshots"
+    assert any(
+        "PRODUCTION_BACKUP_DIR" in mount and mount.endswith(":/mnt/snapshots")
+        for mount in elasticsearch["volumes"]
+    )
+    assert "PRODUCTION_BACKUP_DIR:?set PRODUCTION_BACKUP_DIR" in production_text
+
+    runbook = (ROOT / "docs" / "deployment-production.md").read_text(encoding="utf-8")
+    assert "--scale caddy=0" in runbook
+    assert "不得将公网 IP 填入 `RAG_PUBLIC_DOMAIN`" in runbook
+    assert '"type": "fs"' in runbook
+    assert "_snapshot/rag_production" in runbook
+    assert "docker compose down -v" in runbook
+    assert "禁止执行" in runbook
+
+
 def test_secret_scanner_fails_without_echoing_the_secret() -> None:
     """验证本测试场景的预期行为与边界条件。"""
     secret = "contract-secret-sentinel"
