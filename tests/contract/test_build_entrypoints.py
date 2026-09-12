@@ -33,6 +33,11 @@ def test_makefile_offline_targets_are_commented_earthly_only_entrypoints() -> No
     assert "EARTHLY_FLAGS ?=" in makefile
     assert (ROOT / ".earthly.env").read_text(encoding="utf-8").startswith("# Intentionally empty")
     earthfile_targets = {
+        "release-check",
+        "release-publish",
+        "production-baseline",
+        "production-deploy",
+        "production-recover",
         "proto",
         "lint",
         "test",
@@ -246,6 +251,11 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
     earthfile = _text("Earthfile")
     compose = _text("docker-compose.yml")
     public = {
+        "release-check",
+        "release-publish",
+        "production-baseline",
+        "production-deploy",
+        "production-recover",
         "all",
         "proto",
         "lint",

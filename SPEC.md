@@ -255,6 +255,32 @@ development/test 的 Compose 最终服务顺序固定为 `rag-security-materials
 
 生产升级是维护窗口中的全量重启 runbook：先通过 `PRODUCTION_BACKUP_DIR` 挂载的宿主机持久化 repository 创建并验证 snapshot、禁用 shard allocation、停止全部节点并备份 data volume；再校验精确 ES/插件镜像与 checksum，预置外部 CA/node/admin/client 密钥并完成上述生产材料校验；只在其成功后由 production 编排启动 ES 和 bootstrap。bootstrap/health 通过后、恢复 allocation/业务前，必须创建新的受保护目标数据卷/集群，执行并验证已确认 snapshot restore，核对预期索引、文档计数/完整性与一次 RAG 可检索性；restore 或核验失败必须保持停止。只有这些恢复验证及 `rag_mvp` 索引边界通过后才启动下游服务并恢复 allocation。证书、密码或 bootstrap 失败立即停止；回滚仅使用已验证 snapshot 与旧镜像，始终保留私网端口策略。若怀疑历史 9200 暴露，必须轮换密码/证书、审查操作日志并重建可信索引。完整操作步骤见生产部署手册及 Linux/Windows 安装手册。
 
+### 3.4.1 main 分支应用镜像自动发布
+
+GitHub Actions `deploy.yml` 仅响应 `DIO-12312/RAG` 的 main push；以 `make release-check`
+经 Earthfile 执行 Python/Go/前端门禁后，`make release-publish` 发布 linux/amd64 的 RAG、
+Go API、Web、Search Guard bootstrap、Elasticsearch 镜像至 GHCR。每个版本以完整 commit SHA
+标记，`release.json` 记录实际 registry digest，生产应用只接受批准仓库的 digest 引用，拉取后
+验证镜像 revision 与事件 SHA 一致。镜像发布使用 GITHUB_TOKEN 的 packages:write；部署登录使用
+已有 `MIRROR` 私钥与 `HOST` known_hosts，服务器拉取使用 `GHCR_USERNAME`/`GHCR_TOKEN`。
+
+自动发布是单机短暂停服切换，不保证 SSE 连接不中断。部署服务端由 systemd 托管，GitHub
+并发组不取消执行中的发布，主机 flock 互斥，成功版本序号防止旧任务覆盖新版本。代码通过
+git archive 放入 `/data/RAG/.releases/` 独立版本目录，不覆盖开发工作区。
+首次启用前由 `make production-baseline RELEASE_SHA=<已部署源码SHA>` 记录实际运行镜像及已解析
+生产 Compose 到 `/var/lib/rag-deploy`（0700/0600，仅主机）。应用镜像用本地 rollback tag 保留；
+后续 `make production-deploy` 沿用该配置、拉取镜像成功后才停止应用，通过 --no-deps/--no-build/
+--pull never 仅替换 Server/Worker/Outbox/API/Web，并复核容器、API readiness、Web 页面与 Caddy 路由。
+不自动执行 Python migration，不替换 MySQL/ES/NATS/Caddy 或 Search Guard 配置。
+
+迁移目录、Go storage/启动代码、领域数据、RPC、ES/元数据 adapter、生产 Compose/Caddy 和
+Search Guard 资产的兼容性摘要发生变化时，在停服前拒绝发布，需按维护部署流程升级并重新
+建立基线。此门禁是保守变化检测，不是任意代码的数据向后兼容证明；业务变更仍须审查旧版
+可读取新版写入数据。失败回退仅恢复应用镜像，不自动回滚数据库或用户数据。
+切换前写持久化 pending journal；失败恢复上一版本，恢复失败保留 journal 并报错，下一次部署
+或 `make production-recover` 优先恢复。主机断电后 journal 不自动执行，需要该恢复命令或下次部署。
+当前范围不含镜像签名、漏洞扫描平台、异机备份自动化；不得把离线模拟通过视为 GHCR/SSH 实际部署通过。
+
 ### 3.5 不直接复制 RAGFlow 的部分
 
 RAGFlow 需要复杂文档理解、多个检索引擎、对象存储、模型提供商、双语言后端、Agent Canvas 和大量连接器，因此使用了更复杂的 Quart/Peewee、Redis、MinIO、ES/Infinity、深度解析及多层任务体系。本项目借鉴其领域边界、幂等摄取、混合检索和引用血缘，不复制其产品规模和双实现负担。

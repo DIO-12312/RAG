@@ -1,5 +1,8 @@
 # Ubuntu 公网部署与回滚手册
 
+main 分支 GHCR 发布与应用镜像回退见 [自动发布手册](deployment-release.md)。
+手工 `production-run` 为现场构建维护入口；自动发布独立使用 `production-deploy`。
+
 这份手册对应单机 `compose.production.yml`，不替代高可用、Kubernetes 或托管数据库方案。只有公网 IP 时可以启动 Caddy 的 HTTP 入口并通过 `http://49.235.110.118` 验收页面，但不能完成浏览器认可的公网 HTTPS 验收。域名模式必须使用真实域名的 A/AAAA 记录，不得将公网 IP 填入域名 HTTPS 配置。
 
 ## 主机预检

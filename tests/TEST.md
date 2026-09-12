@@ -64,6 +64,28 @@ apps/web/tests/
 
 ## 目录树
 
+### 自动发布与回退验证
+
+目录新增 `tests/contract/test_release_deployment.py`。既有
+`test_build_entrypoints.py` 的公开 Make target 集合纳入 release-check/release-publish/
+production-baseline/production-deploy/production-recover；仍校验 Earthfile 委托及卷保护。
+
+| 测试文件 / 函数 | 职责与运行边界 |
+| --- | --- |
+| `contract/test_release_deployment.py::test_release_success_persists_previous_and_never_recreates_infrastructure` | 发布状态持久化、只更新应用、不触发迁移或基础设施重建 |
+| `test_release_failure_restores_images_and_preserves_active_state` | 拉取、部分更新、代理 reload 失败的回退，拉取失败不停止应用 |
+| `test_failed_rollback_keeps_journal_for_next_recovery` | 回退再次失败保留 journal，下次恢复旧镜像 |
+| `test_schema_change_and_stale_release_fail_before_stop` | 兼容边界变化及过期序号在停服前拒绝 |
+| `test_manifest_rejects_mutable_tag_wrong_sha_and_registry` | 错误 SHA、浮动标签、非批准镜像仓库拒绝 |
+| `test_deploy_workflow_requires_checks_and_uses_existing_secret_names` | main 触发、门禁顺序、部署不取消、已有 Secret 名称和 SSH 主机校验 |
+| `test_health_failure_after_switch_rolls_back` | 新版探针失败后恢复旧镜像和 active 状态 |
+| `test_image_drift_and_revision_mismatch_block_before_stopping` | 手工镜像漂移或拉取镜像 revision 不匹配时停服前拒绝 |
+| `test_baseline_uses_actual_image_ids_and_refuses_overwrite` | 首次基线使用实际运行 Image ID，加保留标签且不替换容器；禁止覆盖 |
+| `DockerSimulator` | 仅 Docker 命令边界替身，使用真实临时文件与状态 journal；不代表真实 Docker/SSH/GHCR 验收 |
+
+以上纳入 `make ci`，不连接生产服务。Go/前端发布门禁由 `make release-check` 经 Earthfile 运行；
+真实 GHCR push 与生产切换需合入 main 后单独验收，不由离线测试结果推断。
+
 ### 2026-09-06 产品体验与模型配置补充
 
 | 文件 | 用例 / 职责 | 运行边界 |
@@ -97,6 +119,7 @@ tests/
 │  ├─ test_parser_chunker_contract.py
 │  ├─ test_proto_contract.py
 │  ├─ test_retry_job_contract.py
+│  ├─ test_release_deployment.py             # GHCR 清单、发布顺序、应用回退与中断恢复
 │  ├─ test_search_engine_contract.py
 │  ├─ test_search_guard_assets.py           # Search Guard 镜像、TLS 材料和最小权限边界
 │  └─ test_task_queue_contract.py

@@ -1,0 +1,77 @@
+name: Deploy production
+
+"on":
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Finish or roll back the current deployment before considering another push.
+concurrency:
+  group: rag-production
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    if: github.repository == 'DIO-12312/RAG'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    env:
+      EARTHLY_DISABLE_ANALYTICS: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install verified Earthly
+        run: |
+          mkdir -p "$RUNNER_TEMP/earthly-bin"
+          cd "$RUNNER_TEMP/earthly-bin"
+          curl --fail --silent --show-error --location --retry 3 --connect-timeout 10 --max-time 180 \
+            https://github.com/earthly/earthly/releases/download/v0.8.16/earthly-linux-amd64 --output earthly
+          echo '3ef3163c81bdd10e28ab31cd96e35c1856d97478c8ce7f20954b8bea7a598404  earthly' | sha256sum --check --strict
+          chmod +x earthly
+          echo "$RUNNER_TEMP/earthly-bin" >> "$GITHUB_PATH"
+
+      - name: Test all application layers
+        run: make release-check
+
+      - name: Authenticate publisher
+        env:
+          PUBLISH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$PUBLISH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Build and publish immutable release
+        run: make release-publish RELEASE_SHA="$GITHUB_SHA"
+
+      - name: Prepare deployment connection
+        env:
+          SSH_KEY: ${{ secrets.MIRROR }}
+          KNOWN_HOSTS: ${{ secrets.HOST }}
+        run: |
+          umask 077
+          test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS"
+          mkdir -p "$RUNNER_TEMP/deploy-ssh"
+          printf '%s\n' "$SSH_KEY" > "$RUNNER_TEMP/deploy-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
+
+      - name: Transfer release and start durable deployment
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          bash deploy/production/send-release.sh
+
+      - name: Remove runner credentials
+        if: always()
+        run: |
+          docker logout ghcr.io
+          if test -d "$RUNNER_TEMP/deploy-ssh"; then rm -r -- "$RUNNER_TEMP/deploy-ssh"; fi

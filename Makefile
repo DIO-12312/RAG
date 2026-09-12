@@ -1,10 +1,35 @@
 EARTHLY ?= earthly
+.DEFAULT_GOAL := all
 EARTHLY_ENV_FILE ?= .earthly.env
 EARTHLY_FLAGS ?=
 SUITE ?= all
 EVAL_FIXTURE ?= rephrased
 PRODUCTION_ENV_FILE ?= /etc/rag-mvp/.env.production
 PUBLIC_MODE ?= ip
+RELEASE_SHA ?=
+RELEASE_SEQUENCE ?=
+
+.PHONY: release-check release-publish production-baseline production-deploy production-recover
+
+# 校验 Python、Go 和前端发布门禁
+release-check:
+	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +release-check
+
+# 构建推送 GHCR 镜像并记录不可变 digest
+release-publish:
+	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +release-publish --RELEASE_SHA="$(RELEASE_SHA)"
+
+# 记录当前健康生产栈以便首次自动发布回退
+production-baseline:
+	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +production-baseline --RELEASE_SHA="$(RELEASE_SHA)" --PRODUCTION_ENV_FILE="$(PRODUCTION_ENV_FILE)"
+
+# 从 release.json 指定的镜像切换生产应用
+production-deploy:
+	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +production-deploy --RELEASE_SHA="$(RELEASE_SHA)" --RELEASE_SEQUENCE="$(RELEASE_SEQUENCE)"
+
+# 恢复中断的生产发布
+production-recover:
+	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +production-recover
 
 .PHONY: all proto lint test ci docker-up docker-test docker-down run production-run web-restart clear help
 
@@ -57,6 +82,11 @@ clear:
 
 # 显示命令说明
 help:
+	@echo make release-check - 校验 Python、Go 与前端发布门禁
+	@echo make release-publish RELEASE_SHA=SHA - 推送 GHCR 镜像与 digest 清单
+	@echo make production-baseline RELEASE_SHA=SHA - 记录现有生产回退基线
+	@echo make production-deploy RELEASE_SHA=SHA RELEASE_SEQUENCE=N - 从 release.json 部署应用
+	@echo make production-recover - 恢复中断的应用切换
 	@echo make all    - 运行 proto、lint、test、docker-up 和 docker-test，必须得在uv的虚拟环境下运行
 	@echo make proto  - 重新生成并校验 protobuf 代码
 	@echo make lint   - 运行 Ruff、格式化、mypy 和 protobuf 检查，必须得在uv的虚拟环境下运行

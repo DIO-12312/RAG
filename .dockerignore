@@ -21,4 +21,7 @@ logs/
 plans/
 proto/
 tests/
+.releases/
+release.json
+release.tar.gz
 

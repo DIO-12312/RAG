@@ -28,10 +28,12 @@ python-workspace:
     COPY apps ./apps
     COPY backend ./backend
     COPY Earthfile Makefile Dockerfile Dockerfile.elasticsearch docker-compose.yml docker-compose.debug.yml compose.product.yml compose.production.yml alembic.ini ./
+    COPY Dockerfile.search-guard-bootstrap ./
     COPY deploy ./deploy
     COPY SPEC.md PLAN.md AGENTS.md ./
     COPY .dockerignore .gitattributes .earthly.env ./
     COPY .github/workflows/quality.yml ./.github/workflows/quality.yml
+    COPY .github/workflows/deploy.yml ./.github/workflows/deploy.yml
     COPY .github/main-ruleset.json ./.github/main-ruleset.json
     RUN uv sync --frozen --group dev
 
@@ -106,6 +108,54 @@ ci:
     FROM +python-workspace
     BUILD +lint
     BUILD +test
+
+# Validate Go application behavior in its pinned build environment.
+release-go-check:
+    FROM golang:1.26.2-bookworm
+    WORKDIR /app
+    COPY backend/go-api/ ./
+    RUN go test ./...
+
+# Validate the shipped frontend with locked dependencies.
+release-web-check:
+    FROM node:22-slim
+    WORKDIR /app
+    COPY apps/web/ ./
+    RUN npm ci
+    RUN npm test -- --run
+    RUN npm run build
+
+# Require all product quality gates before publishing a release.
+release-check:
+    FROM +python-workspace
+    BUILD +ci
+    BUILD +release-go-check
+    BUILD +release-web-check
+
+# Publish commit-tagged images and export their immutable digest manifest.
+release-publish:
+    LOCALLY
+    ARG RELEASE_SHA
+    RUN python3 scripts/release.py publish --sha "$RELEASE_SHA" --manifest release.json
+
+# Capture the healthy, already deployed production baseline without replacing services.
+production-baseline:
+    LOCALLY
+    ARG RELEASE_SHA
+    ARG PRODUCTION_ENV_FILE=/etc/rag-mvp/.env.production
+    RUN python3 scripts/release.py baseline --sha "$RELEASE_SHA" --env-file "$PRODUCTION_ENV_FILE"
+
+# Pull and replace only applications; recover the previous release on health failure.
+production-deploy:
+    LOCALLY
+    ARG RELEASE_SHA
+    ARG RELEASE_SEQUENCE
+    RUN python3 scripts/release.py deploy --sha "$RELEASE_SHA" --sequence "$RELEASE_SEQUENCE" --manifest release.json
+
+# Resume the durable rollback journal following interruption or a host restart.
+production-recover:
+    LOCALLY
+    RUN python3 scripts/release.py recover
 
 # Validate, build, and start the complete Compose topology; requires Docker and a valid .env.
 DOCKER_START:

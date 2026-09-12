@@ -1,5 +1,10 @@
 # 公网生产部署差距分析（对照 RAGFlow）
 
+> 本文下方为历史差距分析，含已过时的现状描述。当前生产拓扑见
+> `docs/deployment-production.md`。新增 main → GHCR → 应用短暂切换与失败回退实现，详见
+> `docs/deployment-release.md`；实际启用需 workflow 合入 main、GitHub Secrets 和主机基线就绪。
+> Caddy、认证、生产 Compose 与前端容器已交付，不能继续按下文“完全没有”的历史描述判断。
+
 ---
 
 ## 一、核心判断

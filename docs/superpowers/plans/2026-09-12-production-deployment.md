@@ -13,7 +13,7 @@
 | P0-3 公网入口 | Caddyfile 与 web/api 路由 | IP 模式 HTTP 公网访问；域名模式自动 HTTPS/HTTP→HTTPS；34 MiB 上传上限、SSE 不缓冲、SPA fallback、转发头正确。 |
 | P0-4a 运维基线 | 部署、健康、备份、升级、回滚 runbook 与 ES snapshot 宿主机路径 | 静态契约覆盖裸 IP 安全停点、snapshot repository、证书失败停止及禁止删卷。 |
 | P0-4b 主机演练 | 在真实主机执行启动、备份、恢复和回滚 | 可演练启动、恢复、证书失败停止及旧镜像/snapshot 回滚，并保存脱敏验收记录。 |
-| P0-5 发布自动化 | 镜像构建、签名/扫描、服务器拉取与受控 rollout | 当前仓库尚未交付；不能把 Compose 模板当作 CI/CD 已完成。 |
+| P0-5 发布自动化 | 镜像构建、签名/扫描、服务器拉取与受控 rollout | 已新增 main/GHCR/短暂切换与应用回退实现；测试记录见 deployment-release.md，真实发布待合入启用；签名/扫描仍未交付。 |
 
 P0-1 与 P0-4b 需要真实服务器和云账号权限，不能由仓库内静态检查替代。P0-5 是后续工作，且任何服务器自动化不得读取或提交真实 Secret。
 
