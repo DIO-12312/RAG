@@ -74,7 +74,7 @@ development/test 的 Compose 服务名与顺序为：`rag-security-materials →
 
 ### 生产编排边界
 
-单机生产基线由根目录 `compose.production.yml` 和 `deploy/production/` 提供；它与 development/test Compose 独立，不能作为 override 混用。该编排只读挂载外部 CA/node/admin/client Secret，禁止定义或启动 `rag-security-materials`；`production-material-check` 在 ES 之前运行 `--environment production` 的材料校验。材料缺失、权限错误或证书主体不匹配时，必须阻断 ES、bootstrap 与下游服务启动。P0-2 基线不发布任何宿主端口；MySQL、NATS、Elasticsearch、Python gRPC、Go API 与 web 仅在 Compose 网络通信，公网入口由独立 P0-3 工作包接入。该编排是单机基线，Kubernetes、HA、跨节点对象存储和平台级 Secret 管理仍是后续工作；development/test Compose 不能替代或推断为生产部署。
+单机生产基线由根目录 `compose.production.yml` 和 `deploy/production/` 提供；它与 development/test Compose 独立，不能作为 override 混用。该编排只读挂载外部 CA/node/admin/client Secret，禁止定义或启动 `rag-security-materials`；`production-material-check` 在 ES 之前运行 `--environment production` 的材料校验。材料缺失、权限错误或证书主体不匹配时，必须阻断 ES、bootstrap 与下游服务启动。Caddy 是唯一发布 80/443 的服务并负责公网 HTTPS；MySQL、NATS、Elasticsearch、Python gRPC、Go API 与 web 仅在 Compose 私网通信。公网证书要求可解析到部署主机的域名，只有裸公网 IP 时不能完成 HTTPS 验收。该编排是单机基线，Kubernetes、HA、跨节点对象存储和平台级 Secret 管理仍是后续工作；development/test Compose 不能替代或推断为生产部署。
 
 已有 `elasticsearch-data` 卷不可原地升级为带插件的集群；迁移 runbook 必须要求维护窗口、备份/快照、停止所有节点、安装插件、挂载证书、初始化、验证，再恢复 shard allocation。测试环境使用独立卷，不得以删除生产卷作为迁移手段。
 

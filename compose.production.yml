@@ -299,7 +299,7 @@ services:
     entrypoint: ["/bin/sh", "-ec", "export PRODUCT_MYSQL_DSN=\"$$(cat /run/secrets/product_mysql_dsn)\"; exec product"]
     environment:
       PRODUCT_HTTP_ADDR: 0.0.0.0:8080
-      PRODUCT_ORIGIN: ${PRODUCT_ORIGIN:?set PRODUCT_ORIGIN in .env.production}
+      PRODUCT_ORIGIN: https://${RAG_PUBLIC_DOMAIN:?set RAG_PUBLIC_DOMAIN in .env.production}
       PRODUCT_RAG_TARGET: rag-server:50051
       PRODUCT_KEY_DIR: /run/model-keys
       PRODUCT_COOKIE_SECURE: "true"
@@ -334,6 +334,23 @@ services:
     networks: [edge]
     restart: unless-stopped
 
+  caddy:
+    image: caddy:2.10.2-alpine
+    environment:
+      RAG_PUBLIC_DOMAIN: ${RAG_PUBLIC_DOMAIN:?set RAG_PUBLIC_DOMAIN in .env.production}
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:?set CADDY_ACME_EMAIL in .env.production}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/production/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      web: {condition: service_started}
+    networks: [edge]
+    restart: unless-stopped
+
 networks:
   edge: {}
   egress: {}
@@ -346,6 +363,8 @@ volumes:
   elasticsearch-data: {}
   nats-data: {}
   object-data: {}
+  caddy-data: {}
+  caddy-config: {}
 
 secrets:
   sg_node_ca:

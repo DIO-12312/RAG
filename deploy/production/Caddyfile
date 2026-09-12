@@ -1,0 +1,39 @@
+{
+	email {$CADDY_ACME_EMAIL}
+	servers {
+		timeouts {
+			read_body 10m
+			read_header 30s
+			idle 2m
+		}
+	}
+}
+
+{$RAG_PUBLIC_DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 34MB
+	}
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+
+	# Reserved explicit API prefix for external integrations. The Vue client keeps
+	# its existing same-origin root paths, which are handled by the web container.
+	@prefixed_api path /api /api/*
+	handle @prefixed_api {
+		uri strip_prefix /api
+		reverse_proxy api:8080 {
+			flush_interval -1
+		}
+	}
+
+	# The web container owns SPA fallback and forwards the existing root API paths.
+	handle {
+		reverse_proxy web:80 {
+			flush_interval -1
+		}
+	}
+}

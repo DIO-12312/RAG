@@ -147,7 +147,11 @@ def test_production_compose_keeps_services_private_and_uses_external_secret_mate
     production = (ROOT / "compose.production.yml").read_text(encoding="utf-8")
     production_config = yaml.safe_load(production)
 
-    assert all("ports" not in service for service in production_config["services"].values())
+    assert all(
+        "ports" not in service
+        for name, service in production_config["services"].items()
+        if name != "caddy"
+    )
     assert "production-material-check:" in production
     assert "rag-security-materials:" not in production
     assert '"--environment", "production"' in production
@@ -162,6 +166,32 @@ def test_production_compose_keeps_services_private_and_uses_external_secret_mate
     }
     assert "sg_admin_certificate" not in elasticsearch_secret_sources
     assert "sg_admin_key" not in elasticsearch_secret_sources
+
+
+def test_production_caddy_is_only_public_entrypoint() -> None:
+    """公网入口只能由 Caddy 发布 80/443，并保留上传与 SSE 契约。"""
+
+    production_text = (ROOT / "compose.production.yml").read_text(encoding="utf-8")
+    production = yaml.safe_load(production_text)
+    services = production["services"]
+
+    assert services["caddy"]["ports"] == ["80:80", "443:443"]
+    assert all("ports" not in service for name, service in services.items() if name != "caddy")
+    assert services["caddy"]["networks"] == ["edge"]
+    assert services["caddy"]["volumes"] == [
+        "./deploy/production/Caddyfile:/etc/caddy/Caddyfile:ro",
+        "caddy-data:/data",
+        "caddy-config:/config",
+    ]
+    assert "RAG_PUBLIC_DOMAIN:?set RAG_PUBLIC_DOMAIN" in production_text
+    assert "CADDY_ACME_EMAIL:?set CADDY_ACME_EMAIL" in production_text
+    assert "PRODUCT_ORIGIN: https://${RAG_PUBLIC_DOMAIN" in production_text
+
+    caddyfile = (ROOT / "deploy" / "production" / "Caddyfile").read_text(encoding="utf-8")
+    assert "{$RAG_PUBLIC_DOMAIN}" in caddyfile
+    assert "max_size 34MB" in caddyfile
+    assert "uri strip_prefix /api" in caddyfile
+    assert caddyfile.count("flush_interval -1") == 2
 
 
 def test_production_model_callers_have_egress_without_exposing_infrastructure() -> None:

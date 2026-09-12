@@ -408,7 +408,8 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_compose_declares_migration_health_role_secrets_and_shared_storage` | Compose 固定迁移顺序、健康依赖、共享对象卷及模型密钥角色边界。 |
 | 同上 | `test_compose_keeps_infrastructure_private_and_orders_search_guard_bootstrap` | 默认 Compose 不发布 MySQL/NATS/ES，且安全材料、ES、Search Guard bootstrap 与下游服务按 fail-closed 顺序启动。 |
 | 同上 | `test_debug_override_binds_elasticsearch_to_loopback_only` | 调试 override 仅将受 TLS/认证保护的 ES 绑定到 `127.0.0.1`。 |
-| 同上 | `test_production_compose_keeps_services_private_and_uses_external_secret_material` | P0-2 生产 Compose 保持全部服务无宿主端口、使用私网网络和外部 file-backed Secret，并关闭 Reflection、启用 Secure Cookie；不连接服务器。 |
+| 同上 | `test_production_compose_keeps_services_private_and_uses_external_secret_material` | P0-2 生产 Compose 保持 Caddy 之外的服务无宿主端口、使用私网网络和外部 file-backed Secret，并关闭 Reflection、启用 Secure Cookie；不连接服务器。 |
+| 同上 | `test_production_caddy_is_only_public_entrypoint` | P0-3 仅允许 Caddy 发布宿主机 80/443，固定域名与 ACME 配置、34 MiB 上传上限、`/api` 前缀转发和 SSE 禁止缓冲；不签发真实证书。 |
 | 同上 | `test_production_model_callers_have_egress_without_exposing_infrastructure` | 生产 Compose 为调用公网 Embedding/Rerank 的 RAG Server/Worker 提供独立出网网络，同时保持 MySQL、NATS、Elasticsearch 仅连接隔离后端且所有这些服务均不发布宿主机端口。 |
 | 同上 | `test_production_uses_one_shared_encryption_key_for_go_and_python` | Go 产品 API 与 Python RAG Server/Worker 必须挂载同一个产品加密 Secret，保证 Dataset 模型配置可跨进程解密，禁止定义易漂移的第二份密钥。 |
 | 同上 | `test_secret_scanner_fails_without_echoing_the_secret` | 日志命中模型密钥时扫描失败且不回显 Secret。 |
