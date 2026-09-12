@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 type Evidence struct {
@@ -42,6 +43,10 @@ type Message struct {
 type Model interface {
 	Complete(context.Context, []Message, bool) (Message, error)
 }
+
+type StreamingModel interface {
+	Stream(context.Context, []Message, bool, func(string) error, func(ToolCall) error) error
+}
 type Retriever interface {
 	Retrieve(context.Context, string, string, int) ([]Evidence, error)
 }
@@ -52,6 +57,7 @@ type Harness struct {
 	MaxRounds int
 	TopK      int
 	Budget    *ContextBudget
+	Streaming bool
 }
 
 var reference = regexp.MustCompile(`\[(\d+)\]`)
@@ -79,6 +85,7 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 	messages = budget.TrimMessages(messages)
 
 	citations := []Citation{}
+	streaming := false
 	seen := map[string]int{}
 	for round := 0; round < rounds; round++ {
 		if e := ctx.Err(); e != nil {
@@ -90,7 +97,42 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 			return "", nil, errors.New("context budget exceeded")
 		}
 
-		msg, e := h.Model.Complete(ctx, messages, round == 0)
+		var msg Message
+		var e error
+
+		if h.Streaming {
+			sm, ok := h.Model.(StreamingModel)
+			if !ok {
+				return "", nil, errors.New("model does not support streaming")
+			}
+			streaming = true
+			var content strings.Builder
+			var toolCalls []ToolCall
+
+			e = sm.Stream(
+				ctx,
+				messages,
+				round == 0,
+				func(delta string) error {
+					content.WriteString(delta)
+					return emit("token", map[string]any{"text": delta})
+				},
+				func(call ToolCall) error {
+					toolCalls = append(toolCalls, call)
+					return nil
+				},
+			)
+			if e == nil {
+				msg = Message{
+					Role:      "assistant",
+					Content:   content.String(),
+					ToolCalls: toolCalls,
+				}
+			}
+		} else {
+			msg, e = h.Model.Complete(ctx, messages, round == 0)
+		}
+
 		if e != nil {
 			return "", nil, e
 		}
@@ -114,8 +156,10 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 			if msg.Content == "" {
 				return "", nil, errors.New("model returned empty answer")
 			}
-			if e = emit("token", map[string]any{"text": msg.Content}); e != nil {
-				return "", nil, e
+			if !streaming {
+				if e = emit("token", map[string]any{"text": msg.Content}); e != nil {
+					return "", nil, e
+				}
 			}
 			return msg.Content, valid, nil
 		}

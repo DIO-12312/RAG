@@ -111,3 +111,102 @@ func TestUnknownToolBudgetAndCancellation(t *testing.T) {
 		t.Fatal("cancellation ignored")
 	}
 }
+
+type streamingModel struct {
+	deltas        []string
+	streamCalls   int
+	completeCalls int
+}
+
+func (m *streamingModel) Complete(ctx context.Context, _ []Message, _ bool) (Message, error) {
+	m.completeCalls++
+	return Message{Content: "fallback"}, ctx.Err()
+}
+
+func (m *streamingModel) Stream(
+	ctx context.Context,
+	_ []Message,
+	_ bool,
+	onDelta func(string) error,
+	onToolCall func(ToolCall) error,
+) error {
+	m.streamCalls++
+
+	if m.streamCalls == 1 {
+		call := ToolCall{ID: "stream-call-1", Type: "function"}
+		call.Function.Name = "rag_retrieve"
+		call.Function.Arguments = `{"query":"migration"}`
+		return onToolCall(call)
+	}
+
+	for _, delta := range m.deltas {
+		if err := onDelta(delta); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
+func TestHarnessUsesStreamingModel(t *testing.T) {
+	m := &streamingModel{
+		deltas: []string{"Migration ", "ends ", "in December. [1]"},
+	}
+	tool := &retriever{}
+	h := Harness{
+		Model:     m,
+		Tool:      tool,
+		Streaming: true,
+	}
+
+	var tokens []string
+	events := []string{}
+	emit := func(event string, data any) error {
+		events = append(events, event)
+		if event == "token" {
+			if v, ok := data.(map[string]any); ok {
+				if text, ok := v["text"].(string); ok {
+					tokens = append(tokens, text)
+				}
+			}
+		}
+		return nil
+	}
+
+	answer, citations, err := h.Run(
+		context.Background(),
+		"owned-dataset",
+		"question",
+		nil,
+		emit,
+	)
+	if err != nil {
+		t.Fatalf("streaming run failed: %v", err)
+	}
+	if answer != "Migration ends in December. [1]" {
+		t.Fatalf("unexpected answer: %q", answer)
+	}
+	if len(citations) != 1 {
+		t.Fatalf("expected 1 citation, got %d", len(citations))
+	}
+	if m.completeCalls != 0 {
+		t.Fatalf("streaming model fell back to Complete: %d calls", m.completeCalls)
+	}
+	if m.streamCalls != 2 {
+		t.Fatalf("expected 2 streaming calls, got %d", m.streamCalls)
+	}
+	if len(tokens) != 3 {
+		t.Fatalf("expected 3 token events, got %d", len(tokens))
+	}
+	if tokens[0] != "Migration " ||
+		tokens[1] != "ends " ||
+		tokens[2] != "in December. [1]" {
+		t.Fatalf("unexpected token events: %#v", tokens)
+	}
+	if len(events) != 4 ||
+		events[0] != "retrieval" ||
+		events[1] != "token" ||
+		events[2] != "token" ||
+		events[3] != "token" {
+		t.Fatalf("unexpected events: %#v", events)
+	}
+}

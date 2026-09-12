@@ -70,12 +70,23 @@ class PublicEndpointTransport(httpx.AsyncBaseTransport):
 
 
 class DatasetProfileGateway:
-    def __init__(self, key_file: Path, dataset: Dataset | None = None) -> None:
+    def __init__(
+        self,
+        key_file: Path,
+        dataset: Dataset | None = None,
+        *,
+        allow_local_models: bool = False,
+    ) -> None:
         self._key_file = key_file
         self._dataset = dataset
+        self._allow_local_models = allow_local_models
 
     def for_dataset(self, dataset: Dataset) -> ModelGateway:
-        return DatasetProfileGateway(self._key_file, dataset)
+        return DatasetProfileGateway(
+            self._key_file,
+            dataset,
+            allow_local_models=self._allow_local_models,
+        )
 
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
         dataset = self._dataset
@@ -111,8 +122,13 @@ class DatasetProfileGateway:
                     "EMBEDDING_PROFILE_INVALID", "embedding snapshot unavailable or invalid"
                 )
             ) from None
+        transport: httpx.AsyncBaseTransport
+        if self._allow_local_models:
+            transport = httpx.AsyncHTTPTransport(retries=0)
+        else:
+            transport = PublicEndpointTransport()
         async with httpx.AsyncClient(
-            transport=PublicEndpointTransport(),
+            transport=transport,
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=timeout,
             follow_redirects=False,

@@ -26,6 +26,7 @@ services:
       PRODUCT_RAG_TARGET: rag-server:50051
       PRODUCT_KEY_DIR: /var/lib/product
       PRODUCT_COOKIE_SECURE: "false"
+      PRODUCT_ALLOW_LOCAL_MODELS: "true"
     volumes:
       - product-keys:/var/lib/product
     ports:
