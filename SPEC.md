@@ -259,14 +259,11 @@ development/test 的 Compose 最终服务顺序固定为 `rag-security-materials
 
 GitHub Actions `deploy.yml` 仅响应 `DIO-12312/RAG` 的 main push；以 `make release-check`
 经 Earthfile 执行 Python/Go/前端门禁后，`make release-publish` 发布 linux/amd64 的 RAG、
-Go API、Web、Search Guard bootstrap、Elasticsearch 镜像至**唯一受控的发布仓库前缀**（当前为
-GHCR，见 `scripts/release.py` 的 `REGISTRY`）。每个版本以完整 commit SHA
-标记，`release.json` 记录实际 registry digest，生产应用只接受该批准前缀下的 digest 引用，拉取后
+Go API、Web、Search Guard bootstrap、Elasticsearch 镜像至 GHCR。每个版本以完整 commit SHA
+标记，`release.json` 记录实际 registry digest，生产应用只接受批准仓库的 digest 引用，拉取后
 验证镜像 revision 与事件 SHA 一致。Web 镜像同时以 `--build-arg VITE_GIT_COMMIT=<sha>` 把发布
-commit 编入前端产物，页面侧栏显示短 SHA 供人工核对线上版本，缺失该参数时显示 `unknown`。发布与部署
-登录使用 `REGISTRY_USERNAME`/`REGISTRY_TOKEN`，runner 与服务器共用同一凭据来源；部署登录使用
-已有 `MIRROR` 私钥与 `HOST` known_hosts。仓库前缀只允许在 `release.py` 中显式修改并同步
-Secrets 与文档，不支持按环境动态切换，避免部署端接受未批准仓库的镜像。
+commit 编入前端产物，页面侧栏显示短 SHA 供人工核对线上版本，缺失该参数时显示 `unknown`。镜像发布使用 GITHUB_TOKEN 的 packages:write；部署登录使用
+已有 `MIRROR` 私钥与 `HOST` known_hosts，服务器拉取使用 `GHCR_USERNAME`/`GHCR_TOKEN`。
 
 自动发布是单机短暂停服切换，不保证 SSE 连接不中断。部署服务端由 systemd 托管，GitHub
 并发组不取消执行中的发布，主机 flock 互斥，成功版本序号防止旧任务覆盖新版本。代码通过
@@ -283,7 +280,7 @@ Search Guard 资产的兼容性摘要发生变化时，在停服前拒绝发布�
 可读取新版写入数据。失败回退仅恢复应用镜像，不自动回滚数据库或用户数据。
 切换前写持久化 pending journal；失败恢复上一版本，恢复失败保留 journal 并报错，下一次部署
 或 `make production-recover` 优先恢复。主机断电后 journal 不自动执行，需要该恢复命令或下次部署。
-当前范围不含镜像签名、漏洞扫描平台、异机备份自动化；不得把离线模拟通过视为真实 registry/SSH 部署通过。发布仓库必须满足"主机可高速拉取"这一硬前提：主机直连国际 registry 的实测吞吐不足时必须改用同地域 registry，否则 `production-deploy` 会在镜像拉取阶段超时失败。
+当前范围不含镜像签名、漏洞扫描平台、异机备份自动化；不得把离线模拟通过视为 GHCR/SSH 实际部署通过。
 
 ### 3.5 不直接复制 RAGFlow 的部分
 

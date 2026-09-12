@@ -49,12 +49,8 @@ jobs:
 
       - name: Authenticate publisher
         env:
-          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
-        run: |
-          test -n "$REGISTRY_USERNAME" && test -n "$REGISTRY_TOKEN"
-          registry=$(python3 scripts/release.py registry)
-          printf '%s' "$REGISTRY_TOKEN" | docker login "${registry%%/*}" -u "$REGISTRY_USERNAME" --password-stdin
+          PUBLISH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$PUBLISH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
       - name: Build and publish immutable release
         run: make release-publish RELEASE_SHA="$GITHUB_SHA"
@@ -72,14 +68,13 @@ jobs:
 
       - name: Transfer release and start durable deployment
         env:
-          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
           bash deploy/production/send-release.sh
 
       - name: Remove runner credentials
         if: always()
         run: |
-          registry=$(python3 scripts/release.py registry || true)
-          if test -n "${registry:-}"; then docker logout "${registry%%/*}" || true; fi
+          docker logout ghcr.io
           if test -d "$RUNNER_TEMP/deploy-ssh"; then rm -r -- "$RUNNER_TEMP/deploy-ssh"; fi

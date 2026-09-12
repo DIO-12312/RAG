@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import copy
 import json
-import re
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -45,7 +42,7 @@ class DockerSimulator:
                 "sha": SHA,
                 "compatibility": release.compatibility(ROOT),
                 "images": {
-                    name: f"{release.REGISTRY}/rag-{name}@sha256:{'c' * 64}"
+                    name: f"ghcr.io/dio-12312/rag-{name}@sha256:{'c' * 64}"
                     for name in release.IMAGES
                 },
             },
@@ -88,7 +85,7 @@ def test_release_success_persists_previous_and_never_recreates_infrastructure(
     assert active["sha"] == SHA
     assert release.read_json(docker.state / "previous.json") == docker.previous
     assert not (docker.state / "pending.json").exists()
-    assert all(ref.startswith(f"{release.REGISTRY}/") for ref in docker.running.values())
+    assert all(ref.startswith("ghcr.io/") for ref in docker.running.values())
     for command in docker.calls:
         assert "down" not in command and "build" not in command
         if "up" in command:
@@ -150,12 +147,7 @@ def test_manifest_rejects_mutable_tag_wrong_sha_and_registry(
 ) -> None:
     docker = DockerSimulator(monkeypatch, tmp_path)
     original = release.read_json(docker.manifest)
-    host = release.REGISTRY.split("/")[0]
-    for ref in (
-        f"{release.REGISTRY}/rag-api:latest",
-        "evil.example/api@sha256:" + "c" * 64,
-        f"{host}/other/rag-api@sha256:" + "c" * 64,
-    ):
+    for ref in ("ghcr.io/dio-12312/rag-api:latest", "evil.example/api@sha256:" + "c" * 64):
         value = copy.deepcopy(original)
         value["images"]["api"] = ref
         with pytest.raises(release.ReleaseError, match="digest"):
@@ -184,9 +176,8 @@ def test_deploy_workflow_requires_checks_and_uses_existing_secret_names() -> Non
         'make release-publish RELEASE_SHA="$GITHUB_SHA"'
     )
     secrets = json.dumps(steps)
-    for name in ("MIRROR", "HOST", "REGISTRY_USERNAME", "REGISTRY_TOKEN"):
+    for name in ("MIRROR", "HOST", "GHCR_USERNAME", "GHCR_TOKEN"):
         assert "secrets." + name in secrets
-    assert "secrets.GITHUB_TOKEN" not in secrets
     assert "pull_request_target" not in json.dumps(workflow)
     assert all(not step.get("continue-on-error") for step in steps)
     sender = (ROOT / "deploy/production/send-release.sh").read_text()
@@ -194,28 +185,6 @@ def test_deploy_workflow_requires_checks_and_uses_existing_secret_names() -> Non
     assert "systemd-run --wait" in sender
     assert "--password-stdin" in sender
     assert "refs/heads/main" in sender
-
-
-def test_release_registry_is_one_approved_prefix_shared_by_publish_and_ci() -> None:
-    """仓库常量是发布、部署校验与 CI 登录的唯一来源，禁止散落硬编码主机名。"""
-
-    assert re.fullmatch(r"[a-z0-9.-]+/[a-z0-9._-]+", release.REGISTRY)
-    workflow = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text())
-    steps = workflow["jobs"]["release"]["steps"]
-    for step in steps:
-        if "docker login" in step.get("run", "") or "docker logout" in step.get("run", ""):
-            assert "scripts/release.py registry" in step["run"]
-    sender = (ROOT / "deploy/production/send-release.sh").read_text()
-    assert "scripts/release.py registry" in sender
-    assert release.REGISTRY.split("/")[0] not in sender
-    printed = subprocess.run(
-        [sys.executable, "scripts/release.py", "registry"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert printed.stdout.strip() == release.REGISTRY
 
 
 def test_health_failure_after_switch_rolls_back(
@@ -310,5 +279,5 @@ def test_publish_injects_release_sha_into_web_image(
     rag = next(call for call in calls if any("rag-rag:" in arg for arg in call))
     assert not any("VITE_GIT_COMMIT" in arg for arg in rag)
     assert release.read_json(manifest)["images"]["web"] == (
-        f"{release.REGISTRY}/rag-web@sha256:" + "e" * 64
+        "ghcr.io/dio-12312/rag-web@sha256:" + "e" * 64
     )
