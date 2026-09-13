@@ -77,6 +77,19 @@ type RunState struct {
 	AttemptedQueries []string
 	Evidence         []Citation
 	StopReason       StopReason
+
+	// 运行上下文：由 Harness 在构造 RunState 时填充。
+	Dataset   string
+	Question  string
+	History   []Message
+	TopK      int
+	Budget    ContextBudget
+	Streaming bool
+	Pool      *EvidencePool
+	Final     Message
+	ToolCalls []ToolCall
+	Answer    string
+	Citations []Citation
 }
 
 // NewRunState 构造处于 Route 相位的 Run。
