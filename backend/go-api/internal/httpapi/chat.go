@@ -102,6 +102,9 @@ func (s *Server) chat(c *gin.Context) {
 		fail(c, 503, "LOAD_FAILED", "会话读取失败。")
 		return
 	}
+	if len(history) > 0 && history[len(history)-1].Role == "user" && history[len(history)-1].Content == p.Question {
+		history = history[:len(history)-1]
+	}
 	emb, _, e := s.Store.Model(ctx, uid(c), "embedding")
 	if e != nil {
 		fail(c, 503, "CONFIG_UNAVAILABLE", "配置读取失败。")
@@ -132,7 +135,7 @@ func (s *Server) chat(c *gin.Context) {
 	}
 	modelClient := agent.ModelClient(s.AllowLocalModels)
 	defer modelClient.CloseIdleConnections()
-	h := agent.Harness{Model: agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}, Tool: retriever, MaxRounds: 6, TopK: int(top)}
+        h := agent.Harness{Model: agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}, Tool: retriever, MaxRounds: 6, TopK: int(top), Streaming: true}
 	answer, citations, e := h.Run(ctx, p.DatasetID, p.Question, history, emit)
 	if e != nil {
 		_ = emit("error", gin.H{"code": "CHAT_FAILED", "message": "问答未完成，请检查模型连通性、工具调用支持及知识库状态。"})

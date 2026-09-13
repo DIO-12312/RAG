@@ -304,7 +304,12 @@ async def _search_resource(settings: Settings) -> ManagedResource[SearchEngine]:
 # 内部辅助：完成 model_resource 所需的局部转换或校验。
 async def _model_resource(settings: Settings) -> ManagedResource[ModelGateway]:
     if settings.model_encryption_key_file:
-        return ManagedResource(DatasetProfileGateway(settings.model_encryption_key_file))
+        return ManagedResource(
+            DatasetProfileGateway(
+                settings.model_encryption_key_file,
+                allow_local_models=True,
+            )
+        )
     profile = settings.require_embedding_profile()
     client = httpx.AsyncClient(
         headers={"Authorization": f"Bearer {profile.api_key.get_secret_value()}"},

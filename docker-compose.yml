@@ -154,6 +154,7 @@ services:
       <<: *rag-environment
       RAG_ELASTICSEARCH_PASSWORD_FILE: /run/secrets/rag_mvp_password
       RAG_MODEL_ENCRYPTION_KEY_FILE: /run/model-keys/encryption.key
+      RAG_ALLOW_LOCAL_MODELS: ${RAG_ALLOW_LOCAL_MODELS:-false}
       RAG_MAX_UPLOAD_BYTES: 33554432
     group_add: ["10001"]
     volumes:

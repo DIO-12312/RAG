@@ -80,17 +80,30 @@ class DatasetProfileGateway:
         dataset: Dataset | None = None,
         rerank_profile: str = "",
         rerank_dataset_id: str = "",
+        *,
+        allow_local_models: bool = False,
     ) -> None:
         self._key_file = key_file
         self._dataset = dataset
         self._rerank_profile = rerank_profile
         self._rerank_dataset_id = rerank_dataset_id
+        self._allow_local_models = allow_local_models
 
     def for_rerank(self, encrypted_profile: str, dataset_id: str) -> ModelGateway:
-        return DatasetProfileGateway(self._key_file, self._dataset, encrypted_profile, dataset_id)
+        return DatasetProfileGateway(
+            self._key_file,
+            self._dataset,
+            encrypted_profile,
+            dataset_id,
+            allow_local_models=self._allow_local_models,
+        )
 
     def for_dataset(self, dataset: Dataset) -> ModelGateway:
-        return DatasetProfileGateway(self._key_file, dataset)
+        return DatasetProfileGateway(
+            self._key_file,
+            dataset,
+            allow_local_models=self._allow_local_models,
+        )
 
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
         dataset = self._dataset
@@ -126,8 +139,13 @@ class DatasetProfileGateway:
                     "EMBEDDING_PROFILE_INVALID", "embedding snapshot unavailable or invalid"
                 )
             ) from None
+        transport: httpx.AsyncBaseTransport
+        if self._allow_local_models:
+            transport = httpx.AsyncHTTPTransport(retries=0)
+        else:
+            transport = PublicEndpointTransport()
         async with httpx.AsyncClient(
-            transport=PublicEndpointTransport(),
+            transport=transport,
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=timeout,
             follow_redirects=False,
