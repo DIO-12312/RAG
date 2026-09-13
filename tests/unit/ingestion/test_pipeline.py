@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # 验证解析、规范化、切块、向量化与写索引的单 Task 流水线。
+import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
@@ -16,6 +17,9 @@ from rag_mvp.ingestion.pipeline import IngestionPipeline
 from rag_mvp.outbox.finalizer import finalize_once
 from rag_mvp.ports.chunker import ChunkDraft
 from rag_mvp.ports.parser import ParsedSegment
+from rag_mvp.ports.search_engine import SearchCandidate
+from rag_mvp.retrieval.provenance import dense_evidence
+from rag_mvp.rpc.rag_service import _evidence
 from tests.fakes.metadata import FakeMetadataRepository
 from tests.fakes.model import FakeModelGateway
 from tests.fakes.search_engine import FakeSearchEngine
@@ -29,14 +33,14 @@ class _DuplicateChunker:
             ChunkDraft(
                 ordinal=0,
                 content_with_weight="repeated evidence",
-                locator=Locator(start_line=1, end_line=1),
-                metadata={"position": "first"},
+                locator=Locator(page_number=5, start_line=1, end_line=1),
+                metadata={"position": "first", "source_type": "pdf"},
             ),
             ChunkDraft(
                 ordinal=1,
                 content_with_weight="repeated evidence",
-                locator=Locator(start_line=2, end_line=2),
-                metadata={"position": "second"},
+                locator=Locator(page_number=9, start_line=2, end_line=2),
+                metadata={"position": "second", "source_type": "pdf"},
             ),
             ChunkDraft(
                 ordinal=2,
@@ -154,3 +158,12 @@ async def test_pipeline_collapses_duplicate_chunk_ids_before_embedding() -> None
     assert [chunk.metadata["position"] for chunk in chunks] == ["first", "third"]
     assert model.embedded_batches == [("repeated evidence", "unique evidence")]
     assert search.record_count == 2
+    assert chunks[0].locator.page_number == 5
+    assert json.loads(chunks[0].metadata["page_numbers"]) == [5, 9]
+    wire = _evidence(
+        dense_evidence(
+            SearchCandidate(record_id="record", dataset_id="dataset-2", chunk=chunks[0], score=1.0)
+        )
+    )
+    assert json.loads(wire.metadata["page_numbers"]) == [5, 9]
+    assert (await pipeline.execute(claim)) == chunks

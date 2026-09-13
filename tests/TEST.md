@@ -239,7 +239,7 @@ tests/
    │  ├─ test_failpoints.py
    │  ├─ test_multiformat_parsers.py
    │  ├─ test_pdf_deepdoc_parser.py        # PDF 字符坐标、下标、目录、保守表格、段落合并、OCR 和安全上限
-   │  ├─ test_pipeline.py
+   │  ├─ test_pipeline.py                 # 稳定去重、重复 PDF 页列表和重执行幂等
    │  ├─ test_recursive_chunker.py
    │  ├─ test_text_parser.py
    │  └─ test_worker.py
@@ -371,7 +371,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_chm_parser_rejects_absolute_topic_path` | 绝对 Topic 路径在进入 HTML 解析前被 fail closed 拒绝。 |
 | 同上 | `test_chmlib_extractor_rejects_non_chm_before_starting_process` | 非 CHM 签名字节在启动外部解包进程前返回稳定 `INVALID_CHM`。 |
 | `ingestion/test_pipeline.py` | `test_pipeline_builds_stable_versioned_chunks_and_upserts_search` | Pipeline 生成稳定的版本化 chunk 并幂等写入检索端。 |
-| 同上 | `test_pipeline_collapses_duplicate_chunk_ids_before_embedding` | 同一 Document 内相同逻辑 Chunk 在 Embedding 前稳定折叠，保留首次来源，避免重复向量化及 manifest 唯一键冲突。 |
+| 同上 | `test_pipeline_collapses_duplicate_chunk_ids_before_embedding` | 同一 Document 内相同逻辑 Chunk 在 Embedding 前稳定折叠，保留首次来源并汇总 PDF 的 page_numbers，验证 Evidence/protobuf metadata 透传且重复执行仍输出相同记录，避免重复向量化及 manifest 唯一键冲突。 |
 | `ingestion/test_recursive_chunker.py` | `test_recursive_chunker_is_stable_bounded_and_overlapping` | 切块边界稳定、长度受限且 overlap 正确。 |
 | 同上 | `test_recursive_chunker_rejects_invalid_overlap` | 非法 overlap 参数被拒绝。 |
 | 同上 | `test_recursive_chunker_matches_txt_golden_fixture` | TXT 切块结果与 golden fixture 一致。 |
@@ -661,3 +661,5 @@ Eval 测试负责防止检索排序和 evidence 定位质量回退。不得以 L
 3. 修改 RPC、Port、状态机、Outbox、Worker、重试、取消或删除语义时，同时检查 Contract、Functional、Resilience 三类表是否仍准确。
 4. 新增 marker、fixture 或 Fake port 时，在本文件和 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md) 中补充运行边界；Fake 不得进入生产 bootstrap。
 5. 测试文档与测试代码必须在同一提交中评审；缺少本文件同步的测试改动不视为完成。
+
+PDF 切分回归运行边界：上述 unit 用例仅使用 ReportLab 自生成 PDF 与 Fake ports，可通过 `make ci` 离线运行；不依赖、不提交真实 ch05.pdf。真实 PDF 的逐页量化是本地只读检查，不等同于重摄取或真实 ES/Embedding 验收。PDF OCR 运行时验收仍使用 `make docker-test SUITE=integration`。
