@@ -148,7 +148,8 @@ func (b ContextBudget) TrimMessages(messages []Message) []Message {
 	return append([]Message{messages[0]}, tail...)
 }
 
-func (h Harness) ContextBudget() ContextBudget {
+// DefaultContextBudget 是 Harness 与 SCA 共用的默认消息 token 预算。
+func DefaultContextBudget() ContextBudget {
 	return ContextBudget{
 		MaxTokens:        32768,
 		ReserveTokens:    4096,
@@ -156,3 +157,5 @@ func (h Harness) ContextBudget() ContextBudget {
 		ToolSchemaTokens: 512,
 	}
 }
+
+func (h Harness) ContextBudget() ContextBudget { return DefaultContextBudget() }

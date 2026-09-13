@@ -54,6 +54,7 @@ type Harness struct {
 	Budget    *ContextBudget
 	Streaming bool
 	Limits    RunLimits
+	Assessor  SufficiencyAssessor
 }
 
 var reference = regexp.MustCompile(`\[(\d+)\]`)

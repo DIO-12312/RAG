@@ -25,8 +25,10 @@ func (h Harness) runStateMachine(ctx context.Context, state *RunState, emit Emit
 			err = h.modelPhase(ctx, state, emit)
 		case RunPhaseTool:
 			err = h.toolPhase(ctx, state, emit)
+		case RunPhaseAssess:
+			err = h.assessPhase(ctx, state, emit)
 		case RunPhaseFinalize:
-			err = h.finalizePhase(state, emit)
+			err = h.finalizePhase(ctx, state, emit)
 		default:
 			return fmt.Errorf("unsupported run phase %s", state.Phase)
 		}
@@ -78,41 +80,11 @@ func (h Harness) modelPhase(ctx context.Context, state *RunState, emit Emit) err
 
 	policy := PolicyForIntent(state.Intent, state.ModelCalls)
 
-	var msg Message
-	if state.Streaming {
-		sm, ok := h.Model.(StreamingModel)
-		if !ok {
-			state.MarkFailed(StopReasonProviderError)
-			return errors.New("model does not support streaming")
-		}
-		var content strings.Builder
-		var toolCalls []ToolCall
-		streamErr := sm.Stream(
-			ctx,
-			state.Messages,
-			policy,
-			func(delta string) error {
-				content.WriteString(delta)
-				return emit("token", map[string]any{"text": delta})
-			},
-			func(call ToolCall) error {
-				toolCalls = append(toolCalls, call)
-				return nil
-			},
-		)
-		if streamErr != nil {
-			return failFromError(state, ctx, streamErr)
-		}
-		msg = Message{Role: "assistant", Content: content.String(), ToolCalls: toolCalls}
-	} else {
-		completed, err := h.Model.Complete(ctx, state.Messages, policy)
-		if err != nil {
-			return failFromError(state, ctx, err)
-		}
-		msg = completed
+	msg, err := h.complete(ctx, state, state.Messages, policy, emit)
+	if err != nil {
+		return failFromError(state, ctx, err)
 	}
 	state.RecordModelCall()
-	msg.Role = "assistant"
 
 	if policy.Mode == ToolNone && len(msg.ToolCalls) > 0 {
 		state.MarkFailed(StopReasonInvalidToolCall)
@@ -121,6 +93,7 @@ func (h Harness) modelPhase(ctx context.Context, state *RunState, emit Emit) err
 
 	if len(msg.ToolCalls) == 0 {
 		state.Final = msg
+		state.AnswerNeeded = false
 		return state.TransitionTo(RunPhaseFinalize)
 	}
 
@@ -194,13 +167,116 @@ func (h Harness) toolPhase(ctx context.Context, state *RunState, emit Emit) erro
 	}
 
 	state.ToolCalls = nil
-	return state.TransitionTo(RunPhaseModel)
+	return state.TransitionTo(RunPhaseAssess)
+}
+
+// assessPhase 执行结构化充分性判断。
+//
+// 未配置 SCA 时保持既有"模型自省"循环；SCA 失败（ErrSufficiencyUnavailable）时
+// 停止额外检索并把受限回答交给 Finalize，取消与预算错误立即终止。
+func (h Harness) assessPhase(ctx context.Context, state *RunState, emit Emit) error {
+	if h.Assessor == nil {
+		state.AnswerNeeded = false
+		return state.TransitionTo(RunPhaseModel)
+	}
+
+	if err := state.CheckModelCall(); err != nil {
+		state.MarkFailed(StopReasonBudgetExceeded)
+		return err
+	}
+
+	decision, err := h.Assessor.Assess(ctx, state.Question, state.Pool.Citations())
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+			state.MarkFailed(StopReasonCancelled)
+			return err
+		}
+		if !errors.Is(err, ErrSufficiencyUnavailable) {
+			state.MarkFailed(StopReasonProviderError)
+			return err
+		}
+		// 降级：不再额外检索，交给 Finalize 并要求说明证据不足。
+		state.Sufficiency = SufficiencyDecision{Sufficient: false, ReasonCode: "assessor_unavailable"}
+		state.SufficiencyChecked = true
+		state.AnswerNeeded = true
+		return state.TransitionTo(RunPhaseFinalize)
+	}
+
+	state.RecordModelCall()
+	state.Sufficiency = decision
+	state.SufficiencyChecked = true
+	state.AnswerNeeded = true
+
+	if decision.Sufficient {
+		return state.TransitionTo(RunPhaseFinalize)
+	}
+
+	// I4 在此接入 Rewrite；当前没有重写器，按"无改写额度"处理并带不足约束收尾。
+	return state.TransitionTo(RunPhaseFinalize)
+}
+
+// complete 统一处理流式与非流式模型调用，并在流式路径转发 token 事件。
+func (h Harness) complete(ctx context.Context, state *RunState, messages []Message, policy ToolPolicy, emit Emit) (Message, error) {
+	if !state.Streaming {
+		msg, err := h.Model.Complete(ctx, messages, policy)
+		if err != nil {
+			return Message{}, err
+		}
+		msg.Role = "assistant"
+		return msg, nil
+	}
+
+	sm, ok := h.Model.(StreamingModel)
+	if !ok {
+		return Message{}, errors.New("model does not support streaming")
+	}
+	var content strings.Builder
+	var toolCalls []ToolCall
+	if err := sm.Stream(
+		ctx,
+		messages,
+		policy,
+		func(delta string) error {
+			content.WriteString(delta)
+			return emit("token", map[string]any{"text": delta})
+		},
+		func(call ToolCall) error {
+			toolCalls = append(toolCalls, call)
+			return nil
+		},
+	); err != nil {
+		return Message{}, err
+	}
+	return Message{Role: "assistant", Content: content.String(), ToolCalls: toolCalls}, nil
 }
 
 // finalizePhase 校验最终引用并结束 Run；不允许多引用不存在的 Evidence。
-func (h Harness) finalizePhase(state *RunState, emit Emit) error {
+func (h Harness) finalizePhase(ctx context.Context, state *RunState, emit Emit) error {
 	citations := state.Pool.Citations()
 	allowDirectAnswer := state.Intent.Action == "reply" || state.Intent.Action == "reuse"
+
+	if state.AnswerNeeded {
+		if err := state.CheckModelCall(); err != nil {
+			state.MarkFailed(StopReasonBudgetExceeded)
+			return err
+		}
+		messages := state.Messages
+		if state.SufficiencyChecked && !state.Sufficiency.Sufficient {
+			messages = withSystemDirective(messages, insufficientEvidenceDirective)
+		}
+		messages = state.Budget.TrimMessages(messages)
+		if !state.Budget.Fits(messages) {
+			state.MarkFailed(StopReasonBudgetExceeded)
+			return errors.New("context budget exceeded")
+		}
+		msg, err := h.complete(ctx, state, messages, ToolPolicy{Mode: ToolNone}, emit)
+		if err != nil {
+			return failFromError(state, ctx, err)
+		}
+		state.RecordModelCall()
+		state.AnswerNeeded = false
+		state.Final = msg
+	}
 
 	if len(citations) == 0 && state.RetrievalRounds == 0 && !allowDirectAnswer {
 		state.MarkFailed(StopReasonInvalidToolCall)
@@ -235,12 +311,32 @@ func (h Harness) finalizePhase(state *RunState, emit Emit) error {
 
 	state.Answer = state.Final.Content
 	state.Citations = valid
+
 	reason := StopReasonCompleted
-	if allowDirectAnswer {
+	switch {
+	case state.SufficiencyChecked && state.Sufficiency.Sufficient:
+		reason = StopReasonEvidenceSufficient
+	case state.SufficiencyChecked:
+		reason = StopReasonEvidenceInsufficient
+	case allowDirectAnswer:
 		reason = StopReasonDirectReply
 	}
 	state.MarkStopped(reason)
 	return nil
+}
+
+// insufficientEvidenceDirective 在 SCA 判定（或降级为）证据不足时约束最终回答。
+const insufficientEvidenceDirective = "The retrieved evidence is insufficient to answer fully. " +
+	"State clearly which facts are missing, do not invent citations, and do not answer beyond the supplied evidence."
+
+// withSystemDirective 保持消息顺序不变，只扩展首条 system 提示。
+func withSystemDirective(messages []Message, directive string) []Message {
+	if len(messages) == 0 {
+		return []Message{{Role: "system", Content: directive}}
+	}
+	updated := append([]Message(nil), messages...)
+	updated[0] = Message{Role: "system", Content: strings.TrimSpace(messages[0].Content + "\n\n" + directive)}
+	return updated
 }
 
 // failFromError 区分取消与供应商错误，并把 Run 置为对应终态。

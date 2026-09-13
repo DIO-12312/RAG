@@ -738,6 +738,8 @@ sequenceDiagram
 
 2026-09-13 Agentic RAG Loop 迭代 3：检索后执行结构化证据充分性判断（SCA）。Assessor 只返回 `{"sufficient": bool, "missing_facts": [...], "reason_code": "..."}` 严格 JSON：不接受 Markdown 围栏、缺失字段、未知字段、超过 5 个缺口、单个缺口超过 256 字符或空 reason code，输出中不得包含自由推理文本；非法输出与供应商故障统一归类为 `ErrSufficiencyUnavailable`，任何情况下都不得自动假定"证据充分"。Assessor 的模型调用使用 `ToolNone`，计入同一次 Run 的 `MaxModelCalls` 与 `ContextBudget`，不新增 API Key、HTTP Client 或授权路径。降级策略：Assessor 不可用时停止额外检索，把现有 Evidence 交给 Finalize，并在系统提示中要求明确说明证据不足；不得因 Assessor 失败无限重试，也不得把该失败当作"可以无引用回答事实"。
 
+2026-09-13 Agentic RAG Loop 迭代 3 接线：`Tool` 之后统一进入 `Assess`。判定充分时进入 `Finalize` 生成受限回答；判定不足时（I4 之前没有重写器，或改写额度已用尽）同样进入 `Finalize`，并在系统提示中追加"证据不足"约束，要求明确说明缺失事实且不得编造引用。Assessor 返回 `ErrSufficiencyUnavailable` 时按同一路径降级：只判断一次、不额外检索、不重试；Assessor 取消或超时立即进入 `Cancelled` 终态。Assessor 与受限回答各计一次 `MaxModelCalls` 并使用同一份 `ContextBudget` 默认值；两者都使用 `ToolNone`。`reply`/`reuse` 路径不进入 `Assess`。终止原因映射为：`evidence_sufficient`、`evidence_insufficient`（含降级）、`direct_reply`，未配置 SCA 的经典循环仍为 `completed`。
+
 ```mermaid
 sequenceDiagram
     participant C as Client

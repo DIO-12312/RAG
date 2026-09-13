@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -12,9 +13,11 @@ type scriptedModel struct {
 	responses []Message
 	calls     int
 	policies  []ToolPolicy
+	messages  [][]Message
 }
 
-func (m *scriptedModel) Complete(ctx context.Context, _ []Message, policy ToolPolicy) (Message, error) {
+func (m *scriptedModel) Complete(ctx context.Context, messages []Message, policy ToolPolicy) (Message, error) {
+	m.messages = append(m.messages, append([]Message(nil), messages...))
 	m.policies = append(m.policies, policy)
 	m.calls++
 	if m.calls <= len(m.responses) {
@@ -253,6 +256,175 @@ func TestRuntimeContextBudgetFailure(t *testing.T) {
 		t.Fatal("context budget overflow must fail")
 	}
 	if state.StopReason != StopReasonBudgetExceeded || model.calls != 0 {
+		t.Fatalf("unexpected stop state: %+v model=%d", state, model.calls)
+	}
+}
+
+// fakeAssessor 返回固定判断，并记录调用次数与输入。
+type fakeAssessor struct {
+	decision  SufficiencyDecision
+	err       error
+	calls     int
+	questions []string
+	evidence  [][]Citation
+}
+
+func (a *fakeAssessor) Assess(ctx context.Context, question string, citations []Citation) (SufficiencyDecision, error) {
+	a.calls++
+	a.questions = append(a.questions, question)
+	a.evidence = append(a.evidence, append([]Citation(nil), citations...))
+	if a.err != nil {
+		return SufficiencyDecision{}, a.err
+	}
+	return a.decision, ctx.Err()
+}
+
+func lastSystemPrompt(messages []Message) string {
+	for _, message := range messages {
+		if message.Role == "system" {
+			return message.Content
+		}
+	}
+	return ""
+}
+
+func TestRuntimeSufficientEvidenceRetrievesOnceAndAnswers(t *testing.T) {
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "migration"),
+		{Content: "Migration ends in December. [1]"},
+	}}
+	tool := &retriever{}
+	assessor := &fakeAssessor{decision: SufficiencyDecision{Sufficient: true, ReasonCode: "covered"}}
+	h := Harness{Model: model, Tool: tool, Assessor: assessor}
+
+	state, err := runScripted(t, h, "question")
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if tool.calls != 1 || assessor.calls != 1 || model.calls != 2 {
+		t.Fatalf("unexpected call counts: tool=%d assessor=%d model=%d", tool.calls, assessor.calls, model.calls)
+	}
+	if state.StopReason != StopReasonEvidenceSufficient || len(state.Citations) != 1 {
+		t.Fatalf("unexpected stop state: %+v", state)
+	}
+	if len(assessor.evidence[0]) != 1 || assessor.evidence[0][0].Evidence.Content == "" {
+		t.Fatalf("assessor must receive retrieved evidence: %+v", assessor.evidence)
+	}
+}
+
+func TestRuntimeInsufficientEvidenceConstrainsFinalAnswer(t *testing.T) {
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "migration"),
+		{Content: "现有资料只提到 migration，未给出结束时间。"},
+	}}
+	tool := &retriever{}
+	assessor := &fakeAssessor{decision: SufficiencyDecision{
+		Sufficient:   false,
+		MissingFacts: []string{"migration 的结束时间"},
+		ReasonCode:   "missing_fact",
+	}}
+	h := Harness{Model: model, Tool: tool, Assessor: assessor}
+
+	state, err := runScripted(t, h, "question")
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if tool.calls != 1 || assessor.calls != 1 {
+		t.Fatalf("insufficient evidence must not trigger extra retrieval here: tool=%d assessor=%d", tool.calls, assessor.calls)
+	}
+	if len(state.Citations) != 0 {
+		t.Fatalf("answer without citations must not fabricate them: %+v", state.Citations)
+	}
+	if state.StopReason != StopReasonEvidenceInsufficient {
+		t.Fatalf("unexpected stop reason: %+v", state)
+	}
+	prompt := lastSystemPrompt(model.messages[len(model.messages)-1])
+	if !strings.Contains(prompt, "insufficient") {
+		t.Fatalf("finalize must instruct the model about missing evidence: %s", prompt)
+	}
+}
+
+func TestRuntimeAssessorUnavailableDegradesWithoutRetry(t *testing.T) {
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "migration"),
+		{Content: "无法确认。"},
+	}}
+	tool := &retriever{}
+	assessor := &fakeAssessor{err: ErrSufficiencyUnavailable}
+	h := Harness{Model: model, Tool: tool, Assessor: assessor}
+
+	state, err := runScripted(t, h, "question")
+	if err != nil {
+		t.Fatalf("degraded assessor must not fail the run: %v", err)
+	}
+	if assessor.calls != 1 {
+		t.Fatalf("assessor failure must not retry: %d", assessor.calls)
+	}
+	if tool.calls != 1 {
+		t.Fatalf("degraded assessor must not start extra retrieval: %d", tool.calls)
+	}
+	if state.StopReason != StopReasonEvidenceInsufficient {
+		t.Fatalf("unexpected stop reason: %+v", state)
+	}
+	if model.calls != 2 {
+		t.Fatalf("expected tool decision + constrained answer, got %d calls", model.calls)
+	}
+}
+
+func TestRuntimeAssessorCancellationTerminatesImmediately(t *testing.T) {
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "migration"),
+		{Content: "unused"},
+	}}
+	tool := &retriever{}
+	assessor := &fakeAssessor{err: context.Canceled}
+	h := Harness{Model: model, Tool: tool, Assessor: assessor}
+
+	state, err := runScripted(t, h, "question")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation must abort the run, got %v", err)
+	}
+	if state.StopReason != StopReasonCancelled || model.calls != 1 {
+		t.Fatalf("cancelled assessor must stop the loop: %+v model=%d", state, model.calls)
+	}
+}
+
+func TestRuntimeOrdinaryConversationNeverAssesses(t *testing.T) {
+	model := &scriptedModel{responses: []Message{{Content: "你好，有什么可以帮你？"}}}
+	tool := &retriever{}
+	assessor := &fakeAssessor{decision: SufficiencyDecision{Sufficient: true}}
+	h := Harness{Model: model, Tool: tool, Assessor: assessor}
+
+	state, err := runScripted(t, h, "你好")
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if assessor.calls != 0 || tool.calls != 0 {
+		t.Fatalf("ordinary conversation must not assess or retrieve: assessor=%d tool=%d", assessor.calls, tool.calls)
+	}
+	if state.StopReason != StopReasonDirectReply {
+		t.Fatalf("unexpected stop reason: %+v", state)
+	}
+}
+
+func TestRuntimeAssessorCountsTowardModelBudget(t *testing.T) {
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "migration"),
+		{Content: "unused answer"},
+	}}
+	tool := &retriever{}
+	assessor := &fakeAssessor{decision: SufficiencyDecision{Sufficient: true, ReasonCode: "covered"}}
+	limits := DefaultRunLimits()
+	limits.MaxModelCalls = 2
+	h := Harness{Model: model, Tool: tool, Assessor: assessor, Limits: limits}
+
+	state, err := runScripted(t, h, "question")
+	if err == nil || !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("assessor must consume the model budget, got %v", err)
+	}
+	// Assess 计入 MaxModelCalls：工具决策 1 次 + Assess 1 次已用满预算，
+	// 因此 Finalize 的受限回答必须在调用前被拒绝。
+	if state.StopReason != StopReasonBudgetExceeded || state.ModelCalls != 2 || model.calls != 1 {
 		t.Fatalf("unexpected stop state: %+v model=%d", state, model.calls)
 	}
 }

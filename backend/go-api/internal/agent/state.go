@@ -90,6 +90,11 @@ type RunState struct {
 	ToolCalls []ToolCall
 	Answer    string
 	Citations []Citation
+
+	// 充分性判断结果：SufficiencyChecked 表示本次 Run 真正执行过 SCA（或已降级）。
+	Sufficiency        SufficiencyDecision
+	SufficiencyChecked bool
+	AnswerNeeded       bool
 }
 
 // NewRunState 构造处于 Route 相位的 Run。
@@ -102,7 +107,7 @@ var allowedTransitions = map[RunPhase]map[RunPhase]bool{
 	RunPhaseRoute:    {RunPhaseModel: true, RunPhaseDone: true, RunPhaseFailed: true},
 	RunPhaseModel:    {RunPhaseTool: true, RunPhaseFinalize: true, RunPhaseDone: true, RunPhaseFailed: true},
 	RunPhaseTool:     {RunPhaseModel: true, RunPhaseAssess: true, RunPhaseFinalize: true, RunPhaseFailed: true},
-	RunPhaseAssess:   {RunPhaseRewrite: true, RunPhaseTool: true, RunPhaseFinalize: true, RunPhaseFailed: true},
+	RunPhaseAssess:   {RunPhaseRewrite: true, RunPhaseTool: true, RunPhaseModel: true, RunPhaseFinalize: true, RunPhaseFailed: true},
 	RunPhaseRewrite:  {RunPhaseTool: true, RunPhaseFinalize: true, RunPhaseFailed: true},
 	RunPhaseFinalize: {RunPhaseDone: true, RunPhaseFailed: true},
 	RunPhaseDone:     {},

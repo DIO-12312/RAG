@@ -135,7 +135,18 @@ func (s *Server) chat(c *gin.Context) {
 	}
 	modelClient := agent.ModelClient(s.AllowLocalModels)
 	defer modelClient.CloseIdleConnections()
-	h := agent.Harness{Model: agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}, Tool: retriever, MaxRounds: 6, TopK: int(top), Streaming: true}
+	// 同一个受限 adapter 同时承担回答与充分性判断，避免第二套凭据或授权路径；
+	// Assess 与受限回答都计入 Harness 的 MaxModelCalls，并使用同一份默认上下文预算。
+	model := agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}
+	budget := agent.DefaultContextBudget()
+	h := agent.Harness{
+		Model:     model,
+		Tool:      retriever,
+		MaxRounds: 6,
+		TopK:      int(top),
+		Streaming: true,
+		Assessor:  agent.ModelSufficiencyAssessor{Model: model, Budget: &budget},
+	}
 	answer, citations, e := h.Run(ctx, p.DatasetID, p.Question, history, emit)
 	if e != nil {
 		_ = emit("error", gin.H{"code": "CHAT_FAILED", "message": "问答未完成，请检查模型连通性、工具调用支持及知识库状态。"})
