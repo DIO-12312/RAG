@@ -734,6 +734,8 @@ sequenceDiagram
 
 2026-09-13 Agentic RAG Loop 迭代 1：Python 不实现 Agent Loop（意图路由、工具选择、会话策略与 SSE 均不在 Python），产品 Go 已经实现并独占 Agent Loop。路由结果必须直接控制 provider 请求的工具暴露与强制策略，而不是只在 Harness 内部事后忽略工具调用：`reply`/`reuse` 在任何轮次都以 `ToolNone` 发送请求，即 payload 完全省略 `tools` 与 `tool_choice`；`retrieve` 仅首轮使用 `ToolRequired(rag_retrieve)`，后续轮次降为 `ToolAuto`；`clarify` 不调用模型。DeepSeek thinking 模式继续沿用"thinking 开启时不强制 tool_choice"的兼容策略，但 `ToolNone` 在任何供应商下都不得暴露工具。若模型在 `ToolNone` 轮次仍返回 ToolCall，Harness 必须拒绝且不得触发任何检索，避免出现"识别为普通交流但仍强制检索"。
 
+2026-09-13 Agentic RAG Loop 迭代 2：Go Agent Loop 从隐式 for 循环迁移为显式状态机。合法主路径为 `Route → Model → Tool → Assess → Finalize → Done`、`Route → Model → Done`（普通交流）、`Route → Done`（澄清）以及 `Assess → Rewrite → Tool → Assess`（证据不足补检索）；`Done` 与 `Failed` 是终态，进入后不可重开，任何非法迁移返回稳定错误。每次 Run 的预算集中在 `RunLimits`：模型调用 ≤ 6、检索轮次 ≤ 3、改写轮次 ≤ 2、单轮工具调用 ≤ 4、Evidence ≤ 40 条、单次工具结果 ≤ 128 KiB；计数一律在动作开始前检查、动作成功后递增，取消、预算耗尽与不可恢复错误立即进入终态。`ContextBudget` 继续独立负责消息 token 预算，两者不得互相替代。此状态机只属于 Go 产品面，不改变 Python Job/Task 状态机定义。
+
 ```mermaid
 sequenceDiagram
     participant C as Client

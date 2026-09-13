@@ -58,15 +58,26 @@ type Harness struct {
 	TopK      int
 	Budget    *ContextBudget
 	Streaming bool
+	Limits    RunLimits
 }
 
 var reference = regexp.MustCompile(`\[(\d+)\]`)
 
-func (h Harness) Run(ctx context.Context, dataset, question string, history []Message, emit Emit) (string, []Citation, error) {
-	rounds := h.MaxRounds
-	if rounds <= 0 {
-		rounds = 6
+// runLimits 合并 Harness 覆盖值与默认预算；MaxRounds 继续作为模型调用上限的兼容入口。
+func (h Harness) runLimits() RunLimits {
+	limits := h.Limits
+	if limits.MaxModelCalls <= 0 {
+		limits = DefaultRunLimits()
 	}
+	if h.MaxRounds > 0 {
+		limits.MaxModelCalls = h.MaxRounds
+	}
+	return limits
+}
+
+func (h Harness) Run(ctx context.Context, dataset, question string, history []Message, emit Emit) (string, []Citation, error) {
+	limits := h.runLimits()
+	rounds := limits.MaxModelCalls
 	top := h.TopK
 	if top < 1 || top > 30 {
 		top = 6
@@ -185,7 +196,7 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 			}
 			return msg.Content, valid, nil
 		}
-		if len(msg.ToolCalls) > 4 {
+		if len(msg.ToolCalls) > limits.MaxToolCallsPerRound {
 			return "", nil, errors.New("too many tool calls")
 		}
 		messages = append(messages, msg)
@@ -216,7 +227,7 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 				key := hit.DocumentID + "/" + hit.ChunkID
 				n, ok := seen[key]
 				if !ok {
-					if len(citations) >= 40 {
+					if len(citations) >= limits.MaxEvidence {
 						return "", nil, errors.New("evidence budget exceeded")
 					}
 					n = len(citations) + 1
@@ -229,7 +240,7 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 				return "", nil, e
 			}
 			body, _ := json.Marshal(result)
-			if len(body) > 128*1024 {
+			if len(body) > limits.MaxToolOutputBytes {
 				return "", nil, errors.New("tool output budget exceeded")
 			}
 			messages = append(messages, Message{Role: "tool", ToolCallID: call.ID, Content: string(body)})
