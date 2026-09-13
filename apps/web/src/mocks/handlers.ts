@@ -20,6 +20,7 @@ import {
   mockSettings,
   resetMockData,
 } from "./data";
+import { createMockChatStream } from "./sse";
 
 let signedIn = false;
 
@@ -137,6 +138,29 @@ export const handlers = [
     const unauthorized = requireSignedIn();
     if (unauthorized) return unauthorized;
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.get("*/conversations", () => {
+    const unauthorized = requireSignedIn();
+    if (unauthorized) return unauthorized;
+    return HttpResponse.json([]);
+  }),
+
+  http.get("*/conversations/:id/messages", () => {
+    const unauthorized = requireSignedIn();
+    if (unauthorized) return unauthorized;
+    return HttpResponse.json([]);
+  }),
+
+  http.post("*/chat/stream", async () => {
+    const unauthorized = requireSignedIn();
+    if (unauthorized) return unauthorized;
+    const blocks: string[] = [];
+    for await (const event of createMockChatStream().events) {
+      const { type, ...payload } = event;
+      blocks.push(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
+    }
+    return new HttpResponse(blocks.join(""), { headers: { "Content-Type": "text/event-stream" } });
   }),
 
   http.get("*/settings", () => {

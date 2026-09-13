@@ -13,6 +13,7 @@ async function refreshHistory():Promise<void>{try{conversations.value=await requ
 function newChat():void{if(busy.value)return;conversationId.value='';transcript.value=[];answer.value='';citations.value=[];question.value='';error.value='';if(route.query.c)router.replace({query:{}});}
 let active:ChatStream|undefined;let resuming=false;
 onMounted(async()=>{await datasets.load();selectedId.value=datasets.readyDatasets[0]?.id??"";try{conversations.value=await request("/conversations");}catch{error.value="会话列表加载失败";}const c=route.query.c;if(typeof c==="string"&&c)await resume(c);});
+function sendOnEnter(event:KeyboardEvent):void{if(event.isComposing||event.keyCode===229)return;if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();void ask();}
 onActivated(async()=>{try{conversations.value=await request("/conversations");}catch{/* keep stale list */}});
 onBeforeUnmount(()=>active?.cancel());watch(selectedId,()=>{if(resuming)return;active?.cancel();conversationId.value="";transcript.value=[];answer.value="";citations.value=[];});
 async function resume(id:string):Promise<void>{const row=conversations.value.find(c=>c.id===id);if(!row||busy.value)return;resuming=true;selectedId.value=row.datasetId;await nextTick();resuming=false;conversationId.value=id;try{transcript.value=await request("/conversations/"+id+"/messages");}catch(e){error.value=e instanceof Error?e.message:"会话加载失败";}}
@@ -117,13 +118,14 @@ async function ask():Promise<void>{if(!selectedId.value||!question.value.trim()|
           :disabled="busy"
           required
         /></label><div class="composer-footer">
-          <small><AppIcon name="spark" />答案将附上可追溯的来源</small><button
+          <small><AppIcon name="spark" />Enter 发送 · Ctrl / ⌘ + Enter 换行</small><button
             v-if="!busy"
             :disabled="!question.trim()"
           >
             发送 <AppIcon name="send" />
           </button><button
             v-else
+          @keydown.enter="sendOnEnter"
             type="button"
             @click="active?.cancel()"
           >
