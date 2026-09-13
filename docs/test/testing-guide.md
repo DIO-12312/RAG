@@ -61,6 +61,16 @@ make ci
 
 `tests/fakes/` 不会被生产 `bootstrap/container.py` 导入。Fake 可证明编排和业务不变量，但不能证明 MySQL 锁、ES mapping/KNN/BM25、JetStream ACK/NAK 或进程级恢复。
 
+### 3.1 Go Agent 路由与检索循环评测基线
+
+`backend/go-api/internal/agent/testdata/agent_eval.json` 固定 31 条样本，覆盖普通交流、知识问题、问候混合事实问题、多轮指代、已有回答加工、加工加新事实、无答案、跨文档比较与恶意“不要检索”指令；`eval_test.go` 用脚本化 Model/Assessor/Rewriter/Retriever 驱动真实状态机，门槛全部为 100%：路由准确率、应检索问题召回率、普通交流不检索精确率、限制内收敛率与 Citation 编号有效率。测试不 snapshot LLM 自由文本，也不连接真实模型或 MySQL。
+
+```bash
+cd backend/go-api && go test -p 1 ./internal/agent -run TestAgentEval -count=1 -v
+```
+
+该基线随 `make release-check` 的 Go 门禁一起执行；修改路由、状态机、SCA 或重写行为时必须同步更新 fixture 与门槛，不得删样本或降低门槛来换取通过。
+
 ## 4. 定位单个失败
 
 下列底层命令仅用于失败定位，不是 Hook、CI 或 README 的公共入口。附加 `-vv -s` 可查看详细测试名与输出。
