@@ -12,7 +12,7 @@
 ## 能做什么
 
 - 通过 gRPC 创建 Dataset、流式上传文档、查询/重试/取消 Job、检索和删除文档。
-- 解析 TXT、Markdown、代码、文本型 PDF、CHM 和 CHI；一个 CHM 是一个 Domain Document，每个 HTML Topic 是带标题层级、路径和锚点定位的逻辑子文档。
+- 解析 TXT、Markdown、代码、PDF、CHM 和 CHI；PDF 可在 `plain/deepdoc/auto` 间选择并对扫描页按需 OCR，一个 CHM 是一个 Domain Document，每个 HTML Topic 是带标题层级、路径和锚点定位的逻辑子文档。
 - 执行 `parse → normalize → chunk → embed → index`，以稳定 `chunk_id` 和索引版本保证重放幂等。
 - 使用 Elasticsearch Dense KNN 与 BM25 双路召回，由纯算法层执行 RRF 融合、可选 Rerank 和上下文预算裁剪。
 - 使用 MySQL 事务、Transactional Outbox、NATS ACK/NAK/redelivery、generation fence 和异步清理处理重复请求与进程崩溃。

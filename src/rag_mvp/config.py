@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from rag_mvp.ports.parser import PdfParserMode
+
 DEFAULT_MYSQL_DSN = "mysql+asyncmy://rag:rag@mysql:3306/rag"
 
 
@@ -81,9 +83,17 @@ class Settings(BaseSettings):
     object_root: Path = Path("data/objects")
 
     max_upload_bytes: int = Field(default=16 * 1024 * 1024, ge=1)
-    parser_version: str = "source-router-v6"
+    parser_version: str = "source-router-v7"
     chunk_size: int = Field(default=800, ge=1)
     chunk_overlap: int = Field(default=120, ge=0)
+    pdf_parser_mode: PdfParserMode = PdfParserMode.AUTO
+    pdf_native_text_min_chars_per_page: int = Field(default=40, ge=0)
+    pdf_ocr_language: str = "chi_sim+eng"
+    pdf_ocr_dpi: int = Field(default=200, ge=72, le=400)
+    pdf_ocr_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
+    pdf_max_pages: int = Field(default=1000, ge=1, le=10000)
+    pdf_header_footer_margin_ratio: float = Field(default=0.12, gt=0, lt=0.3)
+    pdf_repeated_margin_min_pages: int = Field(default=3, ge=2)
     chm_extractor_path: str = "extract_chmLib"
     chm_extract_timeout_seconds: float = Field(default=30.0, gt=0)
     chm_max_files: int = Field(default=8192, ge=1)
@@ -132,6 +142,21 @@ class Settings(BaseSettings):
         """Return the host:port address accepted by gRPC."""
 
         return f"{self.grpc_host}:{self.grpc_port}"
+
+    @property
+    def parser_fingerprint(self) -> str:
+        """Return every parser setting that can change indexed PDF content."""
+
+        return "|".join(
+            (
+                self.parser_version,
+                f"pdf={self.pdf_parser_mode.value}",
+                f"native-min={self.pdf_native_text_min_chars_per_page}",
+                f"ocr={self.pdf_ocr_language}@{self.pdf_ocr_dpi}",
+                f"margin={self.pdf_header_footer_margin_ratio}",
+                f"repeat-min={self.pdf_repeated_margin_min_pages}",
+            )
+        )
 
     # 实现 require_embedding_profile 对应的局部职责。
     def require_embedding_profile(self) -> EmbeddingProfile:
@@ -220,6 +245,8 @@ class Settings(BaseSettings):
             raise ValueError("parser_version must not be empty")
         if not self.chm_extractor_path.strip():
             raise ValueError("chm_extractor_path must not be empty")
+        if not self.pdf_ocr_language.strip():
+            raise ValueError("pdf_ocr_language must not be empty")
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap must be smaller than chunk_size")
         checkpoint_names = self.failpoint_checkpoint_names
