@@ -135,7 +135,7 @@ func (s *Server) chat(c *gin.Context) {
 	}
 	modelClient := agent.ModelClient(s.AllowLocalModels)
 	defer modelClient.CloseIdleConnections()
-        h := agent.Harness{Model: agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}, Tool: retriever, MaxRounds: 6, TopK: int(top), Streaming: true}
+	h := agent.Harness{Model: agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}, Tool: retriever, MaxRounds: 6, TopK: int(top), Streaming: true}
 	answer, citations, e := h.Run(ctx, p.DatasetID, p.Question, history, emit)
 	if e != nil {
 		_ = emit("error", gin.H{"code": "CHAT_FAILED", "message": "问答未完成，请检查模型连通性、工具调用支持及知识库状态。"})
