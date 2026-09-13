@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {onMounted,onActivated,onBeforeUnmount,ref,watch,nextTick} from "vue";import {streamChat,type ChatStream} from "@/api/chat";import {useDatasetStore} from "@/stores/datasets";import type {Citation} from "@/api/contracts";import {request} from "@/api/http";
+import {onMounted,onActivated,onBeforeUnmount,computed,ref,watch,nextTick} from "vue";import {streamChat,type ChatStream} from "@/api/chat";import {useDatasetStore} from "@/stores/datasets";import type {Citation} from "@/api/contracts";import {request} from "@/api/http";
 import AppIcon from "@/components/AppIcon.vue";
 import KnowledgeOrb from "@/components/KnowledgeOrb.vue";
 import MarkdownContent from "@/components/MarkdownContent.vue";
@@ -9,15 +9,17 @@ import {randomUUID} from "@/utils/id";
 defineOptions({name:'ChatView'});
 const route=useRoute();const router=useRouter();
 const datasets=useDatasetStore();const selectedId=ref("");const question=ref("");const answer=ref("");const citations=ref<Citation[]>([]);const error=ref("");const phase=ref("");const busy=ref(false);const conversationId=ref("");const transcript=ref<{role:string;content:string;citations:Citation[]}[]>([]);const conversations=ref<{id:string;datasetId:string;title:string;updatedAt:string}[]>([]);
+const contextUsage=ref<{estimatedTokens:number;usableTokens:number;evidenceCount:number;evidenceLimit:number}|undefined>();
+const contextWarning=computed(()=>{const usage=contextUsage.value;if(!usage||!usage.usableTokens)return "";const ratio=usage.estimatedTokens/usage.usableTokens;const capped=usage.evidenceLimit>0&&usage.evidenceCount>=usage.evidenceLimit;if(ratio<0.8&&!capped)return "";const percent=Math.round(ratio*100);const detail=`约 ${usage.estimatedTokens.toLocaleString()} / ${usage.usableTokens.toLocaleString()} tokens`;if(capped&&ratio<0.8)return `证据条数已达上限（${usage.evidenceCount} / ${usage.evidenceLimit}），更早或更低分的证据会被丢弃。`;if(ratio>=0.95)return `上下文已用 ${percent}%（${detail}），接近上限，较早的对话与部分证据可能被裁剪。`;return `上下文已用 ${percent}%（${detail}，证据 ${usage.evidenceCount} 条），继续追问可能触发裁剪。`;});
 async function refreshHistory():Promise<void>{try{conversations.value=await request('/conversations');}catch(e){error.value=e instanceof Error?e.message:'历史会话加载失败';}}
-function newChat():void{if(busy.value)return;conversationId.value='';transcript.value=[];answer.value='';citations.value=[];question.value='';error.value='';if(route.query.c)router.replace({query:{}});}
+function newChat():void{if(busy.value)return;conversationId.value='';transcript.value=[];answer.value='';citations.value=[];question.value='';error.value='';contextUsage.value=undefined;if(route.query.c)router.replace({query:{}});}
+function sendOnEnter(event:KeyboardEvent):void{if(event.isComposing||event.keyCode===229)return;if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();void ask();}
 let active:ChatStream|undefined;let resuming=false;
 onMounted(async()=>{await datasets.load();selectedId.value=datasets.readyDatasets[0]?.id??"";try{conversations.value=await request("/conversations");}catch{error.value="会话列表加载失败";}const c=route.query.c;if(typeof c==="string"&&c)await resume(c);});
-function sendOnEnter(event:KeyboardEvent):void{if(event.isComposing||event.keyCode===229)return;if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();void ask();}
 onActivated(async()=>{try{conversations.value=await request("/conversations");}catch{/* keep stale list */}});
-onBeforeUnmount(()=>active?.cancel());watch(selectedId,()=>{if(resuming)return;active?.cancel();conversationId.value="";transcript.value=[];answer.value="";citations.value=[];});
+onBeforeUnmount(()=>active?.cancel());watch(selectedId,()=>{if(resuming)return;active?.cancel();conversationId.value="";transcript.value=[];answer.value="";citations.value=[];contextUsage.value=undefined;});
 async function resume(id:string):Promise<void>{const row=conversations.value.find(c=>c.id===id);if(!row||busy.value)return;resuming=true;selectedId.value=row.datasetId;await nextTick();resuming=false;conversationId.value=id;try{transcript.value=await request("/conversations/"+id+"/messages");}catch(e){error.value=e instanceof Error?e.message:"会话加载失败";}}
-async function ask():Promise<void>{if(!selectedId.value||!question.value.trim()||busy.value)return;if(!conversationId.value){conversationId.value=randomUUID();router.replace({query:{c:conversationId.value}});}busy.value=true;error.value="";answer.value="";citations.value=[];phase.value="正在思考并检索…";const q=question.value;active=streamChat({datasetId:selectedId.value,question:q,conversationId:conversationId.value});let final=false;try{for await(const event of active.events){if(event.type==="retrieval")phase.value="已检索到 "+event.hits.length+" 条证据，正在生成回答…";if(event.type==="token")answer.value+=event.text;if(event.type==="error")throw new Error(event.message);if(event.type==="final"){answer.value=event.answer;citations.value=event.citations;conversationId.value=event.conversationId??"";transcript.value.push({role:"user",content:q,citations:[]},{role:"assistant",content:answer.value,citations:citations.value});question.value="";answer.value="";citations.value=[];final=true;}}if(final)conversations.value=await request("/conversations");}catch(e){error.value=e instanceof Error&&e.name==="AbortError"?"已停止生成":e instanceof Error?e.message:"问答失败";}finally{busy.value=false;phase.value="";active=undefined;}}
+async function ask():Promise<void>{if(!selectedId.value||!question.value.trim()||busy.value)return;if(!conversationId.value){conversationId.value=randomUUID();router.replace({query:{c:conversationId.value}});}busy.value=true;error.value="";answer.value="";citations.value=[];contextUsage.value=undefined;phase.value="正在思考并检索…";const q=question.value;active=streamChat({datasetId:selectedId.value,question:q,conversationId:conversationId.value});let final=false;try{for await(const event of active.events){if(event.type==="context")contextUsage.value={estimatedTokens:event.estimatedTokens,usableTokens:event.usableTokens,evidenceCount:event.evidenceCount,evidenceLimit:event.evidenceLimit};if(event.type==="retrieval")phase.value="已检索到 "+event.hits.length+" 条证据，正在生成回答…";if(event.type==="token")answer.value+=event.text;if(event.type==="error")throw new Error(event.message);if(event.type==="final"){answer.value=event.answer;citations.value=event.citations;conversationId.value=event.conversationId??"";transcript.value.push({role:"user",content:q,citations:[]},{role:"assistant",content:answer.value,citations:citations.value});question.value="";answer.value="";citations.value=[];final=true;}}if(final)conversations.value=await request("/conversations");}catch(e){error.value=e instanceof Error&&e.name==="AbortError"?"已停止生成":e instanceof Error?e.message:"问答失败";}finally{busy.value=false;phase.value="";active=undefined;}}
 </script>
 <template>
   <main class="chat-page">
@@ -106,7 +108,13 @@ async function ask():Promise<void>{if(!selectedId.value||!question.value.trim()|
       </p><MarkdownContent
         v-if="answer"
         :content="answer"
-      /><form
+      /><p
+        v-if="contextWarning"
+        class="context-warning"
+        role="status"
+      >
+        <AppIcon name="spark" />{{ contextWarning }}
+      </p><form
         class="chat-composer"
         @submit.prevent="ask"
       >
@@ -117,6 +125,7 @@ async function ask():Promise<void>{if(!selectedId.value||!question.value.trim()|
           rows="2"
           :disabled="busy"
           required
+          @keydown.enter="sendOnEnter"
         /></label><div class="composer-footer">
           <small><AppIcon name="spark" />Enter 发送 · Ctrl / ⌘ + Enter 换行</small><button
             v-if="!busy"
@@ -125,7 +134,6 @@ async function ask():Promise<void>{if(!selectedId.value||!question.value.trim()|
             发送 <AppIcon name="send" />
           </button><button
             v-else
-          @keydown.enter="sendOnEnter"
             type="button"
             @click="active?.cancel()"
           >

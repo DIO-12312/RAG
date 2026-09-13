@@ -116,6 +116,9 @@ func (h Harness) modelPhase(ctx context.Context, state *RunState, emit Emit) err
 		state.MarkFailed(StopReasonBudgetExceeded)
 		return errors.New("context budget exceeded")
 	}
+	if err := h.emitContext(state, emit); err != nil {
+		return err
+	}
 
 	policy := PolicyForIntent(state.Intent, state.ModelCalls)
 
@@ -519,4 +522,35 @@ func exhaustRetrievalBudget(state *RunState, remaining []ToolCall) {
 	state.AnswerNeeded = true
 	state.ToolCalls = nil
 	state.ToolReason = ""
+}
+
+// emitContext 汇报当前模型上下文占用与证据数量，供前端在接近预算时告警。
+// 只有用量或证据数发生变化时才发送，避免每轮重复事件。
+func (h Harness) emitContext(state *RunState, emit Emit) error {
+	usable := state.Budget.MaxTokens - state.Budget.ReserveTokens
+	if usable < 1 {
+		usable = state.Budget.MaxTokens
+	}
+	used := state.Budget.UsedTokens(state.Messages)
+	evidence := 0
+	if state.Pool != nil {
+		evidence = state.Pool.Len()
+	}
+	if state.ContextReported && used == state.ContextTokens && evidence == state.ContextEvidence {
+		return nil
+	}
+	state.ContextReported = true
+	state.ContextTokens = used
+	state.ContextEvidence = evidence
+	if err := emit("context", map[string]any{
+		"estimatedTokens": used,
+		"usableTokens":    usable,
+		"budgetTokens":    state.Budget.MaxTokens,
+		"evidenceCount":   evidence,
+		"evidenceLimit":   state.Limits.MaxEvidence,
+	}); err != nil {
+		state.MarkFailed(StopReasonCancelled)
+		return err
+	}
+	return nil
 }

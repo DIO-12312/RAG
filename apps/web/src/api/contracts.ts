@@ -139,6 +139,7 @@ export interface ChatRequest {
 export type ChatEvent =
   | { type: "retrieval"; hits: Evidence[] }
   | { type: "token"; text: string }
+  | { type: "context"; estimatedTokens: number; usableTokens: number; budgetTokens: number; evidenceCount: number; evidenceLimit: number }
   | { type: "final"; answer: string; citations: Citation[]; conversationId?: string }
   | { type: "error"; code: string; message: string };
 

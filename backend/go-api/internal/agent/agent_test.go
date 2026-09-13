@@ -74,7 +74,7 @@ func TestHTTPToolLoopAndCitation(t *testing.T) {
 			if e != nil || answer == "" || len(c) != 1 || c[0].Evidence.Content == "" || tool.dataset != "owned-dataset" || calls != 2 {
 				t.Fatalf("loop failed: %v", e)
 			}
-			if len(events) != 2 || events[0] != "retrieval" || events[1] != "token" {
+			if len(events) != 4 || events[0] != "context" || events[1] != "retrieval" || events[2] != "context" || events[3] != "token" {
 				t.Fatal(events)
 			}
 		})
@@ -204,11 +204,13 @@ func TestHarnessUsesStreamingModel(t *testing.T) {
 		tokens[2] != "in December. [1]" {
 		t.Fatalf("unexpected token events: %#v", tokens)
 	}
-	if len(events) != 4 ||
-		events[0] != "retrieval" ||
-		events[1] != "token" ||
-		events[2] != "token" ||
-		events[3] != "token" {
+	if len(events) != 6 ||
+		events[0] != "context" ||
+		events[1] != "retrieval" ||
+		events[2] != "context" ||
+		events[3] != "token" ||
+		events[4] != "token" ||
+		events[5] != "token" {
 		t.Fatalf("unexpected events: %#v", events)
 	}
 }

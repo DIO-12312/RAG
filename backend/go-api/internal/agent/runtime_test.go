@@ -694,3 +694,71 @@ func TestFailureHintMapsStopReasons(t *testing.T) {
 		t.Fatal("RunError must unwrap to the original error")
 	}
 }
+
+// TestRuntimeReportsContextUsage 验证每轮模型调用前汇报上下文占用，
+// 且证据进入上下文后用量必须增长。
+func TestRuntimeReportsContextUsage(t *testing.T) {
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "migration"),
+		{Content: "Migration ends in December. [1]"},
+	}}
+	h := Harness{Model: model, Tool: &retriever{}}
+	state := h.newRunState("owned-dataset", "question", nil)
+
+	type report struct {
+		tokens   int
+		usable   int
+		evidence int
+		limit    int
+	}
+	var reports []report
+	err := h.runStateMachine(context.Background(), state, func(event string, data any) error {
+		if event != "context" {
+			return nil
+		}
+		payload, ok := data.(map[string]any)
+		if !ok {
+			t.Fatalf("unexpected context payload: %T", data)
+		}
+		item := report{}
+		item.tokens, _ = payload["estimatedTokens"].(int)
+		item.usable, _ = payload["usableTokens"].(int)
+		item.evidence, _ = payload["evidenceCount"].(int)
+		item.limit, _ = payload["evidenceLimit"].(int)
+		reports = append(reports, item)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if len(reports) != 2 {
+		t.Fatalf("expected one context report per model round, got %d", len(reports))
+	}
+	if reports[0].evidence != 0 || reports[1].evidence != 1 {
+		t.Fatalf("unexpected evidence counts: %+v", reports)
+	}
+	if reports[1].tokens <= reports[0].tokens {
+		t.Fatalf("evidence must increase context usage: %+v", reports)
+	}
+	budget := DefaultContextBudget()
+	if reports[1].usable != budget.MaxTokens-budget.ReserveTokens || reports[1].limit != DefaultRunLimits().MaxEvidence {
+		t.Fatalf("unexpected budget limits: %+v", reports[1])
+	}
+}
+
+// TestEmitContextSkipsUnchangedUsage 验证用量没有变化时不重复发送占用事件。
+func TestEmitContextSkipsUnchangedUsage(t *testing.T) {
+	h := Harness{}
+	state := h.newRunState("dataset", "question", nil)
+	count := 0
+	emit := func(string, any) error { count++; return nil }
+	if err := h.emitContext(state, emit); err != nil {
+		t.Fatalf("first report failed: %v", err)
+	}
+	if err := h.emitContext(state, emit); err != nil {
+		t.Fatalf("second report failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("unchanged usage must not repeat the event, got %d", count)
+	}
+}

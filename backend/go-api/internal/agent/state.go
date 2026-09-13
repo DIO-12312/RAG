@@ -98,6 +98,11 @@ type RunState struct {
 
 	// ToolReason 标记本轮工具调用的来源（model/rewrite），用于 SSE 的 reason 字段。
 	ToolReason string
+
+	// 上下文占用汇报：记录上次发给前端的用量，避免重复事件。
+	ContextReported bool
+	ContextTokens   int
+	ContextEvidence int
 }
 
 // queryAttempted 判断查询是否已在本次 Run 的尝试账本中（按规范化文本比较）。
