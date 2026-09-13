@@ -71,6 +71,19 @@ protoc --proto_path=../../proto --go_out=. --go_opt=module=rag-mvp/backend/go-ap
 
 本次联调同时修复既有 Search Guard bulk 分片权限，见 `docs/bug/2026-09-06-search-guard-bulk-shard-permission.md`。权限仅对 `rag-chunks-v1*` 生效。
 
+## Agentic RAG Loop（2026-09-13）
+
+Go Agent 现在是显式状态机：`route → model → tool → assess → finalize`，证据不足时按缺口有界地 `rewrite → tool → assess`（最多 2 轮改写、3 轮检索、6 次模型调用）。路由结果直接决定 provider 请求的工具策略：`reply`/`reuse` 使用 `ToolNone`（payload 完全不带 `tools`/`tool_choice`），`retrieve` 首轮 `ToolRequired`、后续 `ToolAuto`。`rag_retrieve` 仍只读并绑定服务端授权的 dataset；Python 依旧只提供 gRPC `Retrieve`。
+
+验证入口（本地离线，一条命令）：
+
+```bash
+cd backend/go-api && go test -p 1 ./internal/agent -run TestAgentEval -count=1 -v
+go test -p 1 ./... -count=1
+```
+
+`testdata/agent_eval.json` 固定 31 条样本，五项指标门槛均为 100%。每次请求还会输出脱敏 `agent_run` 事件（run ID、阶段、计数、耗时、终止原因与查询指纹），日志中不含问题原文、Evidence 正文或模型推理内容。真实链路验收仍需按下面的产品栈步骤手工复核：`你好` 不产生 `retrieval` 事件与引用；`你好，文档里怎么配置超时？` 至少一次 `retrieval` 且有受支持引用；无答案问题明确说明证据不足而不编造引用。
+
 ## 本次体验迭代
 
 - 多文件及文件夹选择，单批最多 1000 个、单文件 32 MiB；逐文件提交，失败独立重试并复用幂等键。目录层级只用于选择列表展示，资料作为平面文档存放；不支持的格式/空文件跳过。
