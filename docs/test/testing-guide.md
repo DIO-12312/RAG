@@ -86,23 +86,23 @@ make ci
 标准流程：
 
 ```bash
-make docker-up
+make run
 make docker-test SUITE=integration
 make docker-test SUITE=resilience
 make docker-test SUITE=eval
-make docker-down
+make down
 ```
 
 也可以一次顺序执行全部真实测试：
 
 ```bash
 make docker-test SUITE=all
-make docker-down
+make down
 ```
 
 `SUITE=all` 固定按 `integration → resilience → eval` 执行；任一步失败即停止后续 suite。`docker-test` 会验证、构建、启动并等待完整 Compose 拓扑，但测试结束或失败后不会自动关闭服务，以便保留日志和现场。真实 suite 会验证 Search Guard TLS、匿名/错误凭据拒绝、`rag_mvp` 的索引最小权限和受保护 ES 上的 RAG 闭环；具体证据在 `tests/integration/test_search_guard_security.py`、`tests/contract/test_search_guard_assets.py` 与 `tests/contract/test_container_artifacts.py`。
 
-无论成功失败，最后都应显式运行 `make docker-down`；该入口先扫描服务日志中的 API Key 与 ES password，再执行不删除持久卷的 `down --remove-orphans`，禁止用 `down -v` 代替。除 MySQL/ES/NATS/object 数据卷外，它也必须保留 `search-guard-node-secrets` 和 `search-guard-client-secrets` 材料卷：删除它们会破坏受控的开发材料、使诊断失去可重现性，不能作为"修复"启动错误的手段。
+无论成功失败，最后都应显式运行 `make down`；该入口关闭默认 RAG 与产品两套开发 Compose 栈，删除本地构建镜像但不删除持久卷，禁止用 `down -v` 代替。除 MySQL/ES/NATS/object 数据卷外，它也必须保留 `search-guard-node-secrets` 和 `search-guard-client-secrets` 材料卷：删除它们会破坏受控的开发材料、使诊断失去可重现性，不能作为"修复"启动错误的手段。
 
 真实测试注意事项：
 
@@ -111,7 +111,7 @@ make docker-down
 - Embedding 仍以 32 条为配置批次上限；若兼容供应商用 HTTP 400 拒绝多输入批次，Adapter 会保持顺序二分请求，单条输入仍被拒绝时保留稳定失败，不回退 Fake。
 - `resilience` 使用测试专用 Compose override、共享 barrier 和 Docker socket，能够 KILL/stop/start 精确容器；只允许在隔离的测试宿主机运行。
 - `eval` 始终摄取固定语料并调用真实模型完成 30 问；本地 PDF 存在时还会完整摄取 44 页文档并执行 50 次 query embedding，因此通常是模型请求最多的 suite。
-- 真实测试只传必要 Secret 给 `rag-server`、`rag-worker` 和 `rag-test`；Migration 与 Outbox 不应获得模型 API Key。ES password 以只读文件挂载，`docker-down` 同时扫描模型 API Key 与该 password，扫描命中不会回显任何 Secret。
+- 真实测试只传必要 Secret 给 `rag-server`、`rag-worker` 和 `rag-test`；Migration 与 Outbox 不应获得模型 API Key。ES password 以只读文件挂载；`make down` 不打印或回显任何 Secret。
 
 固定 30 问的真实和离线评测门槛均为 `Recall@6 ≥ 0.85`、`MRR@6 ≥ 0.70`、locator accuracy `= 1.0`。本地 PDF 五十问门槛为 `Recall@6 ≥ 0.80`、`MRR@6 ≥ 0.65`、Top-1 页命中率 `≥ 0.60`、答案包含度 `≥ 0.70`。不得通过降低阈值、修改向量 snapshot 或 LLM 自由文本 snapshot 消除失败。
 
@@ -126,7 +126,7 @@ make docker-down
 | Functional 失败 | 按 upload → Finalizer → Relay → Worker → Retrieve 顺序定位。 |
 | Resilience 失败 | 检查 Task/Job、Outbox、generation、delivery sequence 和 ACK/NAK。 |
 | 覆盖率低于 85% | 为新分支补 unit/functional 测试，不降低 `--cov-fail-under`。 |
-| 真实测试失败 | 保留服务，检查容器状态和脱敏日志；TLS/证书/密码/bootstrap 错误必须 fail closed，随后运行 `make docker-down`，不得关闭 Search Guard 或发布 9200。 |
+| 真实测试失败 | 保留服务，检查容器状态和脱敏日志；TLS/证书/密码/bootstrap 错误必须 fail closed，随后运行 `make down`，不得关闭 Search Guard 或发布 9200。 |
 | Secret 扫描失败 | 先修复日志泄漏；扫描器只报告命中，不回显密钥。 |
 
 ## 7. CI 与团队合入门禁
@@ -146,7 +146,7 @@ make docker-down
 - 使用 GitHub 托管的 `ubuntu-24.04` 临时 runner，超时 30 分钟；固定 checkout 提交、Earthly 0.8.16 下载地址和 SHA-256。安装网络请求有限重试，测试不自动重跑到通过。
 - 只有 `contents: read` 权限，checkout 不保留凭据；不注入模型/部署 Secret，不使用 `pull_request_target`，不运行部署或修改 GitHub 规则。
 - `make release-check` 先执行 `make ci`（Python Ruff、mypy、Python protobuf 同步、unit/contract/functional、Fake resilience、offline eval 与四个核心包的 85% 聚合覆盖率门槛），再执行 Go 与前端发布门禁：`release-go-check` 运行 `go test ./...`，`release-web-check` 用 `apps/web/package-lock.json` 执行 `npm ci`、前端 test 与 build。**不包含 Go protobuf 同步、`gofmt`/`go vet` 或新增代码覆盖率的独立门槛。**
-- "离线"指测试不依赖业务基础设施或模型；首次安装仍需要 Docker/BuildKit、镜像和包下载网络。此 workflow 不启动业务 Compose，无需 `make docker-down`，也不访问或删除开发数据卷。
+- "离线"指测试不依赖业务基础设施或模型；首次安装仍需要 Docker/BuildKit、镜像和包下载网络。此 workflow 不启动业务 Compose，无需 `make down`，也不访问或删除开发数据卷。
 - `lint/test/ci` 聚合 target 显式 `FROM +python-workspace`，保持已有检查集合不变；避免 Earthly 0.8.16 在空基底嵌套 BUILD 时出现 `fakecopy2 / failed to get state for index` 内部错误。
 
 ### 7.2 启用 main 保护（管理员一次性操作）
@@ -200,15 +200,15 @@ GitHub 参考：[创建和导入 Ruleset](https://docs.github.com/en/repositorie
 | 工具版本 | GNU Make 4.4.1、Earthly v0.8.16、Docker Engine 29.4.0、Docker Compose v5.1.1 |
 | Protobuf | `make proto` 成功；`src/rag_mvp/rpc/generated` 与 Git 中生成物内容一致，无缓存或临时文件进入导出目录 |
 | 离线门禁 | `make lint`、`make test`、`make ci` 成功；195 passed、9 deselected，核心覆盖率 88.01% |
-| Docker 拓扑 | `make docker-up` 成功；Migration 正常退出，MySQL、Elasticsearch、NATS、Server、Worker、Outbox 均达到声明的健康状态 |
+| Docker 拓扑 | `make run` 成功；Migration 正常退出，MySQL、Elasticsearch、NATS、Server、Worker、Outbox、产品 API 和 Web 均达到声明的健康状态 |
 | Integration/E2E | `make docker-test SUITE=integration`：27 passed in 51.68s |
 | Docker Resilience | `make docker-test SUITE=resilience`：8 passed in 45.75s |
 | Real Eval | `make docker-test SUITE=eval`：1 passed in 16.30s；固定 30 问 Recall@6 = 1.0、MRR@6 = 1.0、locator accuracy = 1.0 |
-| 安全停止 | `make docker-down` 的日志 Secret 扫描成功；停止后 Compose 无运行服务，未执行 `down -v` |
+| 开发环境停止 | `make down` 成功；停止后两套开发 Compose 无运行服务，开发本地镜像已清理，未执行 `down -v` |
 | 数据持久性 | `rag-mvp_mysql-data`、`rag-mvp_elasticsearch-data`、`rag-mvp_nats-data`、`rag-mvp_object-data` 和 resilience failpoint 卷仍存在 |
 
 未单独执行 `make docker-test SUITE=all`；历史记录中 integration、resilience、eval 是在同一固定顺序下分别完成。这里的历史"通过"仅描述 Search Guard 加固前的未受保护环境，不能推断 TLS、权限最小化或当前安全 Docker 拓扑已验收。原生 Windows shell 下 Earthly `LOCALLY` 对 Windows 路径的转换不稳定；本次 Docker target 按本文推荐路径在 WSL2 中验收，离线 target 可在原生 Windows 运行。
 
 ### 当前 Search Guard Docker 验收状态（2026-08-29）
 
-`make docker-test SUITE=all` 在 `rag-search-guard-bootstrap` bootstrap 失败（exit 1）时 fail closed；因此后续 suite 未运行，不能把历史 integration、resilience 或 eval 的成功表述为当前安全验收通过。已执行 `make docker-down`，服务和网络已停止且保留数据与 Search Guard 材料卷。修复 bootstrap 根因后，必须重新运行公共 Make suite，不得改用直接 Compose test 入口绕过该顺序。
+`make docker-test SUITE=all` 在 `rag-search-guard-bootstrap` bootstrap 失败（exit 1）时 fail closed；因此后续 suite 未运行，不能把历史 integration、resilience 或 eval 的成功表述为当前安全验收通过。已执行 `make down`，服务和网络已停止且保留数据与 Search Guard 材料卷。修复 bootstrap 根因后，必须重新运行公共 Make suite，不得改用直接 Compose test 入口绕过该顺序。

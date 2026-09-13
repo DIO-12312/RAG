@@ -42,9 +42,8 @@ def test_makefile_offline_targets_are_commented_earthly_only_entrypoints() -> No
         "lint",
         "test",
         "ci",
-        "docker-up",
         "docker-test",
-        "docker-down",
+        "down",
         "run",
         "production-run",
         "web-restart",
@@ -249,7 +248,7 @@ def test_main_ruleset_protects_main_without_blocking_direct_push() -> None:
     assert "pull_request" not in rules
 
 
-def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> None:
+def test_docker_entrypoints_validate_suites_and_preserve_volumes() -> None:
     """验证本测试场景的预期行为与边界条件。"""
     makefile = _text("Makefile")
     earthfile = _text("Earthfile")
@@ -265,9 +264,8 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
         "lint",
         "test",
         "ci",
-        "docker-up",
         "docker-test",
-        "docker-down",
+        "down",
         "run",
         "production-run",
         "web-restart",
@@ -300,9 +298,9 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
     assert "ARG EVAL_FIXTURE=rephrased" in earthfile
     assert 'case "$EVAL_FIXTURE" in original|rephrased)' in earthfile
     assert '-e EVAL_FIXTURE="$EVAL_FIXTURE"' in earthfile
-    assert earthfile.count("DO +DOCKER_START") == 3
+    assert earthfile.count("DO +DOCKER_START") == 2
     assert "docker-start:\n    FUNCTION" not in earthfile
-    for target in ("docker-up", "docker-test", "docker-down"):
+    for target in ("docker-test", "down"):
         assert re.search(rf"^# .+\n{re.escape(target)}:", makefile, re.MULTILINE)
         assert re.search(rf"^# .+\n{re.escape(target)}:", earthfile, re.MULTILINE)
     assert "LOCALLY" in earthfile
@@ -319,9 +317,15 @@ def test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes() -> 
     assert "tests/eval/test_real_computer_architecture_pdf_quality.py" in eval_command
     assert '--user "$(id -u):$(id -g)"' in eval_command
     assert "Unknown SUITE:" in earthfile
-    assert "scripts/check_secret_leaks.py" in earthfile
-    assert "docker compose down --remove-orphans" in earthfile
+    assert "docker-up" not in makefile
+    assert "docker-down" not in makefile
+    assert "docker-up:" not in earthfile
+    assert "docker-down:" not in earthfile
+    down_target = earthfile.split("\ndown:\n", 1)[1].split("\n# ", 1)[0]
+    assert "docker compose down --remove-orphans --rmi local" in down_target
+    assert "docker compose -f compose.product.yml down --remove-orphans --rmi local" in down_target
     assert "down -v" not in earthfile
+    assert "all: proto lint test run" in makefile
     assert "./tests/eval/log:/app/tests/eval/log:rw" in compose
 
 

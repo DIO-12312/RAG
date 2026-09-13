@@ -4,6 +4,10 @@
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
 
+### 2026-09-13 开发环境 Make 入口
+
+`tests/contract/test_build_entrypoints.py` 的 `test_makefile_offline_targets_are_commented_earthly_only_entrypoints` 与 `test_docker_entrypoints_validate_suites_and_preserve_volumes` 校验公开入口已移除 `docker-up`，`docker-down` 已改为 `down`，`all` 按 `proto lint test run` 执行；同时校验 `down` 通过两套开发 Compose 配置移除容器、网络和本地镜像，但不使用 `down -v` 删除数据卷。该契约测试为离线文本检查，不实际停止容器或删除镜像。
+
 ### 2026-09-11 用户级 Rerank
 
 ```text
@@ -436,7 +440,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_quality_workflow_pins_tools_and_keeps_secrets_out` | 检查只读权限、临时托管 runner、固定 Action/Earthly 与下载校验、不保留凭据、不注入 Secret 或启动业务 Compose，以及 Earthly 显式复制所需配置。仅静态契约，不证明下载或远端运行成功。 |
 | 同上 | `test_main_ruleset_protects_main_without_blocking_direct_push` | 用 JSON 解析规则，验证 main 限定、仅禁止删除与强推、且不含 `pull_request` 或 `required_status_checks`，确保直接 push 不被拦截。不会调用 GitHub API 或验证远端规则已启用。 |
 | 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界；lint/test/ci 聚合复用非空工作区基底，并复制生产 Compose/Caddy 契约输入，避免测试工作区遗漏部署文件。 |
-| 同上 | `test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes` | Docker 公共入口复用 Function；run 统一由 Earthfile 顺序准备共享卷、等待 RAG、启动产品服务与容器化 Vue 前端；验证 suite、静默校验 Compose、扫描日志和持久卷保护。eval 同时收集既有 30 问与 PDF 五十问。此离线静态契约不替代 Windows/WSL/Linux 的实际启动验收。 |
+| 同上 | `test_docker_entrypoints_validate_suites_and_preserve_volumes` | Docker 公共入口复用 Function；run 统一由 Earthfile 顺序准备共享卷、等待 RAG、启动产品服务与容器化 Vue 前端；验证 suite、静默校验 Compose、关闭两套开发栈、清理本地镜像和持久卷保护。eval 同时收集既有 30 问与 PDF 五十问。此离线静态契约不替代 Windows/WSL/Linux 的实际启动验收。 |
 | 同上 | `test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths` | Docker 入口构建安全材料/ES/bootstrap 服务，并仅向测试容器传递 ES password file 与 CA path。 |
 | 同上 | `test_containerized_web_upload_limits_match_supported_rag_sources` | 前端与 Go 白名单一致接纳 PDF、CHM/CHI、Markdown、文本和代码；Nginx 为 32 MiB 文件及 multipart 开销设置 34 MiB 请求上限。 |
 | 同上 | `test_containerized_web_proxies_product_health_checks` | 容器化 Nginx 必须将 `/healthz`、`/readyz` 转发到 Go API，防止 SPA fallback 返回 HTML 造成公网健康假阳性。 |

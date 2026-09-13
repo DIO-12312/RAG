@@ -164,11 +164,6 @@ DOCKER_START:
     RUN docker compose --profile test build rag-security-materials elasticsearch rag-search-guard-bootstrap rag-migrate rag-server rag-worker rag-outbox rag-test
     RUN docker compose up -d --wait --wait-timeout 240 rag-server rag-worker rag-outbox
 
-# Start the complete RAG service topology and wait for every declared health condition.
-docker-up:
-    LOCALLY
-    DO +DOCKER_START
-
 # Start the complete development stack: RAG services, Go product backend, and Vue frontend container.
 run:
     LOCALLY
@@ -217,12 +212,8 @@ docker-test:
         run_eval() { docker compose --profile test run --rm --user "$(id -u):$(id -g)" -e EVAL_FIXTURE="$EVAL_FIXTURE" rag-test uv run pytest -m eval tests/eval/test_real_retrieval_quality.py tests/eval/test_real_computer_architecture_pdf_quality.py -q; }; \
         case "$SUITE" in integration) run_integration ;; resilience) run_resilience ;; eval) run_eval ;; all) run_integration && run_resilience && run_eval ;; esac
 
-# Scan Compose logs for the configured API key, then stop services without deleting volumes.
-docker-down:
+# Stop both development Compose stacks and remove their locally built images without deleting volumes.
+down:
     LOCALLY
-    RUN log_file="$(mktemp)"; trap 'rm -f "$log_file"' EXIT; \
-        docker compose logs --no-color >"$log_file" 2>&1 || true; \
-        scan_status=0; \
-        docker compose --profile test run --rm -T --no-deps rag-test uv run python scripts/check_secret_leaks.py <"$log_file" || scan_status=$?; \
-        down_status=0; docker compose down --remove-orphans || down_status=$?; \
-        if [ "$scan_status" -ne 0 ]; then exit "$scan_status"; fi; exit "$down_status"
+    RUN docker compose down --remove-orphans --rmi local
+    RUN docker compose -f compose.product.yml down --remove-orphans --rmi local

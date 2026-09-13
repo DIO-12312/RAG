@@ -163,7 +163,7 @@ Windows 上推荐在 Ubuntu WSL2 中运行 Make、Earthly 和 Docker CLI，而 D
 | 文件系统边界 | Windows NTFS 与 WSL ext4 的性能/权限差异 | 小项目可直接在 `/mnt/c`；高频 I/O 场景可迁到 WSL 文件系统 |
 | 默认发行版 | WSL 启动时默认进入的 Linux 发行版 | Docker Desktop 可选择集成默认发行版或指定 Ubuntu |
 
-推荐验证顺序：在 Docker Desktop 设置中启用 **Use the WSL 2 based engine** 和 Ubuntu 的 **WSL Integration**；然后在 Ubuntu 中执行 `docker version`，再进入 `/mnt/c/Users/wcz/Documents/ChatGPT/RAG` 执行 `make docker-up`。如果 Ubuntu 内没有 `docker` 命令，不要在 Ubuntu 再安装独立 Docker Engine，先检查 Docker Desktop 的 WSL Integration。
+推荐验证顺序：在 Docker Desktop 设置中启用 **Use the WSL 2 based engine** 和 Ubuntu 的 **WSL Integration**；然后在 Ubuntu 中执行 `docker version`，再进入项目目录执行 `make run`。如果 Ubuntu 内没有 `docker` 命令，不要在 Ubuntu 再安装独立 Docker Engine，先检查 Docker Desktop 的 WSL Integration。
 
 ## 10. 一条完整链路的复习方式
 
@@ -175,5 +175,4 @@ Windows 上推荐在 Ubuntu WSL2 中运行 Make、Earthly 和 Docker CLI，而 D
 4. Worker 接到 delivery，回查 MySQL，解析 PDF、切块、调用 Embedding Provider，并 Bulk upsert 到 ES。
 5. Worker 条件完成 Task/Job，切换 Document 的 active index version，然后 ACK NATS delivery。
 6. 调用方执行 Retrieve；服务生成 query vector，向 ES 请求 Dense 和 BM25 候选，回查 MySQL 可见性，RRF 融合后返回 evidence 与定位信息。
-
 
