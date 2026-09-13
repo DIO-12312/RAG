@@ -779,6 +779,8 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 
 ### 5.7 配置与可观测性
 
+2026-09-14 产品 Go 的事件与配置契约扩展：Chat SSE 在每轮模型调用前增加可选 `context` 事件，即 `{"event":"context","data":{"estimatedTokens":N,"usableTokens":N,"budgetTokens":N,"evidenceCount":N,"evidenceLimit":N}}`，其中用量由既有的 `ContextBudget.UsedTokens` 估算且 `usableTokens = maxTokens - reserveTokens`；同一 Run 内用量与证据数都不变时不得重复发送。该事件只服务于前端"上下文接近预算"告警，不改变回答、引用、裁剪或停止语义，也不得携带问题原文、Evidence 正文或模型私有推理。设置页新增 `POST /settings/models/:kind/test`（`kind` 为 `chat`/`embedding`/`rerank`）：服务端用已保存配置发起一次最小探测——chat 为不带 `tools` 的单轮补全，embedding 校验返回向量维度与索引维度一致，rerank 按 `/rerank` 协议校验返回条数与结果下标——探测总时长上限 30 秒。未配置 Key 返回 `MODEL_NOT_CONFIGURED`，密钥解密失败返回 `KEY_UNAVAILABLE`，供应商错误以 HTTP 200 加 `{"ok":false,"latencyMs":N,"detail":"..."}` 返回且回显必须截断；API Key 与完整供应商响应不得进入响应体、日志或前端存储。
+
 PDF 运行参数包括 `plain/deepdoc/auto` 模式、原生文字阈值、OCR 语言、DPI、超时、最大页数和页眉页脚比例；这些参数与 parser 版本共同构成 `parser_fingerprint`，Server 计算上传 digest 与 Worker 实际解析必须使用同一组 Settings。
 
 `Settings` 只从环境变量/`.env` 读取：MySQL DSN、Alembic migration root、对象目录、Elasticsearch URL/索引名/用户名/密码/CA 证书路径、NATS URL/stream/consumer、模型 URL/名称/API Key/声明维度、parser 版本、chunk 大小/重叠、上传上限、`ack_wait`、`max_deliver`、Worker 空闲等待、Outbox 轮询/批量/Finalizer 尝试上限、staging sweep 间隔/TTL、重试退避和日志级别。容器镜像必须复制 Alembic 配置与版本脚本，并由 `rag-migrate` 显式设置 migration root 后执行 `upgrade head`；Search Guard 安全 bootstrap 必须先于 migration 成功，应用角色只能在二者成功后启动。RPC 上传计算 `config_digest` 与 Worker Pipeline 必须使用同一份 parser/chunk/model Settings，禁止入口使用硬编码配置造成去重摘要与真实执行参数不一致。所有循环在超时轮询期间仍必须能被 stop event 立即唤醒。生产容器要求 `EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_MODEL_API_KEY` 与 `EMBEDDING_MODEL_DIMENSION`；维度不得在代码中按供应商写死。API Key、Elasticsearch 密码、证书私钥和管理员客户端证书只存在环境变量、受保护挂载或密钥管理系统，禁止写入 Dataset、Job、日志、trace、镜像或测试 artifact。
