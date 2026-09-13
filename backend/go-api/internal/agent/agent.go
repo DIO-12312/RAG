@@ -84,6 +84,19 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 	}
 	messages = budget.TrimMessages(messages)
 
+	intent := RouteIntent(question, history)
+	allowDirectAnswer := intent.Action == "reply" || intent.Action == "reuse"
+
+	if intent.Action == "clarify" {
+		if intent.ClarificationQuestion == "" {
+			return "", nil, errors.New("clarification question is empty")
+		}
+		if e := emit("token", map[string]any{"text": intent.ClarificationQuestion}); e != nil {
+			return "", nil, e
+		}
+		return intent.ClarificationQuestion, nil, nil
+	}
+
 	citations := []Citation{}
 	streaming := false
 	seen := map[string]int{}
@@ -138,7 +151,7 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 		}
 		msg.Role = "assistant"
 		if len(msg.ToolCalls) == 0 {
-			if len(citations) == 0 && round == 0 {
+			if len(citations) == 0 && round == 0 && !allowDirectAnswer {
 				return "", nil, errors.New("model did not call retrieval tool")
 			}
 			valid := []Citation{}
@@ -168,6 +181,9 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 		}
 		messages = append(messages, msg)
 		for _, call := range msg.ToolCalls {
+			if intent.Action == "reuse" {
+				return "", nil, errors.New("transformation must not call retrieval tool")
+			}
 			if call.ID == "" || call.Function.Name != "rag_retrieve" {
 				return "", nil, errors.New("unknown tool")
 			}
@@ -177,6 +193,11 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 			if len(call.Function.Arguments) > 8192 || json.Unmarshal([]byte(call.Function.Arguments), &args) != nil || len(args.Query) == 0 || len(args.Query) > 4096 {
 				return "", nil, errors.New("invalid tool arguments")
 			}
+
+			if intent.Action == "retrieve" && intent.StandaloneQuery != "" {
+				args.Query = intent.StandaloneQuery
+			}
+
 			hits, e := h.Tool.Retrieve(ctx, dataset, args.Query, top)
 			if e != nil {
 				return "", nil, e
