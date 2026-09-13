@@ -29,3 +29,18 @@ func TestDocumentStateDegradesStaleJobs(t *testing.T) {
 		}
 	}
 }
+
+func TestRagNotFoundOnlyMatchesExplicitNotFound(t *testing.T) {
+	if !ragNotFound(&pb.BusinessError{Code: "DOCUMENT_NOT_FOUND"}) {
+		t.Fatal("DOCUMENT_NOT_FOUND must be treated as stale reference")
+	}
+	if !ragNotFound(&pb.BusinessError{Code: "DATASET_NOT_FOUND"}) {
+		t.Fatal("DATASET_NOT_FOUND must be treated as stale reference")
+	}
+	if ragNotFound(&pb.BusinessError{Code: "DOCUMENT_DELETED"}) {
+		t.Fatal("other business errors must keep failing the request")
+	}
+	if ragNotFound(nil) {
+		t.Fatal("nil business error is not a stale reference")
+	}
+}

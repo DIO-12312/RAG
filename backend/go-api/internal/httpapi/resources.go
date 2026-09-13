@@ -122,6 +122,13 @@ func (s *Server) createDataset(c *gin.Context) {
 	c.JSON(201, gin.H{"id": id, "name": p.Name, "status": "EMPTY", "documentCount": 0, "updatedAt": time.Now().UTC().Format(time.RFC3339)})
 }
 
+// ragNotFound 判断 RAG 业务错误是否表示对象在 RAG 侧已经不存在。只有明确的
+// NOT_FOUND 才允许产品侧清理引用：传输错误必须继续按失败处理，避免在 RAG 仍有数据时
+// 丢掉产品库引用。
+func ragNotFound(e *pb.BusinessError) bool {
+	return e != nil && strings.HasSuffix(e.GetCode(), "_NOT_FOUND")
+}
+
 func (s *Server) deleteDataset(c *gin.Context) {
 	r, e := s.Store.Resource(c.Request.Context(), uid(c), c.Param("id"))
 	if e != nil || (r.Kind != "dataset" && r.Kind != "deleting_dataset") {
@@ -134,11 +141,32 @@ func (s *Server) deleteDataset(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
-	result, e := s.RAG.DeleteDataset(ctx, r.ID, uid(c)+"-"+key(c))
-	if e != nil || result == nil {
+	resp, e := s.RAG.RPC.DeleteDataset(ctx, &pb.DeleteDatasetRequest{Context: ragclient.Context(uid(c) + "-" + key(c)), DatasetId: r.ID})
+	if e != nil {
 		fail(c, 502, "DELETE_FAILED", "知识库删除失败，请稍后重试。")
 		return
 	}
+	if ragNotFound(resp.GetError()) {
+		// RAG 侧已无此知识库（元数据可能已被重置）：仍需清理产品侧引用，
+		// 否则用户既删不掉也重建不了。
+		if _, e = s.Store.DB.ExecContext(
+			ctx,
+			"UPDATE resource_index SET kind='deleted' WHERE user_id=? AND (id=? OR dataset_id=?)",
+			uid(c),
+			r.ID,
+			r.ID,
+		); e != nil {
+			fail(c, 503, "SAVE_FAILED", "请重试。")
+			return
+		}
+		c.JSON(202, gin.H{"datasetId": r.ID, "jobId": ""})
+		return
+	}
+	if ragclient.Error(resp.GetError()) != nil || resp.GetResult() == nil {
+		fail(c, 502, "DELETE_FAILED", "知识库删除失败，请稍后重试。")
+		return
+	}
+	result := resp.GetResult()
 	if _, e = s.Store.DB.ExecContext(
 		ctx,
 		"UPDATE resource_index SET kind=CASE WHEN id=? THEN 'deleting_dataset' ELSE 'deleted' END, job_id=CASE WHEN id=? THEN ? ELSE job_id END WHERE user_id=? AND (id=? OR dataset_id=?)",
@@ -275,7 +303,20 @@ func (s *Server) deleteDocument(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 	resp, e := s.RAG.RPC.DeleteDocument(ctx, &pb.DeleteDocumentRequest{Context: ragclient.Context(uid(c) + "-" + key(c)), DocumentId: r.ID})
-	if e != nil || ragclient.Error(resp.GetError()) != nil || resp.GetResult() == nil {
+	if e != nil {
+		fail(c, 502, "DELETE_FAILED", "文档删除失败。")
+		return
+	}
+	if ragNotFound(resp.GetError()) {
+		// RAG 侧已无此文档：仍清理产品侧的文档与其任务引用，让用户能自行移除陈旧记录。
+		if _, e = s.Store.DB.ExecContext(ctx, "UPDATE resource_index SET kind='deleted' WHERE user_id=? AND (id=? OR (kind='job' AND id=?))", uid(c), r.ID, r.JobID); e != nil {
+			fail(c, 503, "SAVE_FAILED", "请用相同请求键重试。")
+			return
+		}
+		c.Status(204)
+		return
+	}
+	if ragclient.Error(resp.GetError()) != nil || resp.GetResult() == nil {
 		fail(c, 502, "DELETE_FAILED", "文档删除失败。")
 		return
 	}

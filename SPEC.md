@@ -783,6 +783,8 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 
 2026-09-14 产品 Go 的降级语义：产品库（`resource_index`）与 RAG 元数据可能失配（例如 RAG MySQL 被重置后产品库仍保留文档与任务引用）。此时 `GET /datasets`、`GET /datasets/:id` 必须仍然返回 200：单个文档在 RAG 侧查不到任务时，文档标记 `stale=true` 且 `status=FAILED`，任务列表给出等价的合成条目，禁止因为一条陈旧引用就让整个知识库列表返回 502——否则用户会完全看不到并无法清理自己的知识库。stale 文档不纳入批量重试，用户应删除后重新上传；产品库与 RAG 的真实一致性仍由重新上传与删除流程恢复。
 
+同一失配下删除路径必须仍然可用：RAG 返回 `DOCUMENT_NOT_FOUND`/`DATASET_NOT_FOUND` 时，`DELETE /documents/:id` 与 `DELETE /datasets/:id` 必须完成产品侧引用清理（分别返回 204 与 202），否则用户既删不掉陈旧记录也无法重建知识库。只有非 NOT_FOUND 的业务错误与传输错误才按失败处理，避免在 RAG 仍有数据时丢掉产品库引用。向 RAG 侧已不存在的知识库上传时，`BindEmbeddingProfile` 必须返回 `DATASET_STALE` 并提示删除后重建，而不是误报 Embedding 配置问题。
+
 ### 5.7 配置与可观测性
 
 PDF 运行参数包括 `plain/deepdoc/auto` 模式、原生文字阈值、OCR 语言、DPI、超时、最大页数和页眉页脚比例；这些参数与 parser 版本共同构成 `parser_fingerprint`，Server 计算上传 digest 与 Worker 实际解析必须使用同一组 Settings。
