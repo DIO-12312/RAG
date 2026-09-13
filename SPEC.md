@@ -740,6 +740,8 @@ sequenceDiagram
 
 2026-09-13 Agentic RAG Loop 迭代 3 接线：`Tool` 之后统一进入 `Assess`。判定充分时进入 `Finalize` 生成受限回答；判定不足时（I4 之前没有重写器，或改写额度已用尽）同样进入 `Finalize`，并在系统提示中追加"证据不足"约束，要求明确说明缺失事实且不得编造引用。Assessor 返回 `ErrSufficiencyUnavailable` 时按同一路径降级：只判断一次、不额外检索、不重试；Assessor 取消或超时立即进入 `Cancelled` 终态。Assessor 与受限回答各计一次 `MaxModelCalls` 并使用同一份 `ContextBudget` 默认值；两者都使用 `ToolNone`。`reply`/`reuse` 路径不进入 `Assess`。终止原因映射为：`evidence_sufficient`、`evidence_insufficient`（含降级）、`direct_reply`，未配置 SCA 的经典循环仍为 `completed`。
 
+2026-09-13 Agentic RAG Loop 迭代 4：证据不足时按缺口驱动查询重写。`QueryRewriter` 接收 `RewriteRequest{OriginalQuestion, StandaloneQuestion, MissingFacts, AttemptedQueries}`，模型只用 `ToolNone`，且只返回 `{"queries": [...]}`：每轮最多 2 条、每条 1–4096 字符，禁止空查询、禁止重复已尝试查询、禁止引入问题与缺口里不存在的 ASCII 标识符；去重后没有新查询时返回 `ErrNoNewQuery`，由状态机收敛而不是再次请求模型，重写器不可用或输出非法统一返回 `ErrRewriteUnavailable`。尝试账本以首次 `StandaloneQuestion` 为第一条并记录全部后续查询；去重使用 `NormalizeAttemptedQuery`（忽略大小写与空白，不改变实际发送文本），重复查询不调用 Retriever、不消耗检索轮次。查询原文只保留在本次 Run 的内存与请求中，日志只记录 SHA-256 前缀与长度（见迭代 5 的 Observer）。
+
 ```mermaid
 sequenceDiagram
     participant C as Client
