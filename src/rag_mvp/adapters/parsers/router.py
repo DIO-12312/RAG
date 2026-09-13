@@ -11,7 +11,7 @@ from rag_mvp.adapters.parsers.markdown import MarkdownParser
 from rag_mvp.adapters.parsers.pdf import PdfParser
 from rag_mvp.adapters.parsers.text import TextParser
 from rag_mvp.domain.errors import DomainError, DomainFailure
-from rag_mvp.ports.parser import ParsedSegment, Parser
+from rag_mvp.ports.parser import ParsedSegment, Parser, PdfParserMode
 
 
 class SourceParserRouter:
@@ -24,13 +24,31 @@ class SourceParserRouter:
         chm_max_files: int = 8192,
         chm_max_topics: int = 4096,
         chm_max_expanded_bytes: int = 128 * 1024 * 1024,
+        pdf_parser_mode: PdfParserMode = PdfParserMode.AUTO,
+        pdf_native_text_min_chars_per_page: int = 40,
+        pdf_ocr_language: str = "chi_sim+eng",
+        pdf_ocr_dpi: int = 200,
+        pdf_ocr_timeout_seconds: float = 60.0,
+        pdf_max_pages: int = 1000,
+        pdf_header_footer_margin_ratio: float = 0.12,
+        pdf_repeated_margin_min_pages: int = 3,
         chm_parser: Parser | None = None,
         chi_parser: Parser | None = None,
+        pdf_parser: Parser | None = None,
     ) -> None:
         text = TextParser()
         markdown = MarkdownParser()
         code = CodeParser()
-        pdf = PdfParser()
+        pdf = pdf_parser or PdfParser(
+            mode=pdf_parser_mode,
+            native_text_min_chars_per_page=pdf_native_text_min_chars_per_page,
+            ocr_language=pdf_ocr_language,
+            ocr_dpi=pdf_ocr_dpi,
+            ocr_timeout_seconds=pdf_ocr_timeout_seconds,
+            max_pages=pdf_max_pages,
+            header_footer_margin_ratio=pdf_header_footer_margin_ratio,
+            repeated_margin_min_pages=pdf_repeated_margin_min_pages,
+        )
         extractor = ChmLibExtractor(
             executable=chm_extractor_path,
             timeout_seconds=chm_extract_timeout_seconds,
