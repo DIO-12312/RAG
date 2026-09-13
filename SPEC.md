@@ -75,6 +75,8 @@ Python MVP 的唯一入口是 gRPC；本地调试也调用同一 gRPC 服务。P
 
 必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java`、PDF、`.chm` 与 `.chi`。PDF 默认使用 `auto` 路由：优先读取原生文字和坐标，原生文字不足的页面才经 Poppler 渲染并使用 Tesseract OCR；输出标题路径、阅读顺序、段落/列表/表格型文本、页码与矩形坐标。OCR 只识别文字，不负责图片语义和公式结构理解。
 
+自 `source-router-v8` 起，PDF `auto/deepdoc` 原生路径使用 pdfminer.six 的字符坐标和实际字号恢复物理行，避免 pypdf 文字回调在文本对象/变换矩阵切换时返回失真的坐标；`plain` 继续使用 pypdf。表格只有连续行的列起点、列数和行距均一致时才输出 Markdown 行；稀疏甘特图不能证明列结构时保留物理行与空白分隔，不猜测缺失单元格。加粗本身不构成标题，项目符号、短大写标签和表格行不得提升为标题；页首标题重置根层级。同页同标题下相邻段落/列表共同形成 segment，表格、页面和标题仍是边界，长段由既有 chunk_size/overlap 切块。页边以页码形态结尾的行可独立过滤，其他页眉页脚仍按跨页重复识别。这些规则改变正文、digest 和 Chunk ID，已有 PDF 必须通过新版本重建后才生效。
+
 一个上传的 CHM 对应一个既有 `Document`，不为 Topic 新建数据库 Document。CHM 内每个 HTML Topic 是逻辑子文档和不可跨越的切块硬边界；Topic 内先按 `h1`～`h6` 标题层级形成段落，超长标题段再依次优先选择段落、句子和词法 token 边界，单个不可分 token 才允许按字符硬截断。Topic 顺序优先采用 `.hhc` 目录，未列入目录的 HTML 按规范化路径稳定追加。每个 CHM Chunk 的 `content_with_weight` 必须在正文前稳定加入 `topic_title`、`heading_path` 与 locator `symbol` 上下文，使同一 Topic 的所有分块均可按页面标题、标题路径和接口符号检索；正文切分上限不包含该检索权重前缀。权重文本参与 Embedding、内容摘要和 `chunk_id` 计算，因此修改前缀规则必须提升 parser/chunker 配置版本并重建索引。Chunk 与 Evidence 必须同时保留原 CHM `source_name`，并在 metadata/locator metadata 中返回 `topic_path`、`topic_title`、`topic_order`、`heading_path` 和可选 `anchor`；行号仍表示 Topic 规范化正文中的行范围，不计算检索权重前缀。
 
 CHM 只解析本地解包后的 HTML 文本，不执行脚本、样式、ActiveX 或外部资源。生产 Worker 使用 `extract_chmLib`，并对签名、路径、符号链接、解包超时、文件数、Topic 数和展开总字节执行 fail-closed 限制；缺少运行时返回 `CHM_EXTRACTOR_UNAVAILABLE`，损坏、越界或无可读 Topic 返回不可重试 `INVALID_CHM`。

@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 
 import pytest
+from pypdf import PdfReader, PdfWriter
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen.canvas import Canvas
 
@@ -155,3 +156,94 @@ async def test_pdf_page_limit_fails_before_ocr() -> None:
         await PdfParser(max_pages=2).parse("manual.pdf", _layout_pdf())
 
     assert error.value.failure.code == "PDF_PAGE_LIMIT_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_pdf_keeps_scaled_grid_subscripts_and_contents_in_physical_rows() -> None:
+    buffer = BytesIO()
+    canvas = Canvas(buffer, pagesize=letter)
+    canvas.setFont("Helvetica-Bold", 18)
+    canvas.drawString(72, 720, "Contents")
+    # Text objects end independently, and use a scaled graphics matrix.
+    canvas.saveState()
+    canvas.scale(0.6, 0.6)
+    for row, title in enumerate(("Warm-up", "Basic Concepts", "Scheduling Criteria")):
+        canvas.setFont("Helvetica", 10)
+        canvas.drawString(120, 1100 - row * 30, str(row + 1))
+        canvas.drawString(150, 1100 - row * 30, title)
+    canvas.restoreState()
+    canvas.showPage()
+    canvas.setFont("Helvetica-Bold", 18)
+    canvas.drawString(72, 720, "Scheduling")
+    for row in range(3):
+        canvas.setFont("Helvetica-Bold", 10)
+        canvas.drawString(72, 650 - row * 24, "Q")
+        canvas.setFont("Helvetica", 7)
+        canvas.drawString(80, 648 - row * 24, str(2 - row))
+        canvas.setFont("Helvetica", 10)
+        for col in range(row, 6):
+            canvas.drawString(120 + col * 24, 650 - row * 24, "A" if row == 2 else "B")
+    canvas.setFont("Helvetica", 10)
+    canvas.drawString(72, 550, "T")
+    canvas.setFont("Helvetica", 7)
+    canvas.drawString(78, 548, "turnaround")
+    canvas.showPage()
+    canvas.save()
+    reader = PdfReader(buffer)
+    writer = PdfWriter()
+    for page in (reader.pages[0], reader.pages[1], reader.pages[0]):
+        writer.add_page(page)
+    repeated = BytesIO()
+    writer.write(repeated)
+    segments = await PdfParser(native_text_min_chars_per_page=1).parse(
+        "grid.pdf", repeated.getvalue()
+    )
+    contents = "\n".join(s.text for s in segments if s.locator.page_number == 1)
+    assert "1 Warm-up" in " ".join(contents.split())
+    assert "2 Basic Concepts" in " ".join(contents.split())
+    grid = "\n".join(s.text for s in segments if s.locator.page_number == 2)
+    assert all(label in grid for label in ("Q0", "Q1", "Q2"))
+    assert all("Q" not in s.metadata["heading_path"] for s in segments)
+    assert sum(line.count("B") for line in grid.splitlines()) == 11
+    assert "Tturnaround" in grid
+    assert contents == "\n".join(s.text for s in segments if s.locator.page_number == 3)
+
+
+@pytest.mark.asyncio
+async def test_pdf_bold_labels_stay_body_and_adjacent_small_blocks_merge() -> None:
+    buffer = BytesIO()
+    canvas = Canvas(buffer, pagesize=letter)
+    canvas.setFont("Helvetica-Bold", 18)
+    canvas.drawString(72, 720, "Scheduling Algorithms")
+    for row, text in enumerate(("CPU", "A", "RR", "Dispatcher", "systems")):
+        canvas.setFont("Helvetica-Bold" if row < 4 else "Helvetica", 10)
+        canvas.drawString(72, 670 - row * 40, text)
+    canvas.setFont("Helvetica", 8)
+    canvas.drawString(72, 20, "Unusual footer 1 / 1")
+    canvas.showPage()
+    canvas.save()
+    segments = await PdfParser(native_text_min_chars_per_page=1).parse(
+        "labels.pdf", buffer.getvalue()
+    )
+    assert len(segments) == 1
+    assert segments[0].metadata["heading_path"] == "Scheduling Algorithms"
+    assert "CPU\nA\nRR\nDispatcher\nsystems" in segments[0].text
+    assert "footer" not in segments[0].text
+
+
+@pytest.mark.asyncio
+async def test_pdf_requires_aligned_columns_and_excludes_bullets_from_tables() -> None:
+    buffer = BytesIO()
+    canvas = Canvas(buffer, pagesize=letter)
+    for page in range(3):
+        canvas.setFont("Helvetica", 10)
+        for row in range(2):
+            canvas.drawString(72, 650 - row * 20, "- process" if page == 2 else "process")
+            canvas.drawString(260 + (row * 60 if page == 1 else 0), 650 - row * 20, "value")
+        canvas.showPage()
+    canvas.save()
+    segments = await PdfParser(native_text_min_chars_per_page=1).parse(
+        "columns.pdf", buffer.getvalue()
+    )
+    assert [s.locator.page_number for s in segments if s.metadata["layout_type"] == "table"] == [1]
+    assert all("process" in s.text and "value" in s.text for s in segments)

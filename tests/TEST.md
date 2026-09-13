@@ -238,7 +238,7 @@ tests/
    │  ├─ test_chm_parser.py
    │  ├─ test_failpoints.py
    │  ├─ test_multiformat_parsers.py
-   │  ├─ test_pdf_deepdoc_parser.py        # PDF 版面、OCR、页眉页脚、表格和安全上限
+   │  ├─ test_pdf_deepdoc_parser.py        # PDF 字符坐标、下标、目录、保守表格、段落合并、OCR 和安全上限
    │  ├─ test_pipeline.py
    │  ├─ test_recursive_chunker.py
    │  ├─ test_text_parser.py
@@ -351,6 +351,9 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_deepdoc_pdf_uses_ocr_for_a_scanned_page_and_keeps_confidence` | 原生文字不足时只对扫描页调用 OCR，并保留页码、坐标和置信度。 |
 | 同上 | `test_forced_deepdoc_rejects_scanned_pdf_when_ocr_is_unavailable` | 强制 DeepDoc 且缺少 OCR 工具时返回稳定错误，不把空内容伪装成成功。 |
 | 同上 | `test_auto_mode_degrades_to_native_content_without_ocr_tools` | auto 模式缺少 OCR 工具时仍保留已有原生文字。 |
+| 同上 | `test_pdf_keeps_scaled_grid_subscripts_and_contents_in_physical_rows` | 自生成缩放 PDF 验证目录编号与条目同行、稀疏网格及下标 Q0/Q1/Q2 不丢失。 |
+| 同上 | `test_pdf_bold_labels_stay_body_and_adjacent_small_blocks_merge` | 加粗短标签保留正文，同页同标题小段合并，单页异常页脚按页码形态过滤。 |
+| 同上 | `test_pdf_requires_aligned_columns_and_excludes_bullets_from_tables` | 几何对齐的连续行才成为表格，错位列和项目符号行不误判。 |
 | 同上 | `test_pdf_page_limit_fails_before_ocr` | 超过页数安全上限时在渲染/OCR 前拒绝文档。 |
 | `test_config.py` | `test_pdf_content_settings_change_the_parser_fingerprint` | 会改变 PDF 索引正文的配置必须改变 parser fingerprint，防止错误复用旧索引。 |
 | `ingestion/test_chm_parser.py` | `test_chm_parser_orders_topics_and_preserves_heading_provenance` | CHM 按 HHC 目录稳定排列 Topic，按标题层级分段，过滤脚本/样式并保留 Topic、标题路径与锚点。 |
