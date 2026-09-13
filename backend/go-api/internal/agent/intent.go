@@ -1,6 +1,9 @@
 package agent
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 type IntentResult struct {
 	Intent                string
@@ -9,11 +12,39 @@ type IntentResult struct {
 	ClarificationQuestion string
 }
 
+// ordinaryReplyPattern 只匹配"整条消息就是寒暄/致谢/告别"的情况。
+// 规范化仅处理空白、末尾标点与常见语气词，不引入新的分类模型。
+var ordinaryReplyPattern = regexp.MustCompile(`^(你好|您好|谢谢|感谢|多谢|再见|拜拜|辛苦了|早上好|晚上好|哈喽|hello|hi)(你|您|啦|了|啊|呀|哈)?$`)
+
+// knowledgeMarkerPattern 标识知识问句或新增事实需求；命中即不得因问候前缀跳过检索。
+var knowledgeMarkerPattern = regexp.MustCompile(`(怎么|如何|什么|啥|哪|多少|为什么|是否|另外|还有|顺便|告诉我|帮我|查一下|配置|参数|最大值|最小值|版本|超时|timeout)`)
+
+// normalizeOrdinaryMessage 只做稳定且可解释的规范化：去首尾空白、末尾标点与语气词。
+func normalizeOrdinaryMessage(text string) string {
+	trimmed := strings.TrimSpace(text)
+	trimmed = strings.TrimRight(trimmed, " \t\r\n，。！？!?.,;；、~～…")
+	trimmed = strings.TrimRight(trimmed, "啊呀吧哦呢哈嘛啦喔哟吗")
+	return strings.TrimSpace(trimmed)
+}
+
+// isOrdinaryReply 判断整条消息是否只表达普通交流。
+func isOrdinaryReply(text string) bool {
+	normalized := normalizeOrdinaryMessage(text)
+	if normalized == "" {
+		return false
+	}
+	if knowledgeMarkerPattern.MatchString(normalized) {
+		// 同一消息混有知识问句或新增事实标记时，必须继续检索。
+		return false
+	}
+	return ordinaryReplyPattern.MatchString(strings.ToLower(normalized))
+}
+
 func RouteIntent(question string, history []Message) IntentResult {
 	q := strings.TrimSpace(question)
 
-	// 普通交流
-	if q == "你好" || q == "您好" || q == "谢谢" || q == "感谢" {
+	// 普通交流（规范化末尾语气词与标点；混合事实问题不会命中整条匹配）
+	if isOrdinaryReply(q) {
 		return IntentResult{
 			Intent: "ordinary",
 			Action: "reply",

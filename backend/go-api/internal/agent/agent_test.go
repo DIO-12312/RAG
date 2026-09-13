@@ -648,3 +648,23 @@ func TestHarnessRejectsToolCallForDirectReply(t *testing.T) {
 		t.Fatalf("retrieval must not run for direct reply, got %d calls", tool.calls)
 	}
 }
+
+func TestRouteIntentNormalizesOrdinaryConversation(t *testing.T) {
+	cases := []struct {
+		question string
+		action   string
+	}{
+		{"你好啊", "reply"},
+		{"你好！", "reply"},
+		{"谢谢你", "reply"},
+		{"再见", "reply"},
+		{"你好，文档里怎么配置超时？", "retrieve"},
+		{"谢谢，另外 timeout 最大是多少？", "retrieve"},
+	}
+
+	for _, tc := range cases {
+		if got := RouteIntent(tc.question, nil); got.Action != tc.action {
+			t.Fatalf("RouteIntent(%q).Action = %q, want %q", tc.question, got.Action, tc.action)
+		}
+	}
+}
