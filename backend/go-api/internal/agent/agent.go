@@ -56,6 +56,8 @@ type Harness struct {
 	Limits    RunLimits
 	Assessor  SufficiencyAssessor
 	Rewriter  QueryRewriter
+	Observer  Observer
+	RunID     string
 }
 
 var reference = regexp.MustCompile(`\[(\d+)\]`)

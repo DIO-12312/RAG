@@ -744,6 +744,8 @@ sequenceDiagram
 
 2026-09-13 Agentic RAG Loop 迭代 4 闭环：`Assess(insufficient)` 在仍有改写额度且配置了重写器时进入 `Rewrite`；重写查询以合成的 `rag_retrieve` 工具调用表达，因此 tool call/result 始终成对、检索事件顺序稳定。达到 `MaxRewriteRounds`、重写器不可用或返回 `ErrNoNewQuery` 时立即带不足约束收尾，不再调用下游；取消发生在重写或第二次检索时立即进入 `Cancelled`。初次检索使用路由得到的 `StandaloneQuery`，后续轮次必须使用模型或重写器给出的查询；重复查询既不调用 Retriever 也不消耗检索轮次，只补齐一个说明性 tool 结果。每次实际检索仍发送 `retrieval` 事件且 `hits` 结构不变，新增可选 `round`（1 基）与 `reason`（`initial`/`model`/`rewrite`）字段；`MissingFacts` 的自由文本不得直接暴露为前端推理链。
 
+2026-09-13 Agentic RAG Loop 迭代 5：每次 Run 通过 `Observer` 输出脱敏事件 `RunEvent{RunID, Stage, Round, Action, QueryHash, EvidenceCount, ModelCalls, RetrievalCalls, RewriteCalls, DurationMS, ErrorCode, StopReason}`。成功路径按 `route → model → tool → assess → finalize → complete` 顺序产生事件，重写路径额外包含 `rewrite`；取消与失败在所有退出路径上只产生一个 `complete` 终态事件，并带稳定错误码（`cancelled`/`provider_error`/`invalid_tool_call`/`budget_exceeded`/`run_failed`）。事件不得包含问题原文、Evidence 正文、模型私有推理（`reasoning_content`）、工具原始参数或任何凭据；查询只记录 SHA-256 前 16 位十六进制与字节长度（`QueryFingerprint`）。Observer 的 panic 或日志失败必须被隔离，不得改变答案或终止 Run；`chat.go` 为每次请求生成 run ID，并用标准库 `slog` 输出单行 JSON 事件。
+
 ```mermaid
 sequenceDiagram
     participant C as Client

@@ -7,10 +7,43 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// runStateMachine 按 phase 驱动一次 Run，直到进入终态；终态不会被重开。
+// observe 发送脱敏事件；Observer 自身 panic 不得影响 Run 结果。
+func (h Harness) observe(ctx context.Context, state *RunState, event RunEvent) {
+	if h.Observer == nil {
+		return
+	}
+	event.RunID = h.RunID
+	event.ModelCalls = state.ModelCalls
+	event.RetrievalCalls = state.RetrievalRounds
+	event.RewriteCalls = state.RewriteRounds
+	event.EvidenceCount = state.Pool.Len()
+	defer func() { _ = recover() }()
+	h.Observer.Observe(ctx, event)
+}
+
+// runStateMachine 按 phase 驱动一次 Run，并在所有退出路径上只发送一个终态事件。
 func (h Harness) runStateMachine(ctx context.Context, state *RunState, emit Emit) error {
+	started := time.Now()
+	err := h.runPhases(ctx, state, emit)
+
+	code := errorCodeForStopReason(state.StopReason)
+	if code == "" && err != nil {
+		code = "run_failed"
+	}
+	h.observe(ctx, state, RunEvent{
+		Stage:      RunStageComplete,
+		DurationMS: time.Since(started).Milliseconds(),
+		ErrorCode:  code,
+		StopReason: state.StopReason,
+	})
+	return err
+}
+
+// runPhases 执行相位循环，直到进入终态或返回错误。
+func (h Harness) runPhases(ctx context.Context, state *RunState, emit Emit) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			state.MarkFailed(StopReasonCancelled)
@@ -20,7 +53,7 @@ func (h Harness) runStateMachine(ctx context.Context, state *RunState, emit Emit
 		var err error
 		switch state.Phase {
 		case RunPhaseRoute:
-			err = h.routePhase(state, emit)
+			err = h.routePhase(ctx, state, emit)
 		case RunPhaseModel:
 			err = h.modelPhase(ctx, state, emit)
 		case RunPhaseTool:
@@ -44,11 +77,12 @@ func (h Harness) runStateMachine(ctx context.Context, state *RunState, emit Emit
 }
 
 // routePhase 只消费路由结果：澄清直接结束，其余动作进入模型相位。
-func (h Harness) routePhase(state *RunState, emit Emit) error {
+func (h Harness) routePhase(ctx context.Context, state *RunState, emit Emit) error {
 	if !knownIntentAction(state.Intent.Action) {
 		state.MarkFailed(StopReasonInvalidToolCall)
 		return fmt.Errorf("unsupported intent action %q", state.Intent.Action)
 	}
+	h.observe(ctx, state, RunEvent{Stage: RunStageRoute, Action: state.Intent.Action})
 
 	if state.Intent.Action == "clarify" {
 		if state.Intent.ClarificationQuestion == "" {
@@ -87,6 +121,7 @@ func (h Harness) modelPhase(ctx context.Context, state *RunState, emit Emit) err
 		return failFromError(state, ctx, err)
 	}
 	state.RecordModelCall()
+	h.observe(ctx, state, RunEvent{Stage: RunStageModel, Round: state.ModelCalls, Action: string(policy.Mode)})
 
 	if policy.Mode == ToolNone && len(msg.ToolCalls) > 0 {
 		state.MarkFailed(StopReasonInvalidToolCall)
@@ -168,6 +203,9 @@ func (h Harness) toolPhase(ctx context.Context, state *RunState, emit Emit) erro
 		if reason == "" {
 			reason = "initial"
 		}
+		queryHash, _ := QueryFingerprint(args.Query)
+		h.observe(ctx, state, RunEvent{Stage: RunStageTool, Round: retrievalRound, Action: reason, QueryHash: queryHash})
+
 		if err := emit("retrieval", map[string]any{"hits": hits, "round": retrievalRound, "reason": reason}); err != nil {
 			state.MarkFailed(StopReasonCancelled)
 			return err
@@ -202,6 +240,7 @@ func (h Harness) assessPhase(ctx context.Context, state *RunState, emit Emit) er
 	}
 
 	decision, err := h.Assessor.Assess(ctx, state.Question, state.Pool.Citations())
+	h.observe(ctx, state, RunEvent{Stage: RunStageAssess, Round: state.RetrievalRounds, Action: assessAction(decision, err)})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 			state.MarkFailed(StopReasonCancelled)
@@ -254,6 +293,19 @@ func (h Harness) rewritePhase(ctx context.Context, state *RunState, emit Emit) e
 	}
 
 	result, err := h.Rewriter.Rewrite(ctx, request)
+	rewriteAction := "rewritten"
+	rewriteHash := ""
+	if err != nil {
+		rewriteAction = "failed"
+		if errors.Is(err, ErrNoNewQuery) {
+			rewriteAction = "no_new_query"
+		} else if errors.Is(err, ErrRewriteUnavailable) {
+			rewriteAction = "unavailable"
+		}
+	} else if len(result.Queries) > 0 {
+		rewriteHash, _ = QueryFingerprint(result.Queries[0])
+	}
+	h.observe(ctx, state, RunEvent{Stage: RunStageRewrite, Round: state.RewriteRounds + 1, Action: rewriteAction, QueryHash: rewriteHash})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 			state.MarkFailed(StopReasonCancelled)
@@ -387,6 +439,7 @@ func (h Harness) finalizePhase(ctx context.Context, state *RunState, emit Emit) 
 
 	state.Answer = state.Final.Content
 	state.Citations = valid
+	h.observe(ctx, state, RunEvent{Stage: RunStageFinalize, Round: state.RetrievalRounds, Action: string(state.StopReason)})
 
 	reason := StopReasonCompleted
 	switch {
@@ -423,4 +476,18 @@ func failFromError(state *RunState, ctx context.Context, err error) error {
 	}
 	state.MarkFailed(StopReasonProviderError)
 	return err
+}
+
+// assessAction 把 SCA 结果映射为稳定的观测动作名。
+func assessAction(decision SufficiencyDecision, err error) string {
+	if err != nil {
+		if errors.Is(err, ErrSufficiencyUnavailable) {
+			return "unavailable"
+		}
+		return "failed"
+	}
+	if decision.Sufficient {
+		return "sufficient"
+	}
+	return "insufficient"
 }

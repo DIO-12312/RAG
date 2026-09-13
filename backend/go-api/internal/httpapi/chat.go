@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"log/slog"
 	"net/http"
 	"rag-mvp/backend/go-api/internal/agent"
 	"rag-mvp/backend/go-api/internal/security"
@@ -147,6 +148,8 @@ func (s *Server) chat(c *gin.Context) {
 		Streaming: true,
 		Assessor:  agent.ModelSufficiencyAssessor{Model: model, Budget: &budget},
 		Rewriter:  agent.ModelQueryRewriter{Model: model, Budget: &budget},
+		Observer:  agent.JSONLogObserver{Logger: slog.Default()},
+		RunID:     agent.NewRunID(),
 	}
 	answer, citations, e := h.Run(ctx, p.DatasetID, p.Question, history, emit)
 	if e != nil {
