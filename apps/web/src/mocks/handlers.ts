@@ -202,6 +202,16 @@ export const handlers = [
     return HttpResponse.json(mockSettings);
   }),
 
+  http.post("*/settings/models/:kind/test", ({ params }) => {
+    const unauthorized = requireSignedIn();
+    if (unauthorized) return unauthorized;
+    const kind = String(params.kind);
+    if (!["chat", "embedding", "rerank"].includes(kind)) {
+      return HttpResponse.json({ code: "NOT_FOUND", message: "模型类型不存在。" }, { status: 404 });
+    }
+    return HttpResponse.json({ ok: true, latencyMs: 123, detail: `${kind} 模型响应正常` });
+  }),
+
   http.put("*/settings/agent", async ({ request }) => {
     const unauthorized = requireSignedIn();
     if (unauthorized) return unauthorized;

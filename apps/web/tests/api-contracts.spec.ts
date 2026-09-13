@@ -30,6 +30,7 @@ describe("frontend API contracts", () => {
       "/settings/models/chat",
       "/settings/models/embedding",
       "/settings/models/rerank",
+      "/settings/models/:kind/test",
       "/settings/agent",
       "/chat/stream",
     ]);

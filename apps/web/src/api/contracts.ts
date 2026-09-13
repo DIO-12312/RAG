@@ -17,6 +17,7 @@ export const rootRoutes = [
   "/settings/models/chat",
   "/settings/models/embedding",
   "/settings/models/rerank",
+  "/settings/models/:kind/test",
   "/settings/agent",
   "/chat/stream",
 ] as const;
@@ -173,4 +174,10 @@ export interface SettingsResponse {
   embedding: EmbeddingModelConfigResponse;
   rerank: RerankModelConfigResponse;
   rerankEnabled: boolean;
+}
+
+export interface ModelProbeResult {
+  ok: boolean;
+  latencyMs: number;
+  detail: string;
 }
