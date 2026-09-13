@@ -736,6 +736,8 @@ sequenceDiagram
 
 2026-09-13 Agentic RAG Loop 迭代 2：Go Agent Loop 从隐式 for 循环迁移为显式状态机。合法主路径为 `Route → Model → Tool → Assess → Finalize → Done`、`Route → Model → Done`（普通交流）、`Route → Done`（澄清）以及 `Assess → Rewrite → Tool → Assess`（证据不足补检索）；`Done` 与 `Failed` 是终态，进入后不可重开，任何非法迁移返回稳定错误。每次 Run 的预算集中在 `RunLimits`：模型调用 ≤ 6、检索轮次 ≤ 3、改写轮次 ≤ 2、单轮工具调用 ≤ 4、Evidence ≤ 40 条、单次工具结果 ≤ 128 KiB；计数一律在动作开始前检查、动作成功后递增，取消、预算耗尽与不可恢复错误立即进入终态。`ContextBudget` 继续独立负责消息 token 预算，两者不得互相替代。此状态机只属于 Go 产品面，不改变 Python Job/Task 状态机定义。
 
+2026-09-13 Agentic RAG Loop 迭代 3：检索后执行结构化证据充分性判断（SCA）。Assessor 只返回 `{"sufficient": bool, "missing_facts": [...], "reason_code": "..."}` 严格 JSON：不接受 Markdown 围栏、缺失字段、未知字段、超过 5 个缺口、单个缺口超过 256 字符或空 reason code，输出中不得包含自由推理文本；非法输出与供应商故障统一归类为 `ErrSufficiencyUnavailable`，任何情况下都不得自动假定"证据充分"。Assessor 的模型调用使用 `ToolNone`，计入同一次 Run 的 `MaxModelCalls` 与 `ContextBudget`，不新增 API Key、HTTP Client 或授权路径。降级策略：Assessor 不可用时停止额外检索，把现有 Evidence 交给 Finalize，并在系统提示中要求明确说明证据不足；不得因 Assessor 失败无限重试，也不得把该失败当作"可以无引用回答事实"。
+
 ```mermaid
 sequenceDiagram
     participant C as Client
