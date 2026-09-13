@@ -105,7 +105,9 @@ func TestLiveProductFlow(t *testing.T) {
 			call := agent.ToolCall{ID: "call-retrieve", Type: "function"}
 			call.Function.Name = "rag_retrieve"
 			call.Function.Arguments = `{"query":"What is the Project Cobalt launch code?"}`
-			_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": agent.Message{ToolCalls: []agent.ToolCall{call}}}}})
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(w, "data: "+`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-retrieve","type":"function","function":{"name":"rag_retrieve","arguments":"{\"query\":\"What is the Project Cobalt launch code?\"}"}}]}}]}`+"\n\n")
+			_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 		} else {
 			var body struct {
 				Messages []agent.Message `json:"messages"`
@@ -115,7 +117,9 @@ func TestLiveProductFlow(t *testing.T) {
 			if last.Role != "tool" || !strings.Contains(last.Content, "COBALT-742") {
 				t.Error("real retrieved evidence missing")
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": agent.Message{Content: "The launch code is COBALT-742. [1]"}}}})
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(w, "data: "+`{"choices":[{"delta":{"content":"The launch code is COBALT-742. [1]"}}]}`+"\n\n")
+			_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 		}
 	}))
 	defer model.Close()
