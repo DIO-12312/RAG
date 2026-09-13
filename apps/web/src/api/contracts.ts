@@ -53,6 +53,7 @@ export interface DocumentSummary {
   name: string;
   status: "INDEXED" | "PROCESSING" | "FAILED";
   jobId?: string;
+  stale?: boolean;
 }
 
 export interface CreateDatasetRequest {

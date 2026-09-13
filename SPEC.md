@@ -781,6 +781,8 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 
 2026-09-14 产品 Go 的事件与配置契约扩展：Chat SSE 在每轮模型调用前增加可选 `context` 事件，即 `{"event":"context","data":{"estimatedTokens":N,"usableTokens":N,"budgetTokens":N,"evidenceCount":N,"evidenceLimit":N}}`，其中用量由既有的 `ContextBudget.UsedTokens` 估算且 `usableTokens = maxTokens - reserveTokens`；同一 Run 内用量与证据数都不变时不得重复发送。该事件只服务于前端"上下文接近预算"告警，不改变回答、引用、裁剪或停止语义，也不得携带问题原文、Evidence 正文或模型私有推理。设置页新增 `POST /settings/models/:kind/test`（`kind` 为 `chat`/`embedding`/`rerank`）：服务端用已保存配置发起一次最小探测——chat 为不带 `tools` 的单轮补全，embedding 校验返回向量维度与索引维度一致，rerank 按 `/rerank` 协议校验返回条数与结果下标——探测总时长上限 30 秒。未配置 Key 返回 `MODEL_NOT_CONFIGURED`，密钥解密失败返回 `KEY_UNAVAILABLE`，供应商错误以 HTTP 200 加 `{"ok":false,"latencyMs":N,"detail":"..."}` 返回且回显必须截断；API Key 与完整供应商响应不得进入响应体、日志或前端存储。
 
+2026-09-14 产品 Go 的降级语义：产品库（`resource_index`）与 RAG 元数据可能失配（例如 RAG MySQL 被重置后产品库仍保留文档与任务引用）。此时 `GET /datasets`、`GET /datasets/:id` 必须仍然返回 200：单个文档在 RAG 侧查不到任务时，文档标记 `stale=true` 且 `status=FAILED`，任务列表给出等价的合成条目，禁止因为一条陈旧引用就让整个知识库列表返回 502——否则用户会完全看不到并无法清理自己的知识库。stale 文档不纳入批量重试，用户应删除后重新上传；产品库与 RAG 的真实一致性仍由重新上传与删除流程恢复。
+
 ### 5.7 配置与可观测性
 
 PDF 运行参数包括 `plain/deepdoc/auto` 模式、原生文字阈值、OCR 语言、DPI、超时、最大页数和页眉页脚比例；这些参数与 parser 版本共同构成 `parser_fingerprint`，Server 计算上传 digest 与 Worker 实际解析必须使用同一组 Settings。

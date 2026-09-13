@@ -20,9 +20,9 @@ const dataset = {
   ],
 };
 
-async function mountDetail(counters: { deleted: string[]; retried: string[] }) {
+async function mountDetail(counters: { deleted: string[]; retried: string[] }, documents: Array<{ id: string; name: string; status: string; jobId: string; stale?: boolean }> = dataset.documents) {
   server.use(
-    http.get("*/datasets/:id", () => HttpResponse.json(dataset)),
+    http.get("*/datasets/:id", () => HttpResponse.json({ ...dataset, documents, documentCount: documents.length })),
     http.delete("*/documents/:id", ({ params }) => {
       counters.deleted.push(String(params.id));
       return new HttpResponse(null, { status: 204 });
@@ -77,5 +77,19 @@ it("重新索引失败项只提交 FAILED 文档的任务", async () => {
   await flushPromises();
   expect(counters.retried).toEqual(["job-c"]);
   expect(wrapper.get('[role="status"]').text()).toContain("已重新提交 1 个文档的索引任务。");
+  wrapper.unmount();
+});
+
+it("索引元数据已丢失的文档提示重新上传，且不纳入重新索引", async () => {
+  const counters = { deleted: [] as string[], retried: [] as string[] };
+  const wrapper = await mountDetail(counters, [
+    { id: "doc-ok", name: "ok.pdf", status: "INDEXED", jobId: "job-ok" },
+    { id: "doc-stale", name: "ghost.pdf", status: "FAILED", jobId: "job-stale", stale: true },
+  ]);
+  expect(wrapper.get(".stale-hint").text()).toContain("索引元数据已丢失，请删除后重新上传");
+  await wrapper.findAll('article input[type="checkbox"]')[1]!.setValue(true);
+  const retryButton = wrapper.get(".document-toolbar").findAll("button")[1]!;
+  expect(retryButton.text()).toContain("重新索引失败项（0）");
+  expect(retryButton.attributes("disabled")).toBeDefined();
   wrapper.unmount();
 });

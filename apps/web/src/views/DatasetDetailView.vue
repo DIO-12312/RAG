@@ -14,7 +14,7 @@ const deleteDialogOpen=ref(false); const deleting=ref(false); let deleteRequestK
 const selected=ref<string[]>([]); const busyBatch=ref(false); const batchNotice=ref("");
 const documents=computed(()=>dataset.value?.documents??[]);
 const allSelected=computed(()=>documents.value.length>0&&documents.value.every(d=>selected.value.includes(d.id)));
-const retryable=computed(()=>documents.value.filter(d=>selected.value.includes(d.id)&&d.status==="FAILED"&&d.jobId));
+const retryable=computed(()=>documents.value.filter(d=>selected.value.includes(d.id)&&d.status==="FAILED"&&d.jobId&&!d.stale));
 const deleteMessage=computed(()=>`知识库“${dataset.value?.name ?? ""}”及其中的 ${dataset.value?.documentCount ?? 0} 个文档将被永久删除，且无法恢复。`);
 let timer: ReturnType<typeof setTimeout> | undefined; let disposed=false;
 function toggle(id:string,checked:boolean):void{selected.value=checked?[...new Set([...selected.value,id])]:selected.value.filter(item=>item!==id);}
@@ -117,7 +117,10 @@ onMounted(()=>void load());onBeforeUnmount(()=>{disposed=true;if(timer)clearTime
         :checked="selected.includes(doc.id)"
         :disabled="busyBatch"
         @change="toggle(doc.id,($event.target as HTMLInputElement).checked)"
-      ><span class="sr-only">选择 {{ doc.name }}</span></label><strong>{{ doc.name }}</strong> <StatusBadge :status="doc.status" /><button
+      ><span class="sr-only">选择 {{ doc.name }}</span></label><strong>{{ doc.name }}</strong> <StatusBadge :status="doc.status" /><small
+        v-if="doc.stale"
+        class="stale-hint"
+      >索引元数据已丢失，请删除后重新上传</small><button
         class="button-quiet"
         :disabled="busyBatch"
         @click="action(doc.id,'delete')"

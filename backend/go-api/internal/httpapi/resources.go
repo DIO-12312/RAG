@@ -17,6 +17,24 @@ func jobDTO(j *pb.JobResult, name string) gin.H {
 	status := strings.TrimPrefix(j.Status.String(), "JOB_STATUS_")
 	return gin.H{"id": j.JobId, "datasetId": j.DatasetId, "sourceName": name, "status": status, "progress": j.Progress * 100, "retryable": j.Retryable, "errorMessage": j.GetFailure().GetMessage(), "cancelRequested": j.CancelRequested, "type": strings.TrimPrefix(j.Type.String(), "JOB_TYPE_")}
 }
+
+// documentState 把 RAG 任务状态映射为产品文档状态。任务在 RAG 服务中查不到（例如 RAG
+// 元数据被重置）时返回 stale，而不是让整个知识库列表返回 502：单条陈旧记录不应让用户
+// 完全看不到自己的知识库。stale 文档按失败展示，可由用户在界面上删除后重新上传。
+func documentState(j *pb.JobResult, err error) (state string, stale bool) {
+	if err != nil || j == nil {
+		return "FAILED", true
+	}
+	switch j.Status {
+	case pb.JobStatus_JOB_STATUS_SUCCEEDED:
+		return "INDEXED", false
+	case pb.JobStatus_JOB_STATUS_PENDING, pb.JobStatus_JOB_STATUS_RUNNING:
+		return "PROCESSING", false
+	default:
+		return "FAILED", false
+	}
+}
+
 func (s *Server) summary(c *gin.Context, r storage.Resource) (gin.H, error) {
 	docs, e := s.Store.List(c.Request.Context(), uid(c), "document", r.ID)
 	if e != nil {
@@ -27,18 +45,17 @@ func (s *Server) summary(c *gin.Context, r storage.Resource) (gin.H, error) {
 	processing := 0
 	for _, d := range docs {
 		j, e := s.RAG.Job(c.Request.Context(), d.JobID)
-		if e != nil {
-			return nil, e
-		}
-		state := "FAILED"
-		if j.Status == pb.JobStatus_JOB_STATUS_SUCCEEDED {
-			state = "INDEXED"
+		state, stale := documentState(j, e)
+		if state == "INDEXED" {
 			ready++
-		} else if j.Status == pb.JobStatus_JOB_STATUS_PENDING || j.Status == pb.JobStatus_JOB_STATUS_RUNNING {
-			state = "PROCESSING"
+		} else if state == "PROCESSING" {
 			processing++
 		}
-		out = append(out, gin.H{"id": d.ID, "name": d.Name, "status": state, "jobId": d.JobID})
+		doc := gin.H{"id": d.ID, "name": d.Name, "status": state, "jobId": d.JobID}
+		if stale {
+			doc["stale"] = true
+		}
+		out = append(out, doc)
 	}
 	state := "EMPTY"
 	if ready > 0 {
@@ -196,9 +213,10 @@ func (s *Server) jobs(c *gin.Context) {
 	out := []gin.H{}
 	for _, row := range rows {
 		j, e := s.RAG.Job(c.Request.Context(), row.ID)
-		if e != nil {
-			fail(c, 502, "RAG_UNAVAILABLE", "任务查询失败。")
-			return
+		if e != nil || j == nil {
+			// 与文档状态同样降级：任务在 RAG 侧不存在时标记为 stale，而不是让整页任务列表失败。
+			out = append(out, gin.H{"id": row.ID, "datasetId": r.ID, "sourceName": row.Name, "status": "FAILED", "progress": 100, "retryable": false, "errorMessage": "任务在 RAG 服务中不存在，元数据可能已被重置。", "cancelRequested": false, "type": "INGEST_DOCUMENT", "stale": true})
+			continue
 		}
 		out = append(out, jobDTO(j, row.Name))
 	}
