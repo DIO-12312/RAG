@@ -41,11 +41,11 @@ type Message struct {
 	ToolCallID       string     `json:"tool_call_id,omitempty"`
 }
 type Model interface {
-	Complete(context.Context, []Message, bool) (Message, error)
+	Complete(context.Context, []Message, ToolPolicy) (Message, error)
 }
 
 type StreamingModel interface {
-	Stream(context.Context, []Message, bool, func(string) error, func(ToolCall) error) error
+	Stream(context.Context, []Message, ToolPolicy, func(string) error, func(ToolCall) error) error
 }
 type Retriever interface {
 	Retrieve(context.Context, string, string, int) ([]Evidence, error)
@@ -87,6 +87,10 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 	intent := RouteIntent(question, history)
 	allowDirectAnswer := intent.Action == "reply" || intent.Action == "reuse"
 
+	if !knownIntentAction(intent.Action) {
+		return "", nil, fmt.Errorf("unsupported intent action %q", intent.Action)
+	}
+
 	if intent.Action == "clarify" {
 		if intent.ClarificationQuestion == "" {
 			return "", nil, errors.New("clarification question is empty")
@@ -110,6 +114,8 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 			return "", nil, errors.New("context budget exceeded")
 		}
 
+		policy := PolicyForIntent(intent, round)
+
 		var msg Message
 		var e error
 
@@ -125,7 +131,7 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 			e = sm.Stream(
 				ctx,
 				messages,
-				round == 0,
+				policy,
 				func(delta string) error {
 					content.WriteString(delta)
 					return emit("token", map[string]any{"text": delta})
@@ -143,13 +149,16 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 				}
 			}
 		} else {
-			msg, e = h.Model.Complete(ctx, messages, round == 0)
+			msg, e = h.Model.Complete(ctx, messages, policy)
 		}
 
 		if e != nil {
 			return "", nil, e
 		}
 		msg.Role = "assistant"
+		if policy.Mode == ToolNone && len(msg.ToolCalls) > 0 {
+			return "", nil, errors.New("unexpected tool call for direct reply")
+		}
 		if len(msg.ToolCalls) == 0 {
 			if len(citations) == 0 && round == 0 && !allowDirectAnswer {
 				return "", nil, errors.New("model did not call retrieval tool")

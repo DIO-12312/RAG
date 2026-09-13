@@ -167,7 +167,7 @@ func TestLiveProductFlow(t *testing.T) {
 		providerClient.Transport = diagnosticTransport{base: providerClient.Transport, report: func(message string) { t.Log(strings.ReplaceAll(message, secret, "[REDACTED]")) }}
 		defer providerClient.CloseIdleConnections()
 		provider := agent.OpenAI{BaseURL: modelURL, Key: secret, Name: modelName, Thinking: thinking, Timeout: time.Duration(timeout) * time.Second, Client: providerClient}
-		if _, e := provider.Complete(ctx, []agent.Message{{Role: "user", Content: "Use rag_retrieve to find the Project Cobalt launch code."}}, true); e != nil {
+		if _, e := provider.Complete(ctx, []agent.Message{{Role: "user", Content: "Use rag_retrieve to find the Project Cobalt launch code."}}, agent.ToolPolicy{Mode: agent.ToolRequired, RequiredName: "rag_retrieve"}); e != nil {
 			t.Fatalf("saved provider tool-call preflight: %v", e)
 		}
 	}

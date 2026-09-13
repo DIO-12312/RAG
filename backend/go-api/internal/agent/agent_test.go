@@ -86,7 +86,7 @@ type fixedModel struct {
 	calls int
 }
 
-func (m *fixedModel) Complete(ctx context.Context, _ []Message, _ bool) (Message, error) {
+func (m *fixedModel) Complete(ctx context.Context, _ []Message, _ ToolPolicy) (Message, error) {
 	m.calls++
 	return m.msg, ctx.Err()
 }
@@ -120,7 +120,7 @@ type streamingModel struct {
 	completeCalls int
 }
 
-func (m *streamingModel) Complete(ctx context.Context, _ []Message, _ bool) (Message, error) {
+func (m *streamingModel) Complete(ctx context.Context, _ []Message, _ ToolPolicy) (Message, error) {
 	m.completeCalls++
 	return Message{Content: "fallback"}, ctx.Err()
 }
@@ -128,7 +128,7 @@ func (m *streamingModel) Complete(ctx context.Context, _ []Message, _ bool) (Mes
 func (m *streamingModel) Stream(
 	ctx context.Context,
 	_ []Message,
-	_ bool,
+	_ ToolPolicy,
 	onDelta func(string) error,
 	onToolCall func(ToolCall) error,
 ) error {
@@ -551,5 +551,100 @@ func TestHarnessRejectsRetrievalDuringTransformation(t *testing.T) {
 	}
 	if tool.calls != 0 {
 		t.Fatalf("retrieval calls = %d, want 0", tool.calls)
+	}
+}
+
+func TestPolicyForIntent(t *testing.T) {
+	cases := []struct {
+		name   string
+		intent IntentResult
+		round  int
+		want   ToolPolicy
+	}{
+		{"reply first round", IntentResult{Action: "reply"}, 0, ToolPolicy{Mode: ToolNone}},
+		{"reply later round", IntentResult{Action: "reply"}, 2, ToolPolicy{Mode: ToolNone}},
+		{"reuse", IntentResult{Action: "reuse"}, 0, ToolPolicy{Mode: ToolNone}},
+		{"retrieve first round", IntentResult{Action: "retrieve"}, 0, ToolPolicy{Mode: ToolRequired, RequiredName: "rag_retrieve"}},
+		{"retrieve later round", IntentResult{Action: "retrieve"}, 1, ToolPolicy{Mode: ToolAuto}},
+		{"unknown action falls back to none", IntentResult{Action: "explode"}, 0, ToolPolicy{Mode: ToolNone}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PolicyForIntent(tc.intent, tc.round); got != tc.want {
+				t.Fatalf("PolicyForIntent(%q, %d) = %+v, want %+v", tc.intent.Action, tc.round, got, tc.want)
+			}
+		})
+	}
+
+	for _, action := range []string{"reply", "reuse", "retrieve", "clarify"} {
+		if !knownIntentAction(action) {
+			t.Fatalf("action %q must be known", action)
+		}
+	}
+	if knownIntentAction("explode") {
+		t.Fatal("unknown action must not be treated as known")
+	}
+}
+
+func TestHarnessOrdinaryConversationWithOpenAIAdapterSkipsRetrieval(t *testing.T) {
+	for _, question := range []string{"你好", "您好", "谢谢"} {
+		t.Run(question, func(t *testing.T) {
+			requests := 0
+			exposedTools := false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				var raw map[string]json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				if _, ok := raw["tools"]; ok {
+					exposedTools = true
+				}
+				if _, ok := raw["tool_choice"]; ok {
+					exposedTools = true
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": Message{Content: "你好，有什么可以帮你？"}}}})
+			}))
+			defer srv.Close()
+
+			tool := &retriever{}
+			h := Harness{Model: OpenAI{BaseURL: srv.URL, Name: "test-model", Timeout: time.Second}, Tool: tool}
+			answer, citations, err := h.Run(context.Background(), "owned-dataset", question, nil, func(string, any) error { return nil })
+			if err != nil {
+				t.Fatalf("ordinary conversation failed: %v", err)
+			}
+			if answer == "" || len(citations) != 0 {
+				t.Fatalf("unexpected result: answer=%q citations=%d", answer, len(citations))
+			}
+			if tool.calls != 0 {
+				t.Fatalf("ordinary conversation called retrieval %d times", tool.calls)
+			}
+			if requests != 1 {
+				t.Fatalf("expected a single model call, got %d", requests)
+			}
+			if exposedTools {
+				t.Fatal("ordinary conversation must not expose rag_retrieve to the provider")
+			}
+		})
+	}
+}
+
+func TestHarnessRejectsToolCallForDirectReply(t *testing.T) {
+	call := ToolCall{ID: "call-1", Type: "function"}
+	call.Function.Name = "rag_retrieve"
+	call.Function.Arguments = `{"query":"x"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": Message{ToolCalls: []ToolCall{call}}}}})
+	}))
+	defer srv.Close()
+
+	tool := &retriever{}
+	h := Harness{Model: OpenAI{BaseURL: srv.URL, Name: "test-model", Timeout: time.Second}, Tool: tool}
+	if _, _, err := h.Run(context.Background(), "owned-dataset", "你好", nil, func(string, any) error { return nil }); err == nil {
+		t.Fatal("direct reply must reject an unexpected retrieval tool call")
+	}
+	if tool.calls != 0 {
+		t.Fatalf("retrieval must not run for direct reply, got %d calls", tool.calls)
 	}
 }
