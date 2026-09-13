@@ -28,6 +28,9 @@ func (h Harness) observe(ctx context.Context, state *RunState, event RunEvent) {
 func (h Harness) runStateMachine(ctx context.Context, state *RunState, emit Emit) error {
 	started := time.Now()
 	err := h.runPhases(ctx, state, emit)
+	if err != nil && state.Phase == RunPhaseFailed {
+		err = &RunError{Reason: state.StopReason, Err: err}
+	}
 
 	code := errorCodeForStopReason(state.StopReason)
 	if code == "" && err != nil {
@@ -147,7 +150,7 @@ func (h Harness) modelPhase(ctx context.Context, state *RunState, emit Emit) err
 
 // toolPhase 顺序执行本轮的 rag_retrieve 调用，并保持事件顺序稳定。
 func (h Harness) toolPhase(ctx context.Context, state *RunState, emit Emit) error {
-	for _, call := range state.ToolCalls {
+	for index, call := range state.ToolCalls {
 		if state.Intent.Action == "reuse" {
 			state.MarkFailed(StopReasonInvalidToolCall)
 			return errors.New("transformation must not call retrieval tool")
@@ -179,9 +182,12 @@ func (h Harness) toolPhase(ctx context.Context, state *RunState, emit Emit) erro
 			continue
 		}
 
-		if err := state.CheckRetrievalRound(); err != nil {
-			state.MarkFailed(StopReasonBudgetExceeded)
-			return err
+		if state.RetrievalRounds >= state.Limits.MaxRetrievalRounds {
+			// 检索轮次用尽不是失败：补齐剩余工具结果并带"证据不足"约束收尾，
+			// 否则用户只会看到笼统的 CHAT_FAILED。
+			exhaustRetrievalBudget(state, state.ToolCalls[index:])
+			h.observe(ctx, state, RunEvent{Stage: RunStageTool, Action: "budget_exhausted"})
+			return state.TransitionTo(RunPhaseFinalize)
 		}
 
 		hits, err := h.Tool.Retrieve(ctx, state.Dataset, args.Query, state.TopK)
@@ -490,4 +496,27 @@ func assessAction(decision SufficiencyDecision, err error) string {
 		return "sufficient"
 	}
 	return "insufficient"
+}
+
+// exhaustRetrievalBudget 在检索轮次预算用尽时补齐未执行工具调用的结果，
+// 并把 Run 标记为证据不足，交给 Finalize 生成带约束的回答。
+func exhaustRetrievalBudget(state *RunState, remaining []ToolCall) {
+	for _, pending := range remaining {
+		state.Messages = append(state.Messages, Message{
+			Role:       "tool",
+			ToolCallID: pending.ID,
+			Content:    `{"note":"retrieval budget exhausted"}`,
+		})
+	}
+
+	decision := state.Sufficiency
+	decision.Sufficient = false
+	if decision.ReasonCode == "" || decision.ReasonCode == "covered" {
+		decision.ReasonCode = "retrieval_budget_exhausted"
+	}
+	state.Sufficiency = decision
+	state.SufficiencyChecked = true
+	state.AnswerNeeded = true
+	state.ToolCalls = nil
+	state.ToolReason = ""
 }

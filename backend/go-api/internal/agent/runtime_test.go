@@ -160,10 +160,11 @@ func TestRuntimeBudgetAndCancellationAreTerminal(t *testing.T) {
 		}
 	})
 
-	t.Run("retrieval round budget", func(t *testing.T) {
+	t.Run("retrieval round budget converges instead of failing", func(t *testing.T) {
 		model := &scriptedModel{responses: []Message{
 			toolCallMessage("call-1", "q1"),
 			toolCallMessage("call-2", "q2"),
+			{Content: "现有证据不足，无法确认。"},
 		}}
 		tool := &retriever{}
 		limits := DefaultRunLimits()
@@ -171,12 +172,16 @@ func TestRuntimeBudgetAndCancellationAreTerminal(t *testing.T) {
 		h := Harness{Model: model, Tool: tool, Limits: limits}
 
 		state, err := runScripted(t, h, "question")
-		if err == nil || !errors.Is(err, ErrBudgetExceeded) {
-			t.Fatalf("expected retrieval budget error, got %v", err)
+		if err != nil {
+			t.Fatalf("exhausted retrieval budget must converge, not fail: %v", err)
 		}
-		if tool.calls != 1 || state.StopReason != StopReasonBudgetExceeded {
-			t.Fatalf("retrieval must stop after one round: tool=%d %+v", tool.calls, state)
+		if tool.calls != 1 || state.RetrievalRounds != 1 {
+			t.Fatalf("retrieval must stop after one round: tool=%d rounds=%d", tool.calls, state.RetrievalRounds)
 		}
+		if state.StopReason != StopReasonEvidenceInsufficient || state.Phase != RunPhaseDone {
+			t.Fatalf("unexpected convergence state: %+v", state)
+		}
+		assertToolCallsPaired(t, state.Messages)
 	})
 
 	t.Run("client cancellation", func(t *testing.T) {
@@ -605,5 +610,87 @@ func TestRuntimeCancellationDuringSecondRetrievalStopsLoop(t *testing.T) {
 	}
 	if state.StopReason != StopReasonCancelled || model.calls != 1 || tool.calls != 2 {
 		t.Fatalf("unexpected stop state: %+v model=%d tool=%d", state, model.calls, tool.calls)
+	}
+}
+
+// assertToolCallsPaired 校验每个 assistant tool_call 都有配对的 tool 结果，
+// 收敛路径也不能留下悬空调用。
+func assertToolCallsPaired(t *testing.T, messages []Message) {
+	t.Helper()
+	answered := map[string]bool{}
+	for _, message := range messages {
+		if message.Role == "tool" && message.ToolCallID != "" {
+			answered[message.ToolCallID] = true
+		}
+	}
+	for _, message := range messages {
+		for _, call := range message.ToolCalls {
+			if call.ID != "" && !answered[call.ID] {
+				t.Fatalf("tool call %s has no paired result: %+v", call.ID, messages)
+			}
+		}
+	}
+}
+
+func TestRuntimeRetrievalBudgetConvergesToInsufficientAnswer(t *testing.T) {
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "first"),
+		{Content: "现有证据不足，无法确认结束时间。"},
+	}}
+	tool := &scriptedRetriever{results: [][]Evidence{{{DocumentID: "d", IndexVersion: 1, ChunkID: "c1", Content: "first"}}}}
+	assessor := &fakeAssessor{decision: SufficiencyDecision{
+		Sufficient:   false,
+		MissingFacts: []string{"结束时间"},
+		ReasonCode:   "missing_fact",
+	}}
+	rewriter := &fakeRewriter{result: RewriteResult{Queries: []string{"second", "third"}}}
+	limits := DefaultRunLimits()
+	limits.MaxRetrievalRounds = 1
+	h := Harness{Model: model, Tool: tool, Assessor: assessor, Rewriter: rewriter, Limits: limits}
+
+	state, err := runScripted(t, h, "question")
+	if err != nil {
+		t.Fatalf("exhausted retrieval budget must converge, not fail: %v", err)
+	}
+	if tool.calls != 1 || state.RetrievalRounds != 1 {
+		t.Fatalf("must not exceed the retrieval budget: tool=%d rounds=%d", tool.calls, state.RetrievalRounds)
+	}
+	if state.StopReason != StopReasonEvidenceInsufficient || state.Phase != RunPhaseDone {
+		t.Fatalf("unexpected stop state: %+v", state)
+	}
+	if !strings.Contains(lastSystemPrompt(model.messages[len(model.messages)-1]), "insufficient") {
+		t.Fatal("converged answer must carry the insufficiency constraint")
+	}
+	if len(state.Sufficiency.MissingFacts) != 1 || state.Sufficiency.MissingFacts[0] != "结束时间" {
+		t.Fatalf("existing gaps must be preserved: %+v", state.Sufficiency)
+	}
+	assertToolCallsPaired(t, state.Messages)
+}
+
+func TestFailureHintMapsStopReasons(t *testing.T) {
+	cases := []struct {
+		reason StopReason
+		want   string
+	}{
+		{StopReasonBudgetExceeded, "RUN_BUDGET_EXCEEDED"},
+		{StopReasonInvalidToolCall, "TOOL_CALL_INVALID"},
+		{StopReasonProviderError, "MODEL_UNAVAILABLE"},
+		{StopReasonCancelled, "REQUEST_CANCELLED"},
+	}
+	for _, tc := range cases {
+		code, message := FailureHint(&RunError{Reason: tc.reason, Err: errors.New("boom")})
+		if code != tc.want || message == "" {
+			t.Fatalf("reason %s mapped to (%s, %q)", tc.reason, code, message)
+		}
+	}
+
+	code, message := FailureHint(errors.New("plain failure"))
+	if code != "CHAT_FAILED" || message == "" {
+		t.Fatalf("unknown error must keep the generic hint, got (%s, %q)", code, message)
+	}
+
+	wrapped := &RunError{Reason: StopReasonCancelled, Err: context.Canceled}
+	if !errors.Is(wrapped, context.Canceled) {
+		t.Fatal("RunError must unwrap to the original error")
 	}
 }

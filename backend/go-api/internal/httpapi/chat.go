@@ -153,7 +153,8 @@ func (s *Server) chat(c *gin.Context) {
 	}
 	answer, citations, e := h.Run(ctx, p.DatasetID, p.Question, history, emit)
 	if e != nil {
-		_ = emit("error", gin.H{"code": "CHAT_FAILED", "message": "问答未完成，请检查模型连通性、工具调用支持及知识库状态。"})
+		code, message := agent.FailureHint(e)
+		_ = emit("error", gin.H{"code": code, "message": message})
 		return
 	}
 	b, _ := json.Marshal(citations)
