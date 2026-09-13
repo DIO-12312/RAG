@@ -35,7 +35,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libchm-bin && \
+    apt-get install -y --no-install-recommends \
+        libchm-bin \
+        poppler-utils \
+        tesseract-ocr \
+        tesseract-ocr-chi-sim \
+        tesseract-ocr-eng && \
     rm -rf /var/lib/apt/lists/* && \
     addgroup --system --gid 10001 rag && \
     adduser --system --uid 10001 --ingroup rag --no-create-home rag && \

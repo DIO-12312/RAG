@@ -66,7 +66,10 @@ def test_runtime_image_and_context_exclude_secrets_and_test_artifacts() -> None:
     assert "AS runtime" in dockerfile
     assert "AS test" in dockerfile
     assert "UV_CACHE_DIR=/tmp/uv-cache" in dockerfile
-    assert "apt-get install -y --no-install-recommends libchm-bin" in dockerfile
+    assert "apt-get install -y --no-install-recommends" in dockerfile
+    assert "libchm-bin" in dockerfile
+    assert "poppler-utils" in dockerfile
+    assert "tesseract-ocr-chi-sim" in dockerfile
     assert "USER rag" in dockerfile
     assert "COPY tests" not in dockerfile
     assert "migrations /app/migrations" in dockerfile
@@ -113,6 +116,24 @@ def test_compose_declares_migration_health_role_secrets_and_shared_storage() -> 
     for role in ("rag-migrate", "rag-outbox"):
         assert "EMBEDDING_MODEL_API_KEY" not in blocks[role]
         assert "EMBEDDING_MODEL_URL" not in blocks[role]
+
+
+def test_compose_exposes_pdf_parser_settings_to_server_and_worker() -> None:
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    environment = compose.split("services:", maxsplit=1)[0]
+
+    for name in (
+        "RAG_PARSER_VERSION",
+        "RAG_PDF_PARSER_MODE",
+        "RAG_PDF_NATIVE_TEXT_MIN_CHARS_PER_PAGE",
+        "RAG_PDF_OCR_LANGUAGE",
+        "RAG_PDF_OCR_DPI",
+        "RAG_PDF_OCR_TIMEOUT_SECONDS",
+        "RAG_PDF_MAX_PAGES",
+        "RAG_PDF_HEADER_FOOTER_MARGIN_RATIO",
+        "RAG_PDF_REPEATED_MARGIN_MIN_PAGES",
+    ):
+        assert name in environment
 
 
 def test_compose_keeps_infrastructure_private_and_orders_search_guard_bootstrap() -> None:

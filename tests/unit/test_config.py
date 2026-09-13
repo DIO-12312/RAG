@@ -57,7 +57,13 @@ def test_settings_can_be_constructed_explicitly_for_tests(tmp_path: Path) -> Non
     assert settings.object_root == tmp_path
     assert settings.migrations_root == Path(".")
     assert settings.grpc_address == "127.0.0.1:50052"
-    assert settings.parser_version == "source-router-v6"
+    assert settings.parser_version == "source-router-v7"
+    assert settings.pdf_parser_mode.value == "auto"
+    assert settings.pdf_native_text_min_chars_per_page == 40
+    assert settings.pdf_ocr_language == "chi_sim+eng"
+    assert settings.pdf_ocr_dpi == 200
+    assert settings.pdf_max_pages == 1000
+    assert "pdf=auto" in settings.parser_fingerprint
     assert settings.chm_extractor_path == "extract_chmLib"
 
 
@@ -80,6 +86,14 @@ def test_settings_builds_a_normalized_secret_embedding_profile() -> None:
     assert profile.api_key.get_secret_value() == api_key
     assert api_key not in repr(settings)
     assert api_key not in repr(profile)
+
+
+def test_pdf_content_settings_change_the_parser_fingerprint() -> None:
+    baseline = Settings(_env_file=None)
+    changed = Settings(_env_file=None, pdf_ocr_dpi=300)
+
+    assert baseline.parser_fingerprint != changed.parser_fingerprint
+    assert "ocr=chi_sim+eng@300" in changed.parser_fingerprint
 
 
 def test_elasticsearch_profile_reads_file_secret_without_repr_leak(tmp_path: Path) -> None:
@@ -143,6 +157,7 @@ def test_embedding_profile_rejects_missing_or_partial_configuration() -> None:
     [
         ({"parser_version": " "}, "parser_version"),
         ({"chm_extractor_path": " "}, "chm_extractor_path"),
+        ({"pdf_ocr_language": " "}, "pdf_ocr_language"),
         ({"chunk_size": 100, "chunk_overlap": 100}, "chunk_overlap"),
         ({"chunk_size": 100, "chunk_overlap": 101}, "chunk_overlap"),
     ],
