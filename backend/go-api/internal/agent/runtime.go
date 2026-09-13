@@ -27,6 +27,8 @@ func (h Harness) runStateMachine(ctx context.Context, state *RunState, emit Emit
 			err = h.toolPhase(ctx, state, emit)
 		case RunPhaseAssess:
 			err = h.assessPhase(ctx, state, emit)
+		case RunPhaseRewrite:
+			err = h.rewritePhase(ctx, state, emit)
 		case RunPhaseFinalize:
 			err = h.finalizePhase(ctx, state, emit)
 		default:
@@ -104,6 +106,7 @@ func (h Harness) modelPhase(ctx context.Context, state *RunState, emit Emit) err
 
 	state.Messages = append(state.Messages, msg)
 	state.ToolCalls = msg.ToolCalls
+	state.ToolReason = "model"
 	return state.TransitionTo(RunPhaseTool)
 }
 
@@ -130,8 +133,15 @@ func (h Harness) toolPhase(ctx context.Context, state *RunState, emit Emit) erro
 			return errors.New("invalid tool arguments")
 		}
 
-		if state.Intent.Action == "retrieve" && state.Intent.StandaloneQuery != "" {
+		// 首次检索使用路由得到的独立问题；后续轮次必须使用模型或重写器给出的查询。
+		if state.Intent.Action == "retrieve" && state.Intent.StandaloneQuery != "" && state.RetrievalRounds == 0 {
 			args.Query = state.Intent.StandaloneQuery
+		}
+
+		if state.queryAttempted(args.Query) {
+			// 重复查询既不调用 Retriever 也不消耗检索轮次，但必须补齐 tool 结果保持配对。
+			state.Messages = append(state.Messages, Message{Role: "tool", ToolCallID: call.ID, Content: `{"note":"duplicate query skipped"}`})
+			continue
 		}
 
 		if err := state.CheckRetrievalRound(); err != nil {
@@ -143,6 +153,7 @@ func (h Harness) toolPhase(ctx context.Context, state *RunState, emit Emit) erro
 		if err != nil {
 			return failFromError(state, ctx, err)
 		}
+		retrievalRound := state.RetrievalRounds + 1
 		state.RecordRetrievalRound()
 		state.AttemptedQueries = append(state.AttemptedQueries, args.Query)
 
@@ -153,7 +164,11 @@ func (h Harness) toolPhase(ctx context.Context, state *RunState, emit Emit) erro
 		}
 		state.Evidence = state.Pool.Citations()
 
-		if err := emit("retrieval", map[string]any{"hits": hits}); err != nil {
+		reason := state.ToolReason
+		if reason == "" {
+			reason = "initial"
+		}
+		if err := emit("retrieval", map[string]any{"hits": hits, "round": retrievalRound, "reason": reason}); err != nil {
 			state.MarkFailed(StopReasonCancelled)
 			return err
 		}
@@ -167,6 +182,7 @@ func (h Harness) toolPhase(ctx context.Context, state *RunState, emit Emit) erro
 	}
 
 	state.ToolCalls = nil
+	state.ToolReason = ""
 	return state.TransitionTo(RunPhaseAssess)
 }
 
@@ -211,8 +227,68 @@ func (h Harness) assessPhase(ctx context.Context, state *RunState, emit Emit) er
 		return state.TransitionTo(RunPhaseFinalize)
 	}
 
-	// I4 在此接入 Rewrite；当前没有重写器，按"无改写额度"处理并带不足约束收尾。
+	if h.Rewriter != nil && state.CheckRewriteRound() == nil {
+		return state.TransitionTo(RunPhaseRewrite)
+	}
+	// 没有重写器或改写额度已用尽：带不足约束收尾。
 	return state.TransitionTo(RunPhaseFinalize)
+}
+
+// rewritePhase 依据缺口生成新查询，并把它们表达为合成的 rag_retrieve 工具调用，
+// 使 tool call/result 始终成对、检索事件顺序稳定。
+func (h Harness) rewritePhase(ctx context.Context, state *RunState, emit Emit) error {
+	if err := state.CheckModelCall(); err != nil {
+		state.MarkFailed(StopReasonBudgetExceeded)
+		return err
+	}
+
+	standalone := state.Intent.StandaloneQuery
+	if len(state.AttemptedQueries) > 0 {
+		standalone = state.AttemptedQueries[0]
+	}
+	request := RewriteRequest{
+		OriginalQuestion:   state.Question,
+		StandaloneQuestion: standalone,
+		MissingFacts:       append([]string(nil), state.Sufficiency.MissingFacts...),
+		AttemptedQueries:   append([]string(nil), state.AttemptedQueries...),
+	}
+
+	result, err := h.Rewriter.Rewrite(ctx, request)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+			state.MarkFailed(StopReasonCancelled)
+			return err
+		}
+		state.RecordModelCall()
+		if errors.Is(err, ErrNoNewQuery) || errors.Is(err, ErrRewriteUnavailable) {
+			state.AnswerNeeded = true
+			return state.TransitionTo(RunPhaseFinalize)
+		}
+		state.MarkFailed(StopReasonProviderError)
+		return err
+	}
+
+	state.RecordModelCall()
+	state.RecordRewriteRound()
+
+	round := state.RewriteRounds
+	calls := make([]ToolCall, 0, len(result.Queries))
+	for index, query := range result.Queries {
+		encoded, encodeErr := json.Marshal(query)
+		if encodeErr != nil {
+			state.MarkFailed(StopReasonProviderError)
+			return errors.New("rewritten query cannot be encoded")
+		}
+		call := ToolCall{ID: fmt.Sprintf("rewrite-%d-%d", round, index+1), Type: "function"}
+		call.Function.Name = "rag_retrieve"
+		call.Function.Arguments = fmt.Sprintf(`{"query":%s}`, encoded)
+		calls = append(calls, call)
+	}
+
+	state.ToolCalls = calls
+	state.ToolReason = "rewrite"
+	state.Messages = append(state.Messages, Message{Role: "assistant", ToolCalls: append([]ToolCall(nil), calls...)})
+	return state.TransitionTo(RunPhaseTool)
 }
 
 // complete 统一处理流式与非流式模型调用，并在流式路径转发 token 事件。

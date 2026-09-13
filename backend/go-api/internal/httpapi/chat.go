@@ -146,6 +146,7 @@ func (s *Server) chat(c *gin.Context) {
 		TopK:      int(top),
 		Streaming: true,
 		Assessor:  agent.ModelSufficiencyAssessor{Model: model, Budget: &budget},
+		Rewriter:  agent.ModelQueryRewriter{Model: model, Budget: &budget},
 	}
 	answer, citations, e := h.Run(ctx, p.DatasetID, p.Question, history, emit)
 	if e != nil {

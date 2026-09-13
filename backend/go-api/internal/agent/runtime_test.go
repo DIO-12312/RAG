@@ -263,6 +263,7 @@ func TestRuntimeContextBudgetFailure(t *testing.T) {
 // fakeAssessor 返回固定判断，并记录调用次数与输入。
 type fakeAssessor struct {
 	decision  SufficiencyDecision
+	queue     []SufficiencyDecision
 	err       error
 	calls     int
 	questions []string
@@ -276,7 +277,50 @@ func (a *fakeAssessor) Assess(ctx context.Context, question string, citations []
 	if a.err != nil {
 		return SufficiencyDecision{}, a.err
 	}
+	if len(a.queue) > 0 {
+		decision := a.queue[0]
+		a.queue = a.queue[1:]
+		return decision, ctx.Err()
+	}
 	return a.decision, ctx.Err()
+}
+
+// fakeRewriter 返回固定改写结果或错误，并记录收到的账本。
+type fakeRewriter struct {
+	result RewriteResult
+	err    error
+	calls  int
+	last   RewriteRequest
+}
+
+func (r *fakeRewriter) Rewrite(ctx context.Context, request RewriteRequest) (RewriteResult, error) {
+	r.calls++
+	r.last = request
+	if r.err != nil {
+		return RewriteResult{}, r.err
+	}
+	return r.result, ctx.Err()
+}
+
+// scriptedRetriever 按调用顺序返回 Evidence 或错误。
+type scriptedRetriever struct {
+	results [][]Evidence
+	errs    []error
+	calls   int
+	queries []string
+}
+
+func (r *scriptedRetriever) Retrieve(ctx context.Context, _ string, query string, _ int) ([]Evidence, error) {
+	index := r.calls
+	r.calls++
+	r.queries = append(r.queries, query)
+	if index < len(r.errs) && r.errs[index] != nil {
+		return nil, r.errs[index]
+	}
+	if index < len(r.results) {
+		return r.results[index], ctx.Err()
+	}
+	return nil, ctx.Err()
 }
 
 func lastSystemPrompt(messages []Message) string {
@@ -426,5 +470,140 @@ func TestRuntimeAssessorCountsTowardModelBudget(t *testing.T) {
 	// 因此 Finalize 的受限回答必须在调用前被拒绝。
 	if state.StopReason != StopReasonBudgetExceeded || state.ModelCalls != 2 || model.calls != 1 {
 		t.Fatalf("unexpected stop state: %+v model=%d", state, model.calls)
+	}
+}
+
+func TestRuntimeInsufficientThenSufficientClosesLoop(t *testing.T) {
+	first := []Evidence{{DocumentID: "d1", IndexVersion: 1, ChunkID: "c1", Content: "first round evidence"}}
+	second := []Evidence{
+		{DocumentID: "d1", IndexVersion: 1, ChunkID: "c1", Content: "first round evidence"},
+		{DocumentID: "d2", IndexVersion: 1, ChunkID: "c2", Content: "second round evidence"},
+	}
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "migration"),
+		{Content: "答案 [1][2]"},
+	}}
+	tool := &scriptedRetriever{results: [][]Evidence{first, second}}
+	assessor := &fakeAssessor{queue: []SufficiencyDecision{
+		{Sufficient: false, MissingFacts: []string{"结束时间"}, ReasonCode: "missing_fact"},
+		{Sufficient: true, ReasonCode: "covered"},
+	}}
+	rewriter := &fakeRewriter{result: RewriteResult{Queries: []string{"migration 结束时间"}}}
+	h := Harness{Model: model, Tool: tool, Assessor: assessor, Rewriter: rewriter}
+
+	state, err := runScripted(t, h, "question")
+	if err != nil {
+		t.Fatalf("loop failed: %v", err)
+	}
+	if tool.calls != 2 || assessor.calls != 2 || rewriter.calls != 1 || model.calls != 2 {
+		t.Fatalf("unexpected call counts: tool=%d assessor=%d rewriter=%d model=%d",
+			tool.calls, assessor.calls, rewriter.calls, model.calls)
+	}
+	if state.StopReason != StopReasonEvidenceSufficient || len(state.Citations) != 2 {
+		t.Fatalf("unexpected stop state: %+v", state)
+	}
+	if len(state.AttemptedQueries) != 2 || state.AttemptedQueries[1] != "migration 结束时间" {
+		t.Fatalf("attempt ledger must record both queries: %+v", state.AttemptedQueries)
+	}
+	if len(rewriter.last.MissingFacts) != 1 || rewriter.last.MissingFacts[0] != "结束时间" {
+		t.Fatalf("rewriter must receive missing facts: %+v", rewriter.last)
+	}
+	if len(rewriter.last.AttemptedQueries) != 1 || rewriter.last.AttemptedQueries[0] != "question" {
+		t.Fatalf("rewriter must receive the attempt ledger: %+v", rewriter.last)
+	}
+}
+
+func TestRuntimeRewriteLoopConvergesWithoutNewQuery(t *testing.T) {
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "migration"),
+		{Content: "无法确认结束时间。"},
+	}}
+	tool := &scriptedRetriever{results: [][]Evidence{{{DocumentID: "d", IndexVersion: 1, ChunkID: "c", Content: "partial"}}}}
+	assessor := &fakeAssessor{decision: SufficiencyDecision{Sufficient: false, MissingFacts: []string{"结束时间"}, ReasonCode: "missing_fact"}}
+	rewriter := &fakeRewriter{err: ErrNoNewQuery}
+	h := Harness{Model: model, Tool: tool, Assessor: assessor, Rewriter: rewriter}
+
+	state, err := runScripted(t, h, "question")
+	if err != nil {
+		t.Fatalf("convergence must not fail: %v", err)
+	}
+	if rewriter.calls != 1 || tool.calls != 1 || assessor.calls != 1 {
+		t.Fatalf("no_new_query must converge immediately: rewriter=%d tool=%d assessor=%d", rewriter.calls, tool.calls, assessor.calls)
+	}
+	if state.StopReason != StopReasonEvidenceInsufficient {
+		t.Fatalf("unexpected stop reason: %+v", state)
+	}
+	if !strings.Contains(lastSystemPrompt(model.messages[len(model.messages)-1]), "insufficient") {
+		t.Fatal("converged answer must carry the insufficiency constraint")
+	}
+}
+
+func TestRuntimeRewriteBudgetBoundsTheLoop(t *testing.T) {
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "migration"),
+		{Content: "仍无法确认。"},
+	}}
+	tool := &scriptedRetriever{results: [][]Evidence{
+		{{DocumentID: "d", IndexVersion: 1, ChunkID: "c1", Content: "round one"}},
+		{{DocumentID: "d", IndexVersion: 1, ChunkID: "c2", Content: "round two"}},
+	}}
+	assessor := &fakeAssessor{decision: SufficiencyDecision{Sufficient: false, MissingFacts: []string{"结束时间"}, ReasonCode: "missing_fact"}}
+	rewriter := &fakeRewriter{result: RewriteResult{Queries: []string{"migration 结束时间"}}}
+	limits := DefaultRunLimits()
+	limits.MaxRewriteRounds = 1
+	h := Harness{Model: model, Tool: tool, Assessor: assessor, Rewriter: rewriter, Limits: limits}
+
+	state, err := runScripted(t, h, "question")
+	if err != nil {
+		t.Fatalf("bounded loop must not fail: %v", err)
+	}
+	if rewriter.calls != 1 || tool.calls != 2 || assessor.calls != 2 {
+		t.Fatalf("rewrite budget must stop the loop: rewriter=%d tool=%d assessor=%d", rewriter.calls, tool.calls, assessor.calls)
+	}
+	if state.StopReason != StopReasonEvidenceInsufficient {
+		t.Fatalf("unexpected stop reason: %+v", state)
+	}
+}
+
+func TestRuntimeDuplicateQuerySkipsRetrievalWithoutConsumingRound(t *testing.T) {
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "same query"),
+		toolCallMessage("call-2", "same query"),
+		{Content: "答案 [1]"},
+	}}
+	tool := &scriptedRetriever{results: [][]Evidence{{{DocumentID: "d", IndexVersion: 1, ChunkID: "c", Content: "evidence"}}}}
+	h := Harness{Model: model, Tool: tool}
+
+	state, err := runScripted(t, h, "same query")
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if tool.calls != 1 || state.RetrievalRounds != 1 {
+		t.Fatalf("duplicate query must not retrieve or consume a round: tool=%d rounds=%d", tool.calls, state.RetrievalRounds)
+	}
+	if len(state.Citations) != 1 || state.Citations[0].Ordinal != 1 {
+		t.Fatalf("citation ordinals must stay stable: %+v", state.Citations)
+	}
+}
+
+func TestRuntimeCancellationDuringSecondRetrievalStopsLoop(t *testing.T) {
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "migration"),
+		{Content: "unused answer"},
+	}}
+	tool := &scriptedRetriever{
+		results: [][]Evidence{{{DocumentID: "d", IndexVersion: 1, ChunkID: "c1", Content: "first"}}},
+		errs:    []error{nil, context.Canceled},
+	}
+	assessor := &fakeAssessor{decision: SufficiencyDecision{Sufficient: false, MissingFacts: []string{"结束时间"}, ReasonCode: "missing_fact"}}
+	rewriter := &fakeRewriter{result: RewriteResult{Queries: []string{"migration 结束时间"}}}
+	h := Harness{Model: model, Tool: tool, Assessor: assessor, Rewriter: rewriter}
+
+	state, err := runScripted(t, h, "question")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation, got %v", err)
+	}
+	if state.StopReason != StopReasonCancelled || model.calls != 1 || tool.calls != 2 {
+		t.Fatalf("unexpected stop state: %+v model=%d tool=%d", state, model.calls, tool.calls)
 	}
 }

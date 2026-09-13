@@ -95,6 +95,20 @@ type RunState struct {
 	Sufficiency        SufficiencyDecision
 	SufficiencyChecked bool
 	AnswerNeeded       bool
+
+	// ToolReason 标记本轮工具调用的来源（model/rewrite），用于 SSE 的 reason 字段。
+	ToolReason string
+}
+
+// queryAttempted 判断查询是否已在本次 Run 的尝试账本中（按规范化文本比较）。
+func (s *RunState) queryAttempted(query string) bool {
+	normalized := NormalizeAttemptedQuery(query)
+	for _, attempted := range s.AttemptedQueries {
+		if NormalizeAttemptedQuery(attempted) == normalized {
+			return true
+		}
+	}
+	return false
 }
 
 // NewRunState 构造处于 Route 相位的 Run。
