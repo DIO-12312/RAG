@@ -658,6 +658,9 @@ func TestRouteIntentNormalizesOrdinaryConversation(t *testing.T) {
 		{"你好！", "reply"},
 		{"谢谢你", "reply"},
 		{"再见", "reply"},
+		{"谢谢，你真好", "reply"},
+		{"再见，辛苦了", "reply"},
+		{"hi, how do I configure timeout", "retrieve"},
 		{"你好，文档里怎么配置超时？", "retrieve"},
 		{"谢谢，另外 timeout 最大是多少？", "retrieve"},
 	}
