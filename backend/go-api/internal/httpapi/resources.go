@@ -38,7 +38,7 @@ func (s *Server) summary(c *gin.Context, r storage.Resource) (gin.H, error) {
 			state = "PROCESSING"
 			processing++
 		}
-		out = append(out, gin.H{"id": d.ID, "name": d.Name, "status": state})
+		out = append(out, gin.H{"id": d.ID, "name": d.Name, "status": state, "jobId": d.JobID})
 	}
 	state := "EMPTY"
 	if ready > 0 {
