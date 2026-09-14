@@ -109,6 +109,12 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 			return "", nil, errors.New("too many tool calls")
 		}
 		messages = append(messages, msg)
+		// Share the global evidence budget across all parallel subqueries. CHM
+		// retrieval can expand each direct hit with Topic neighbours, so failing
+		// the whole answer when the combined result exceeds the budget would make
+		// ordinary multi-query tool calls unusable. Keep a stable slice from every
+		// subquery instead.
+		perCallLimit := (40 + len(msg.ToolCalls) - 1) / len(msg.ToolCalls)
 		for _, call := range msg.ToolCalls {
 			if call.ID == "" || call.Function.Name != "rag_retrieve" {
 				return "", nil, errors.New("unknown tool")
@@ -124,20 +130,25 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 				return "", nil, e
 			}
 			result := []Citation{}
+			acceptedHits := []Evidence{}
 			for _, hit := range hits {
+				if len(result) >= perCallLimit {
+					break
+				}
 				key := hit.DocumentID + "/" + hit.ChunkID
 				n, ok := seen[key]
 				if !ok {
 					if len(citations) >= 40 {
-						return "", nil, errors.New("evidence budget exceeded")
+						continue
 					}
 					n = len(citations) + 1
 					seen[key] = n
 					citations = append(citations, Citation{n, hit})
 				}
 				result = append(result, citations[n-1])
+				acceptedHits = append(acceptedHits, hit)
 			}
-			if e = emit("retrieval", map[string]any{"hits": hits}); e != nil {
+			if e = emit("retrieval", map[string]any{"hits": acceptedHits}); e != nil {
 				return "", nil, e
 			}
 			body, _ := json.Marshal(result)

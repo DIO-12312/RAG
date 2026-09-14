@@ -44,8 +44,11 @@ func TestHTTPToolLoopAndCitation(t *testing.T) {
 				if body.Thinking.Type != want {
 					t.Error("thinking setting not transmitted")
 				}
-				if thinking && body.ToolChoice != "auto" {
+				if thinking && calls == 1 && body.ToolChoice != "auto" {
 					t.Error("thinking mode must not force tool_choice")
+				}
+				if calls > 1 && body.ToolChoice != "none" {
+					t.Error("model must answer from retrieved evidence without calling tools again")
 				}
 				msg := Message{Content: "Migration ends in December. [1]"}
 				if calls == 1 {
@@ -88,6 +91,75 @@ func (m *fixedModel) Complete(ctx context.Context, _ []Message, _ bool) (Message
 	m.calls++
 	return m.msg, ctx.Err()
 }
+
+type multiQueryModel struct {
+	calls    int
+	messages []Message
+}
+
+func (m *multiQueryModel) Complete(_ context.Context, messages []Message, _ bool) (Message, error) {
+	m.calls++
+	if m.calls == 1 {
+		answer := Message{}
+		for i := 0; i < 4; i++ {
+			call := ToolCall{ID: fmt.Sprintf("call-%d", i), Type: "function"}
+			call.Function.Name = "rag_retrieve"
+			call.Function.Arguments = fmt.Sprintf(`{"query":"query-%d"}`, i)
+			answer.ToolCalls = append(answer.ToolCalls, call)
+		}
+		return answer, nil
+	}
+	m.messages = append([]Message(nil), messages...)
+	return Message{Content: "Bounded answer. [1]"}, nil
+}
+
+type expandingRetriever struct{}
+
+func (expandingRetriever) Retrieve(_ context.Context, dataset, query string, _ int) ([]Evidence, error) {
+	hits := make([]Evidence, 0, 20)
+	for i := 0; i < 20; i++ {
+		hits = append(hits, Evidence{DocumentID: dataset, ChunkID: fmt.Sprintf("%s-%d", query, i), Content: query})
+	}
+	return hits, nil
+}
+
+func TestParallelToolCallsShareEvidenceBudgetWithoutFailing(t *testing.T) {
+	model := &multiQueryModel{}
+	eventSizes := []int{}
+	h := Harness{Model: model, Tool: expandingRetriever{}, MaxRounds: 2, TopK: 6}
+	answer, citations, err := h.Run(context.Background(), "dataset", "question", nil, func(event string, data any) error {
+		if event == "retrieval" {
+			eventSizes = append(eventSizes, len(data.(map[string]any)["hits"].([]Evidence)))
+		}
+		return nil
+	})
+	if err != nil || answer == "" || len(citations) != 1 || model.calls != 2 {
+		t.Fatalf("bounded multi-query loop failed: answer=%q citations=%d calls=%d err=%v", answer, len(citations), model.calls, err)
+	}
+	if len(eventSizes) != 4 {
+		t.Fatalf("retrieval event count=%d, want 4", len(eventSizes))
+	}
+	for i, size := range eventSizes {
+		if size != 10 {
+			t.Fatalf("retrieval event %d has %d hits, want 10", i, size)
+		}
+	}
+	toolMessages := 0
+	for _, message := range model.messages {
+		if message.Role != "tool" {
+			continue
+		}
+		toolMessages++
+		var result []Citation
+		if err := json.Unmarshal([]byte(message.Content), &result); err != nil || len(result) != 10 {
+			t.Fatalf("tool result is not a ten-item bounded slice: len=%d err=%v", len(result), err)
+		}
+	}
+	if toolMessages != 4 {
+		t.Fatalf("tool message count=%d, want 4", toolMessages)
+	}
+}
+
 func TestUnknownToolBudgetAndCancellation(t *testing.T) {
 	call := ToolCall{ID: "call", Type: "function"}
 	call.Function.Name = "delete_document"

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"log"
 	"net/http"
 	"rag-mvp/backend/go-api/internal/agent"
 	"rag-mvp/backend/go-api/internal/security"
@@ -65,11 +66,6 @@ func (s *Server) chat(c *gin.Context) {
 		fail(c, 503, "SAVE_FAILED", "会话创建失败。")
 		return
 	}
-	// 立即持久化用户提问：即使回答流尚未完成，历史记录也能完整恢复该会话。
-	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,role,content,citations_json) VALUES(?,'user',?,'[]')", p.ConversationID, p.Question); e != nil {
-		fail(c, 503, "SAVE_FAILED", "会话保存失败。")
-		return
-	}
 	s.mu.Lock()
 	busy := s.runs[p.ConversationID]
 	if !busy {
@@ -81,9 +77,17 @@ func (s *Server) chat(c *gin.Context) {
 		return
 	}
 	defer func() { s.mu.Lock(); delete(s.runs, p.ConversationID); s.mu.Unlock() }()
+	// Load only completed history. The current question is persisted below and
+	// appended once by the agent harness, so providers never receive it twice.
 	rows, e := s.Store.DB.QueryContext(ctx, "SELECT role,content FROM (SELECT id,role,content FROM conversation_messages WHERE conversation_id=? ORDER BY id DESC LIMIT 12) recent ORDER BY id", p.ConversationID)
 	if e != nil {
 		fail(c, 503, "LOAD_FAILED", "会话读取失败。")
+		return
+	}
+	// Persist the user question before generation so an interrupted stream still
+	// leaves an accurate conversation record.
+	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,role,content,citations_json) VALUES(?,'user',?,'[]')", p.ConversationID, p.Question); e != nil {
+		fail(c, 503, "SAVE_FAILED", "会话保存失败。")
 		return
 	}
 	history := []agent.Message{}
@@ -135,6 +139,7 @@ func (s *Server) chat(c *gin.Context) {
 	h := agent.Harness{Model: agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}, Tool: retriever, MaxRounds: 6, TopK: int(top)}
 	answer, citations, e := h.Run(ctx, p.DatasetID, p.Question, history, emit)
 	if e != nil {
+		log.Printf("chat failed conversation_id=%s dataset_id=%s: %v", p.ConversationID, p.DatasetID, e)
 		_ = emit("error", gin.H{"code": "CHAT_FAILED", "message": "问答未完成，请检查模型连通性、工具调用支持及知识库状态。"})
 		return
 	}

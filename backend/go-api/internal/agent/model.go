@@ -22,11 +22,16 @@ type OpenAI struct {
 func (m OpenAI) Complete(ctx context.Context, messages []Message, force bool) (Message, error) {
 	ctx, cancel := context.WithTimeout(ctx, m.Timeout)
 	defer cancel()
-	choice := any("auto")
+	// The first completion chooses the retrieval query. Once evidence has been
+	// returned, require a final answer instead of allowing providers to enter an
+	// unbounded retrieve-again loop on large knowledge bases.
+	choice := any("none")
 	endpoint, _ := url.Parse(m.BaseURL)
 	deepseek := strings.HasPrefix(strings.ToLower(m.Name), "deepseek-") || (endpoint != nil && endpoint.Hostname() == "api.deepseek.com")
 	if force && !(deepseek && m.Thinking) {
 		choice = map[string]any{"type": "function", "function": map[string]string{"name": "rag_retrieve"}}
+	} else if force {
+		choice = "auto"
 	}
 	payload := map[string]any{"model": m.Name, "messages": messages, "stream": false, "tool_choice": choice, "tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "rag_retrieve", "description": "Search the user's selected knowledge base. Returns evidence with citation numbers.", "parameters": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]string{"type": "string"}}, "required": []string{"query"}, "additionalProperties": false}}}}, "max_tokens": 4096}
 	// Common OpenAI-compatible providers expose this optional extension.
