@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
+
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.ids import chunk_id, content_sha256, es_record_id
 from rag_mvp.domain.models import Chunk
@@ -67,9 +70,18 @@ class IngestionPipeline:
         # 记录，而 MySQL manifest 会因唯一键重复而在完成阶段失败。按首次出现
         # 顺序去重也能避免为注定折叠的内容重复调用 Embedding。
         unique_drafts: dict[str, ChunkDraft] = {}
+        pages: dict[str, set[int]] = {}
         for draft in drafts:
             logical_id = chunk_id(draft.content_with_weight, document.id)
             unique_drafts.setdefault(logical_id, draft)
+            if draft.metadata.get("source_type") == "pdf" and draft.locator.page_number is not None:
+                pages.setdefault(logical_id, set()).add(draft.locator.page_number)
+        for logical_id, page_numbers in pages.items():
+            draft = unique_drafts[logical_id]
+            unique_drafts[logical_id] = replace(
+                draft,
+                metadata={**draft.metadata, "page_numbers": json.dumps(sorted(page_numbers))},
+            )
 
         model = model_for_dataset(self._model, claim.dataset)
         vectors = await model.embed([draft.content_with_weight for draft in unique_drafts.values()])

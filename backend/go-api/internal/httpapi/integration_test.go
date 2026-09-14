@@ -98,25 +98,52 @@ func TestLiveProductFlow(t *testing.T) {
 		t.Fatal("saved Embedding key unavailable")
 	}
 	embeddingConfig["apiKey"] = embeddingKey
-	modelCalls := 0
+	chatCalls := 0
+	assessCalls := 0
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		modelCalls++
-		if modelCalls%2 == 1 {
+		var body struct {
+			Messages []agent.Message   `json:"messages"`
+			Stream   bool              `json:"stream"`
+			Tools    []json.RawMessage `json:"tools"`
+		}
+		if e := json.NewDecoder(r.Body).Decode(&body); e != nil {
+			t.Errorf("decode model request: %v", e)
+		}
+		last := body.Messages[len(body.Messages)-1]
+
+		// 非流式请求：无工具时是充分性判断，有工具时是 provider 预检。
+		if !body.Stream {
+			if len(body.Tools) == 0 {
+				assessCalls++
+				if last.Role != "user" || !strings.Contains(last.Content, "COBALT-742") {
+					t.Error("sufficiency input missing retrieved evidence")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"sufficient\":true,\"missing_facts\":[],\"reason_code\":\"covered\"}"}}]}`)
+				return
+			}
 			call := agent.ToolCall{ID: "call-retrieve", Type: "function"}
 			call.Function.Name = "rag_retrieve"
 			call.Function.Arguments = `{"query":"What is the Project Cobalt launch code?"}`
 			_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": agent.Message{ToolCalls: []agent.ToolCall{call}}}}})
-		} else {
-			var body struct {
-				Messages []agent.Message `json:"messages"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			last := body.Messages[len(body.Messages)-1]
-			if last.Role != "tool" || !strings.Contains(last.Content, "COBALT-742") {
-				t.Error("real retrieved evidence missing")
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": agent.Message{Content: "The launch code is COBALT-742. [1]"}}}})
+			return
 		}
+
+		chatCalls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if len(body.Tools) > 0 {
+			_, _ = fmt.Fprint(w, "data: "+`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-retrieve","type":"function","function":{"name":"rag_retrieve","arguments":"{\"query\":\"What is the Project Cobalt launch code?\"}"}}]}}]}`+"\n\n")
+			_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+			return
+		}
+		content := "你好，有什么可以帮你？"
+		if strings.Contains(last.Content, "COBALT-742") {
+			content = "The launch code is COBALT-742. [1]"
+		} else if last.Role == "tool" {
+			t.Error("real retrieved evidence missing")
+		}
+		_, _ = fmt.Fprint(w, "data: "+fmt.Sprintf(`{"choices":[{"delta":{"content":%q}}]}`, content)+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer model.Close()
 	liveProvider := os.Getenv("PRODUCT_TEST_SAVED_CHAT") == "true"
@@ -163,7 +190,7 @@ func TestLiveProductFlow(t *testing.T) {
 		providerClient.Transport = diagnosticTransport{base: providerClient.Transport, report: func(message string) { t.Log(strings.ReplaceAll(message, secret, "[REDACTED]")) }}
 		defer providerClient.CloseIdleConnections()
 		provider := agent.OpenAI{BaseURL: modelURL, Key: secret, Name: modelName, Thinking: thinking, Timeout: time.Duration(timeout) * time.Second, Client: providerClient}
-		if _, e := provider.Complete(ctx, []agent.Message{{Role: "user", Content: "Use rag_retrieve to find the Project Cobalt launch code."}}, true); e != nil {
+		if _, e := provider.Complete(ctx, []agent.Message{{Role: "user", Content: "Use rag_retrieve to find the Project Cobalt launch code."}}, agent.ToolPolicy{Mode: agent.ToolRequired, RequiredName: "rag_retrieve"}); e != nil {
 			t.Fatalf("saved provider tool-call preflight: %v", e)
 		}
 	}
@@ -292,8 +319,15 @@ func TestLiveProductFlow(t *testing.T) {
 		t.Fatal("dataset timestamp missing")
 	}
 	stream := call("POST", "/chat/stream", strings.NewReader(fmt.Sprintf(`{"datasetId":%q,"question":"What is the Project Cobalt launch code?"}`, dataset.ID)), "application/json", 200)
-	if !bytes.Contains(stream, []byte("event: final")) || !bytes.Contains(stream, []byte("COBALT-742")) || (!liveProvider && modelCalls != 2) || !bytes.Contains(stream, []byte("\"ordinal\":1")) {
+	if !bytes.Contains(stream, []byte("event: final")) || !bytes.Contains(stream, []byte("COBALT-742")) ||
+		(!liveProvider && (chatCalls != 2 || assessCalls != 1)) || !bytes.Contains(stream, []byte("\"ordinal\":1")) {
 		t.Fatalf("chat loop failed: %s", stream)
+	}
+
+	// 普通交流必须既不检索也不产生引用，只输出 token 与 final。
+	greeting := call("POST", "/chat/stream", strings.NewReader(fmt.Sprintf(`{"datasetId":%q,"question":"你好"}`, dataset.ID)), "application/json", 200)
+	if !bytes.Contains(greeting, []byte("event: final")) || bytes.Contains(greeting, []byte("event: retrieval")) || bytes.Contains(greeting, []byte("\"ordinal\"")) {
+		t.Fatalf("ordinary conversation must not retrieve or cite: %s", greeting)
 	}
 	list := call("GET", "/conversations", nil, "", 200)
 	var conversations []struct {

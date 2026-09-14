@@ -77,6 +77,7 @@ func (s *Server) Router() *gin.Engine {
 	a.POST("/auth/logout", s.logout)
 	a.GET("/settings", s.settings)
 	a.PUT("/settings/models/:kind", s.saveModel)
+	a.POST("/settings/models/:kind/test", s.testModel)
 	a.PUT("/settings/agent", s.saveAgentSettings)
 	a.GET("/datasets", s.datasets)
 	a.POST("/datasets", s.createDataset)

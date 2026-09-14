@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
-	"log"
+	"log/slog"
 	"net/http"
 	"rag-mvp/backend/go-api/internal/agent"
 	"rag-mvp/backend/go-api/internal/security"
@@ -66,6 +66,11 @@ func (s *Server) chat(c *gin.Context) {
 		fail(c, 503, "SAVE_FAILED", "会话创建失败。")
 		return
 	}
+	// 立即持久化用户提问：即使回答流尚未完成，历史记录也能完整恢复该会话。
+	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,role,content,citations_json) VALUES(?,'user',?,'[]')", p.ConversationID, p.Question); e != nil {
+		fail(c, 503, "SAVE_FAILED", "会话保存失败。")
+		return
+	}
 	s.mu.Lock()
 	busy := s.runs[p.ConversationID]
 	if !busy {
@@ -77,17 +82,9 @@ func (s *Server) chat(c *gin.Context) {
 		return
 	}
 	defer func() { s.mu.Lock(); delete(s.runs, p.ConversationID); s.mu.Unlock() }()
-	// Load only completed history. The current question is persisted below and
-	// appended once by the agent harness, so providers never receive it twice.
 	rows, e := s.Store.DB.QueryContext(ctx, "SELECT role,content FROM (SELECT id,role,content FROM conversation_messages WHERE conversation_id=? ORDER BY id DESC LIMIT 12) recent ORDER BY id", p.ConversationID)
 	if e != nil {
 		fail(c, 503, "LOAD_FAILED", "会话读取失败。")
-		return
-	}
-	// Persist the user question before generation so an interrupted stream still
-	// leaves an accurate conversation record.
-	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,role,content,citations_json) VALUES(?,'user',?,'[]')", p.ConversationID, p.Question); e != nil {
-		fail(c, 503, "SAVE_FAILED", "会话保存失败。")
 		return
 	}
 	history := []agent.Message{}
@@ -105,6 +102,9 @@ func (s *Server) chat(c *gin.Context) {
 	if e != nil {
 		fail(c, 503, "LOAD_FAILED", "会话读取失败。")
 		return
+	}
+	if len(history) > 0 && history[len(history)-1].Role == "user" && history[len(history)-1].Content == p.Question {
+		history = history[:len(history)-1]
 	}
 	emb, _, e := s.Store.Model(ctx, uid(c), "embedding")
 	if e != nil {
@@ -136,11 +136,25 @@ func (s *Server) chat(c *gin.Context) {
 	}
 	modelClient := agent.ModelClient(s.AllowLocalModels)
 	defer modelClient.CloseIdleConnections()
-	h := agent.Harness{Model: agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}, Tool: retriever, MaxRounds: 6, TopK: int(top)}
+	// 同一个受限 adapter 同时承担回答与充分性判断，避免第二套凭据或授权路径；
+	// Assess 与受限回答都计入 Harness 的 MaxModelCalls，并使用同一份默认上下文预算。
+	model := agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}
+	budget := agent.DefaultContextBudget()
+	h := agent.Harness{
+		Model:     model,
+		Tool:      retriever,
+		MaxRounds: 6,
+		TopK:      int(top),
+		Streaming: true,
+		Assessor:  agent.ModelSufficiencyAssessor{Model: model, Budget: &budget},
+		Rewriter:  agent.ModelQueryRewriter{Model: model, Budget: &budget},
+		Observer:  agent.JSONLogObserver{Logger: slog.Default()},
+		RunID:     agent.NewRunID(),
+	}
 	answer, citations, e := h.Run(ctx, p.DatasetID, p.Question, history, emit)
 	if e != nil {
-		log.Printf("chat failed conversation_id=%s dataset_id=%s: %v", p.ConversationID, p.DatasetID, e)
-		_ = emit("error", gin.H{"code": "CHAT_FAILED", "message": "问答未完成，请检查模型连通性、工具调用支持及知识库状态。"})
+		code, message := agent.FailureHint(e)
+		_ = emit("error", gin.H{"code": code, "message": message})
 		return
 	}
 	b, _ := json.Marshal(citations)

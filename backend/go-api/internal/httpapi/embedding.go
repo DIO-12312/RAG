@@ -41,7 +41,15 @@ func (s *Server) bindEmbedding(c *gin.Context, dataset string) bool {
 		return false
 	}
 	r, e := s.RAG.RPC.BindEmbeddingProfile(ctx, &pb.BindEmbeddingProfileRequest{Context: ragclient.Context(uid(c) + "-bind-" + dataset), DatasetId: dataset, EmbeddingModel: name, EmbeddingDimension: dim, EncryptedEmbeddingProfile: profile})
-	if e != nil || r.GetError() != nil {
+	if e != nil {
+		fail(c, 409, "EMBEDDING_BIND_FAILED", "无法连接 RAG 服务，请稍后重试。")
+		return false
+	}
+	if ragNotFound(r.GetError()) {
+		fail(c, 409, "DATASET_STALE", "该知识库在 RAG 服务中已不存在（元数据可能已被重置），请删除后重新创建。")
+		return false
+	}
+	if r.GetError() != nil {
 		fail(c, 409, "EMBEDDING_BIND_FAILED", "旧知识库需要与原索引相同的 Embedding 模型和维度；请检查配置及 RAG 服务。")
 		return false
 	}

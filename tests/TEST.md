@@ -4,27 +4,20 @@
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
 
-### 2026-09-11 Go Agent 多查询证据预算
+### 2026-09-13 开发环境 Make 入口
 
-| 文件 | 用例 / 职责 | 运行边界 |
-|---|---|---|
-| `backend/go-api/internal/agent/agent_test.go` | `TestParallelToolCallsShareEvidenceBudgetWithoutFailing`：模拟模型首轮并行生成 4 个检索子查询、每路由 CHM 邻居扩展返回 20 条结果，验证全局 40 条 evidence 预算按每路 10 条稳定截断，仍能进入最终回答和引用校验 | Go 离线单元测试 |
+| 合并后保留的测试 | 职责与运行边界 |
+|---|---|
+| `tests/unit/adapters/test_openai_compatible_model.py::test_embed_limits_batch_concurrency_and_preserves_order` | 保持批次并发上限与输入顺序，离线 HTTP 替身；DatasetProfile 与 bootstrap 同时传递并发参数和目标分支的本地模型选项 |
+| `tests/unit/retrieval/test_provenance.py::test_pdf_evidence_repairs_false_tables_and_emits_valid_markdown_tables` | 修复 PDF 展示正文及表格，离线纯函数测试 |
+| `tests/unit/ingestion/test_multiformat_parsers.py::test_non_pdf_formats_do_not_fabricate_printed_page_numbers` | 非 PDF 输入不伪造印刷页码，离线解析测试 |
+| `backend/go-api/internal/ragclient/client_test.go::TestRetrieveDisplaysPrintedAndPhysicalPDFPages`、`TestRetrieveFallsBackToPhysicalPDFPageWithoutPrintedFooter` | 兼容历史双页码 metadata，新结果无印刷页码时回退物理页；离线 Go RPC 替身 |
 
-### 2026-09-11 PDF 来源预览清理
+2026-09-14 合并说明：Agent 与 PDF 冲突采用 `merge-feature-into-main` 的状态机、ToolPolicy 和 pdfminer 实现及配套测试。旧 `multiQueryModel`、`expandingRetriever`、`TestParallelToolCallsShareEvidenceBudgetWithoutFailing` 由该分支 evidence pool/runtime 预算测试覆盖替代；旧 `_fragmented_pdf_with_printed_page` 和 `test_deepdoc_pdf_uses_word_coordinates_and_records_printed_page_number` 随 pdfplumber 路径移除，当前解析器不生成印刷页码。目录仍使用既有 `backend/go-api/internal/agent/*_test.go`、`tests/unit/ingestion/test_pdf_deepdoc_parser.py`；Python 离线检查及 Go/前端测试通过 `make release-check` 验证，不替代真实模型或 PDF 质量验收。
 
-| 文件 | 用例 / 职责 | 运行边界 |
-|---|---|---|
-| `tests/unit/retrieval/test_provenance.py` | `test_pdf_evidence_repairs_false_tables_and_emits_valid_markdown_tables`：验证 PDF 展示文本移除重复标题路径，将误判成表格的正文恢复为连续文本，并为真实二维行补齐合法 Markdown 表头分隔线；索引正文与 chunk ID 不变 | Python 离线单元测试 |
-| `apps/web/tests/markdown-content.spec.ts` | `repairs legacy PDF citation paragraphs and renders stable rows as a table`：验证历史会话中持久化的旧 PDF 引用也会在前端移除长标题前缀和伪表格竖线，并将稳定二维行渲染为现有风格的表格 | Vitest/jsdom，离线产品交互测试 |
+main 中无冲突的展示兼容仍保留：`tests/unit/retrieval/test_provenance.py` 的 `test_pdf_evidence_repairs_false_tables_and_emits_valid_markdown_tables` 与 `apps/web/tests/markdown-content.spec.ts` 的历史 PDF 修复用例验证展示投影；`backend/go-api/internal/ragclient/client_test.go` 的双页码及物理页回退用例验证历史 metadata 兼容；`tests/unit/ingestion/test_multiformat_parsers.py` 与 CHM/CHI 测试继续保证非 PDF 来源不伪造页码。这些均为离线测试，不要求新解析器产出印刷页码。
 
-### 2026-09-11 PDF 正文顺序与印刷页码
-
-| 文件 | 用例 / 职责 | 运行边界 |
-|---|---|---|
-| `tests/unit/ingestion/test_pdf_deepdoc_parser.py` | `test_deepdoc_pdf_uses_word_coordinates_and_records_printed_page_number`：验证单词坐标抽取保持中英文/接口名的原始阅读顺序，过滤页外幽灵文字，并同时保存内部物理页和页脚印刷页码 | Python 离线单元测试 |
-| `tests/unit/ingestion/test_multiformat_parsers.py` | `test_non_pdf_formats_do_not_fabricate_printed_page_numbers`：验证 TXT、Markdown 和代码只保留各自的行号/符号定位，不伪造 PDF 页脚页码 | Python 离线单元测试 |
-| `tests/unit/ingestion/test_chm_parser.py` | 既有 CHM/CHI 来源测试附加断言：两种格式保持 Topic/HTML 行或关键词来源定位，不写入 PDF 专属页码 | Python 离线单元测试 |
-| `backend/go-api/internal/ragclient/client_test.go` | `TestRetrieveDisplaysPrintedAndPhysicalPDFPages`、`TestRetrieveFallsBackToPhysicalPDFPageWithoutPrintedFooter`：验证产品引用同时展示文档页脚页码和 PDF 物理页码，缺少可信页脚时明确展示物理页码 | Go 离线单元测试 |
+`tests/contract/test_build_entrypoints.py` 的 `test_makefile_offline_targets_are_commented_earthly_only_entrypoints` 与 `test_docker_entrypoints_validate_suites_and_preserve_volumes` 校验公开入口已移除 `docker-up`，`docker-down` 已改为 `down`，`all` 按 `proto lint test run` 执行；同时校验 `down` 通过两套开发 Compose 配置移除容器、网络和本地镜像，但不使用 `down -v` 删除数据卷。该契约测试为离线文本检查，不实际停止容器或删除镜像。
 
 ### 2026-09-11 用户级 Rerank
 
@@ -54,14 +47,14 @@ apps/web/tests/rerank-settings.spec.ts
 apps/web/tests/
 └─ dataset-delete.spec.ts  # 二次确认、真实 DELETE 请求、列表隐藏与路由返回
 backend/go-api/internal/
-├─ ragclient/client_test.go            # Dataset 删除与 PDF 展示页码的 gRPC 转换
+├─ ragclient/client_test.go            # DeleteDataset gRPC 转发及错误响应
 └─ httpapi/integration_test.go          # 真实产品链路删除、归属隐藏与结果契约
 ```
 
 | 文件 | 用例 / 职责 | 运行边界 |
 |---|---|---|
 | `apps/web/tests/dataset-delete.spec.ts` | `requires confirmation, removes the dataset, and returns to the library`：详情页显示知识库名、文档数和不可恢复提示；确认后调用删除接口、从列表移除并返回知识库页 | Vitest/jsdom + MSW，离线产品交互测试 |
-| `backend/go-api/internal/ragclient/client_test.go` | `TestDeleteDatasetForwardsIdempotentCommand`、`TestDeleteDatasetRejectsBusinessErrorAndMissingResult`：验证 Dataset 作用域、幂等键、清理 Job 返回及异常响应 fail closed；PDF 页码转换职责见上方专项清单 | Go 离线单元测试 |
+| `backend/go-api/internal/ragclient/client_test.go` | `TestDeleteDatasetForwardsIdempotentCommand`、`TestDeleteDatasetRejectsBusinessErrorAndMissingResult`：验证 Dataset 作用域、幂等键、清理 Job 返回及异常响应 fail closed | Go 离线单元测试 |
 | `backend/go-api/internal/httpapi/server_test.go` | `TestUnauthenticatedAndCrossOrigin`：未登录用户不能调用知识库删除路由 | Go 离线 HTTP 测试 |
 | `backend/go-api/internal/httpapi/integration_test.go` | `TestLiveProductFlow` 的删除阶段：真实调用 HTTP → Go → gRPC，验证 `202`、清理 Job、详情 404 与列表即时隐藏 | 显式真实产品集成测试；依赖 MySQL、Python RAG、Worker、ES 和模型配置 |
 
@@ -256,8 +249,8 @@ tests/
    │  ├─ test_chm_parser.py
    │  ├─ test_failpoints.py
    │  ├─ test_multiformat_parsers.py
-   │  ├─ test_pdf_deepdoc_parser.py        # PDF 版面、OCR、页眉页脚、表格和安全上限
-   │  ├─ test_pipeline.py
+   │  ├─ test_pdf_deepdoc_parser.py        # PDF 字符坐标、下标、目录、保守表格、段落合并、OCR 和安全上限
+   │  ├─ test_pipeline.py                 # 稳定去重、重复 PDF 页列表和重执行幂等
    │  ├─ test_recursive_chunker.py
    │  ├─ test_text_parser.py
    │  └─ test_worker.py
@@ -313,7 +306,6 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | `adapters/test_openai_compatible_model.py` | `test_embed_normalizes_url_preserves_batch_order_and_bearer_header` | 规范 endpoint、仅以 Bearer header 鉴权，并对分批乱序响应恢复全局输入顺序。 |
 | 同上 | `test_embed_bisects_provider_rejected_multi_input_batches` | 多输入批次被供应商以 HTTP 400 拒绝时按顺序二分，成功后恢复完整向量顺序。 |
 | 同上 | `test_embed_empty_input_does_not_call_provider` | 空输入直接返回空向量集合，不产生外部请求。 |
-| 同上 | `test_embed_limits_batch_concurrency_and_preserves_order` | 多批向量化按配置限制并发请求数，同时保持向量与原始输入的全局顺序。 |
 | 同上 | `test_embed_rejects_invalid_schema_count_dimension_and_numbers` | 参数化拒绝错误 object/data、数量、重复 index、维度和非有限数值。 |
 | 同上 | `test_auth_failure_is_non_retryable_and_redacts_provider_body` | 401/403 不重试，映射稳定鉴权错误且不泄漏供应商正文或密钥。 |
 | 同上 | `test_embed_does_not_duplicate_existing_embeddings_suffix` | 已带 `/embeddings` 的 endpoint 不被重复拼接。 |
@@ -362,16 +354,17 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_disabled_checkpoint_is_noop_and_cancellation_does_not_hang` | 未启用 checkpoint 无副作用，取消 barrier await 会立即传播。 |
 | `ingestion/test_multiformat_parsers.py` | `test_markdown_parser_preserves_heading_sections_and_lines` | Markdown 保留标题分段及行定位。 |
 | 同上 | `test_code_parser_preserves_language_symbols_and_lines` | 代码保留语言、符号和行定位。 |
-| 同上 | `test_non_pdf_formats_do_not_fabricate_printed_page_numbers` | TXT、Markdown 和代码不得伪造 PDF 页脚页码。 |
 | 同上 | `test_pdf_parser_returns_one_traceable_segment_per_text_page` | 文本 PDF 每页输出可追溯片段。 |
 | 同上 | `test_router_selects_supported_parser` | Router 为各受支持后缀选择正确 parser。 |
 | 同上 | `test_router_rejects_unsupported_source_type` | 不支持的类型返回稳定错误。 |
 | 同上 | `test_pdf_parser_rejects_corrupt_bytes` | 损坏 PDF 返回稳定错误。 |
 | `ingestion/test_pdf_deepdoc_parser.py` | `test_deepdoc_pdf_preserves_heading_bbox_table_and_removes_repeated_margins` | 复杂文本 PDF 恢复标题路径、表格型行和 bbox，删除跨页重复页眉页脚，并避免目录点线条目污染标题层级。 |
-| 同上 | `test_deepdoc_pdf_uses_word_coordinates_and_records_printed_page_number` | 单词坐标抽取保留混排正文，过滤页外幽灵文字，并分离物理页序号与页脚印刷页码。 |
 | 同上 | `test_deepdoc_pdf_uses_ocr_for_a_scanned_page_and_keeps_confidence` | 原生文字不足时只对扫描页调用 OCR，并保留页码、坐标和置信度。 |
 | 同上 | `test_forced_deepdoc_rejects_scanned_pdf_when_ocr_is_unavailable` | 强制 DeepDoc 且缺少 OCR 工具时返回稳定错误，不把空内容伪装成成功。 |
 | 同上 | `test_auto_mode_degrades_to_native_content_without_ocr_tools` | auto 模式缺少 OCR 工具时仍保留已有原生文字。 |
+| 同上 | `test_pdf_keeps_scaled_grid_subscripts_and_contents_in_physical_rows` | 自生成缩放 PDF 验证目录编号与条目同行、稀疏网格及下标 Q0/Q1/Q2 不丢失。 |
+| 同上 | `test_pdf_bold_labels_stay_body_and_adjacent_small_blocks_merge` | 加粗短标签保留正文，同页同标题小段合并，单页异常页脚按页码形态过滤。 |
+| 同上 | `test_pdf_requires_aligned_columns_and_excludes_bullets_from_tables` | 几何对齐的连续行才成为表格，错位列和项目符号行不误判。 |
 | 同上 | `test_pdf_page_limit_fails_before_ocr` | 超过页数安全上限时在渲染/OCR 前拒绝文档。 |
 | `test_config.py` | `test_pdf_content_settings_change_the_parser_fingerprint` | 会改变 PDF 索引正文的配置必须改变 parser fingerprint，防止错误复用旧索引。 |
 | `ingestion/test_chm_parser.py` | `test_chm_parser_orders_topics_and_preserves_heading_provenance` | CHM 按 HHC 目录稳定排列 Topic，按标题层级分段，过滤脚本/样式并保留 Topic、标题路径与锚点。 |
@@ -389,7 +382,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_chm_parser_rejects_absolute_topic_path` | 绝对 Topic 路径在进入 HTML 解析前被 fail closed 拒绝。 |
 | 同上 | `test_chmlib_extractor_rejects_non_chm_before_starting_process` | 非 CHM 签名字节在启动外部解包进程前返回稳定 `INVALID_CHM`。 |
 | `ingestion/test_pipeline.py` | `test_pipeline_builds_stable_versioned_chunks_and_upserts_search` | Pipeline 生成稳定的版本化 chunk 并幂等写入检索端。 |
-| 同上 | `test_pipeline_collapses_duplicate_chunk_ids_before_embedding` | 同一 Document 内相同逻辑 Chunk 在 Embedding 前稳定折叠，保留首次来源，避免重复向量化及 manifest 唯一键冲突。 |
+| 同上 | `test_pipeline_collapses_duplicate_chunk_ids_before_embedding` | 同一 Document 内相同逻辑 Chunk 在 Embedding 前稳定折叠，保留首次来源并汇总 PDF 的 page_numbers，验证 Evidence/protobuf metadata 透传且重复执行仍输出相同记录，避免重复向量化及 manifest 唯一键冲突。 |
 | `ingestion/test_recursive_chunker.py` | `test_recursive_chunker_is_stable_bounded_and_overlapping` | 切块边界稳定、长度受限且 overlap 正确。 |
 | 同上 | `test_recursive_chunker_rejects_invalid_overlap` | 非法 overlap 参数被拒绝。 |
 | 同上 | `test_recursive_chunker_matches_txt_golden_fixture` | TXT 切块结果与 golden fixture 一致。 |
@@ -461,7 +454,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_quality_workflow_pins_tools_and_keeps_secrets_out` | 检查只读权限、临时托管 runner、固定 Action/Earthly 与下载校验、不保留凭据、不注入 Secret 或启动业务 Compose，以及 Earthly 显式复制所需配置。仅静态契约，不证明下载或远端运行成功。 |
 | 同上 | `test_main_ruleset_protects_main_without_blocking_direct_push` | 用 JSON 解析规则，验证 main 限定、仅禁止删除与强推、且不含 `pull_request` 或 `required_status_checks`，确保直接 push 不被拦截。不会调用 GitHub API 或验证远端规则已启用。 |
 | 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界；lint/test/ci 聚合复用非空工作区基底，并复制生产 Compose/Caddy 契约输入，避免测试工作区遗漏部署文件。 |
-| 同上 | `test_docker_entrypoints_validate_suites_scan_logs_and_preserve_volumes` | Docker 公共入口复用 Function；run 统一由 Earthfile 顺序准备共享卷、等待 RAG、启动产品服务与容器化 Vue 前端；验证 suite、静默校验 Compose、扫描日志和持久卷保护。eval 同时收集既有 30 问与 PDF 五十问。此离线静态契约不替代 Windows/WSL/Linux 的实际启动验收。 |
+| 同上 | `test_docker_entrypoints_validate_suites_and_preserve_volumes` | Docker 公共入口复用 Function；run 统一由 Earthfile 顺序准备共享卷、等待 RAG、启动产品服务与容器化 Vue 前端；验证 suite、静默校验 Compose、关闭两套开发栈、清理本地镜像和持久卷保护。eval 同时收集既有 30 问与 PDF 五十问。此离线静态契约不替代 Windows/WSL/Linux 的实际启动验收。 |
 | 同上 | `test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths` | Docker 入口构建安全材料/ES/bootstrap 服务，并仅向测试容器传递 ES password file 与 CA path。 |
 | 同上 | `test_containerized_web_upload_limits_match_supported_rag_sources` | 前端与 Go 白名单一致接纳 PDF、CHM/CHI、Markdown、文本和代码；Nginx 为 32 MiB 文件及 multipart 开销设置 34 MiB 请求上限。 |
 | 同上 | `test_containerized_web_proxies_product_health_checks` | 容器化 Nginx 必须将 `/healthz`、`/readyz` 转发到 Go API，防止 SPA fallback 返回 HTML 造成公网健康假阳性。 |
@@ -679,3 +672,5 @@ Eval 测试负责防止检索排序和 evidence 定位质量回退。不得以 L
 3. 修改 RPC、Port、状态机、Outbox、Worker、重试、取消或删除语义时，同时检查 Contract、Functional、Resilience 三类表是否仍准确。
 4. 新增 marker、fixture 或 Fake port 时，在本文件和 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md) 中补充运行边界；Fake 不得进入生产 bootstrap。
 5. 测试文档与测试代码必须在同一提交中评审；缺少本文件同步的测试改动不视为完成。
+
+PDF 切分回归运行边界：上述 unit 用例仅使用 ReportLab 自生成 PDF 与 Fake ports，可通过 `make ci` 离线运行；不依赖、不提交真实 ch05.pdf。真实 PDF 的逐页量化是本地只读检查，不等同于重摄取或真实 ES/Embedding 验收。PDF OCR 运行时验收仍使用 `make docker-test SUITE=integration`。

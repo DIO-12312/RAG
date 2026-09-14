@@ -20,6 +20,7 @@ import {
   mockSettings,
   resetMockData,
 } from "./data";
+import { createMockChatStream } from "./sse";
 
 let signedIn = false;
 
@@ -139,6 +140,29 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
+  http.get("*/conversations", () => {
+    const unauthorized = requireSignedIn();
+    if (unauthorized) return unauthorized;
+    return HttpResponse.json([]);
+  }),
+
+  http.get("*/conversations/:id/messages", () => {
+    const unauthorized = requireSignedIn();
+    if (unauthorized) return unauthorized;
+    return HttpResponse.json([]);
+  }),
+
+  http.post("*/chat/stream", async () => {
+    const unauthorized = requireSignedIn();
+    if (unauthorized) return unauthorized;
+    const blocks: string[] = [];
+    for await (const event of createMockChatStream().events) {
+      const { type, ...payload } = event;
+      blocks.push(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
+    }
+    return new HttpResponse(blocks.join(""), { headers: { "Content-Type": "text/event-stream" } });
+  }),
+
   http.get("*/settings", () => {
     const unauthorized = requireSignedIn();
     if (unauthorized) return unauthorized;
@@ -176,6 +200,16 @@ export const handlers = [
       apiKeyConfigured: Boolean(apiKey) || mockSettings.rerank.apiKeyConfigured,
     });
     return HttpResponse.json(mockSettings);
+  }),
+
+  http.post("*/settings/models/:kind/test", ({ params }) => {
+    const unauthorized = requireSignedIn();
+    if (unauthorized) return unauthorized;
+    const kind = String(params.kind);
+    if (!["chat", "embedding", "rerank"].includes(kind)) {
+      return HttpResponse.json({ code: "NOT_FOUND", message: "模型类型不存在。" }, { status: 404 });
+    }
+    return HttpResponse.json({ ok: true, latencyMs: 123, detail: `${kind} 模型响应正常` });
   }),
 
   http.put("*/settings/agent", async ({ request }) => {

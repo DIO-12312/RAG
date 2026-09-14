@@ -73,7 +73,9 @@ Python MVP 的唯一入口是 gRPC；本地调试也调用同一 gRPC 服务。P
   → 返回带来源、分数和上下文预算建议的 evidence
 ```
 
-必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java`、PDF、`.chm` 与 `.chi`。PDF 默认使用 `auto` 路由：优先以单词级真实边界框恢复原生文字、字体和阅读顺序，丢弃页外定位文字，原生文字不足的页面才经 Poppler 渲染并使用 Tesseract OCR；输出标题路径、阅读顺序、段落/列表/表格型文本、页码与矩形坐标。OCR 只识别文字，不负责图片语义和公式结构理解。PDF `Locator.page_number` 始终保存从 1 开始的物理页序号，用于内部检索、过滤和评测；解析器从页面底部边距识别读者可见的页脚页码，保存为 `Locator.metadata.printed_page_number`。Go 产品层同时展示二者，格式为“文档第 276 页（PDF 第 282 页）”；没有可验证页脚页码时展示“PDF 第 282 页”。Markdown、TXT、代码、CHM 与 CHI 没有 PDF 页脚语义，不得伪造 `printed_page_number`。上述原生抽取和页码规则自 `source-router-v8` 起生效并改变 PDF 规范化正文、Embedding 与 `chunk_id`，旧 PDF 必须重建索引。PDF Evidence 的 `display_content` 是不参与 Embedding 和 `chunk_id` 的展示投影：移除正文前重复的标题路径，将被定位文本块误包围的竖线恢复为普通段落，并只把稳定二维短单元格行补成合法 Markdown 表格。
+必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java`、PDF、`.chm` 与 `.chi`。PDF 默认使用 `auto` 路由：优先读取原生文字和坐标，原生文字不足的页面才经 Poppler 渲染并使用 Tesseract OCR；输出标题路径、阅读顺序、段落/列表/表格型文本、页码与矩形坐标。OCR 只识别文字，不负责图片语义和公式结构理解。
+
+自 `source-router-v8` 起，PDF `auto/deepdoc` 原生路径使用 pdfminer.six 的字符坐标和实际字号恢复物理行，避免 pypdf 文字回调在文本对象/变换矩阵切换时返回失真的坐标；`plain` 继续使用 pypdf。表格只有连续行的列起点、列数和行距均一致时才输出 Markdown 行；稀疏甘特图不能证明列结构时保留物理行与空白分隔，不猜测缺失单元格。加粗本身不构成标题，项目符号、短大写标签和表格行不得提升为标题；页首标题重置根层级。同页同标题下相邻段落/列表共同形成 segment，表格、页面和标题仍是边界，长段由既有 chunk_size/overlap 切块。页边以页码形态结尾的行可独立过滤，其他页眉页脚仍按跨页重复识别。这些规则改变正文、digest 和 Chunk ID，已有 PDF 必须通过新版本重建后才生效。
 
 一个上传的 CHM 对应一个既有 `Document`，不为 Topic 新建数据库 Document。CHM 内每个 HTML Topic 是逻辑子文档和不可跨越的切块硬边界；Topic 内先按 `h1`～`h6` 标题层级形成段落，超长标题段再依次优先选择段落、句子和词法 token 边界，单个不可分 token 才允许按字符硬截断。Topic 顺序优先采用 `.hhc` 目录，未列入目录的 HTML 按规范化路径稳定追加。每个 CHM Chunk 的 `content_with_weight` 必须在正文前稳定加入 `topic_title`、`heading_path` 与 locator `symbol` 上下文，使同一 Topic 的所有分块均可按页面标题、标题路径和接口符号检索；正文切分上限不包含该检索权重前缀。权重文本参与 Embedding、内容摘要和 `chunk_id` 计算，因此修改前缀规则必须提升 parser/chunker 配置版本并重建索引。Chunk 与 Evidence 必须同时保留原 CHM `source_name`，并在 metadata/locator metadata 中返回 `topic_path`、`topic_title`、`topic_order`、`heading_path` 和可选 `anchor`；行号仍表示 Topic 规范化正文中的行范围，不计算检索权重前缀。
 
@@ -640,7 +642,7 @@ es_record_id = f"{document_id}:{index_version}:{chunk_id}"
 
 `canonical_json` 指字段名排序、无多余空白、UTF-8 编码的 JSON 序列化，避免直接字符串拼接产生边界歧义。`file_sha256` 是原始上传字节的 SHA-256，用于文件去重；`content_sha256` 是单个 Chunk 的 `content_with_weight` UTF-8 字节的 SHA-256，用于变更审计；`config_digest` 是 parser/chunker/embedding 配置的 SHA-256。`content_with_weight` 是完成解析、规范化、切块和必要元数据增强后的最终可检索正文；它与 `document_id` 拼接时不插入分隔符，按 UTF-8 编码后计算 64 位 xxHash，输出 `chunk_id` 的 16 位十六进制字符串。这与 RAGFlow 当前 Python Task Executor 的普通 Chunk 规则一致：`xxhash.xxh64((content_with_weight + str(doc_id)).encode("utf-8", "surrogatepass")).hexdigest()`。[RAGFlow Chunk ID 生成（task_executor.py:407）](vscode://file/D:/AI/github/ragflow/rag/svr/task_executor.py:407:1)
 
-该规则的语义是：同一 `document_id` 内，最终文本完全相同的 Chunk 会得到相同 ID；文本或所属 Document 任一变化，ID 都会变化。它天然支持至少一次任务重投后的幂等 upsert，但也意味着**同一文档中内容完全相同的重复 Chunk 会折叠为同一索引记录**。Pipeline 必须在调用 Embedding 前按最终 `chunk_id` 稳定去重并保留首次出现的正文、ordinal 和来源定位，使向量、ES 记录与 MySQL manifest 保持一一对应。MVP 必须在切块测试中明确接受该语义；若业务要求保留相同文本的两个不同位置，应有意偏离 RAGFlow，改为把 `ordinal` 或位置范围纳入 hash 输入。
+该规则的语义是：同一 `document_id` 内，最终文本完全相同的 Chunk 会得到相同 ID；文本或所属 Document 任一变化，ID 都会变化。它天然支持至少一次任务重投后的幂等 upsert，但也意味着**同一文档中内容完全相同的重复 Chunk 会折叠为同一索引记录**。Pipeline 必须在调用 Embedding 前按最终 `chunk_id` 稳定去重并保留首次出现的正文、ordinal 和来源定位，使向量、ES 记录与 MySQL manifest 保持一一对应。PDF Chunk 额外在 `metadata.page_numbers` 保存该逻辑 Chunk 出现页的去重升序列表（JSON 字符串，例如 `"[5, 6, 9]"`），Evidence 通过既有 metadata map 原样返回；主 locator、bbox 和 ordinal 仍指向首次出现，不把后续页误作主 bbox 的位置。非 PDF 的去重行为不变，位置不参与 hash。
 
 `index_version` 仍用于控制“哪一轮索引对用户可见”，但不参与 `chunk_id` 计算：文件内容或解析/切块配置变化时新建版本；`target_document_id` 的重建在 Document 行锁内递增 `next_index_version` 并创建 `IndexBuild(BUILDING)`，数据库以 `(document_id, index_version)` 唯一约束兜底。ES 以 `es_record_id` 保留新旧版本，避免相同 Chunk 覆盖。全部新版本 Chunk 写入后，Worker 只在 Document generation fence 仍匹配时于 MySQL 事务内写 Chunk manifest、将 IndexBuild 置为 `ACTIVE` 并更新 `Document.active_version`。检索先从 ES 过量召回候选，再批量读取 MySQL 的 `Document.active_version` 并剔除不匹配版本；因此切换前只见旧版本，切换后只见完整新版本，旧 ES 记录由清理 Task 异步删除。若 Job 终态失败或被删除 fence 拦截，IndexBuild 置为 `ABANDONED`，并创建 `is_system=true` 的 `CLEANUP_INDEX_VERSION` Job/Task 删除该不可见 ES 版本；重投同一摄取 Task 仍可对同一 `BUILDING` 版本做幂等 upsert。
 
@@ -726,11 +728,25 @@ sequenceDiagram
 
 2026-09-06 后续迭代：Embedding URL/模型/API Key/超时/Top-K 由个人设置写入 Go MySQL，API Key 加密存储，不再要求运行环境提供模型凭据。创建 Dataset 时 Go 将配置加密快照经 gRPC 传给 Python，Python MySQL 随 Dataset 持久化，Worker 与 Retrieve 使用同一快照。仅基础设施加密密钥通过只读 secret 提供给 Python，不将 API Key 放入 NATS/日志或返回前端。已有 Dataset 的模型与维度不变；空快照可经 BindEmbeddingProfile 在行锁下首次绑定匹配配置，已绑定快照不可被该 RPC 覆盖。当前 ES 索引为 1024 维，前端清楚标明并校验维度。修改个人配置影响之后创建的知识库，避免不同模型的向量混用。批量上传按单文件调用已有上传 RPC、每文件独立幂等键；目录仅展开文件，不改变 Python Task/Outbox 语义。Go 历史会话返回创建/最近消息时间并稳定倒序；前端右侧模态抽屉展示。回答 Markdown 禁止原始 HTML并清洗输出，引用证据保留原文。
 
-2026-09-06 产品控制面迭代开始实施：`backend/go-api` 使用独立 MySQL 保存个人用户、模型配置、资源所有权索引和会话，单用户拥有多个 Dataset，无租户角色。网络 API 使用根路径与 24 小时 JWT cookie。Go Agent 通过现有 `Retrieve` RPC 执行只读工具调用，绑定已鉴权 Dataset，限制轮数/时间并支持取消；首轮选择检索查询并取得 evidence 后，下一轮必须基于已有 evidence 生成最终答案，不允许模型在大型知识库上反复调用同一检索工具直至轮次耗尽。同一首轮最多接受 4 个并行检索子查询；全局 40 条 evidence 预算在子查询间稳定均分，CHM Topic 邻居扩展造成的超额结果按原顺序截断而不使整次问答失败。知识库创建、文档管理和知识库删除均经 Python RPC；Go 不读写 Python 表。Embedding 已改为用户配置及 Dataset 加密快照。实施与验收记录见 `docs/development/live-product-plane.md`。
+2026-09-06 产品控制面迭代开始实施：`backend/go-api` 使用独立 MySQL 保存个人用户、模型配置、资源所有权索引和会话，单用户拥有多个 Dataset，无租户角色。网络 API 使用根路径与 24 小时 JWT cookie。Go Agent 通过现有 `Retrieve` RPC 执行只读工具调用，绑定已鉴权 Dataset，限制轮数/时间并支持取消。知识库创建、文档管理和知识库删除均经 Python RPC；Go 不读写 Python 表。Embedding 已改为用户配置及 Dataset 加密快照。实施与验收记录见 `docs/development/live-product-plane.md`。
 
 2026-09-11 用户级 Rerank：复用产品 `agent_settings.rerank_enabled` 持久化开关，默认关闭，前端关闭时隐藏配置并保留已保存凭据。保存完整配置后才允许启用。Go 对已授权 Dataset 的每次问答读取当前用户的 Rerank 配置，以共享 AES-GCM 密钥封装 Base URL、模型名、API Key 和超时；AAD 为 `rag/rerank-profile/v1/<dataset_id>`。密文仅经 `RetrieveRequest.encrypted_rerank_profile`（新增字段 8）传递，不落入 Python 数据库、日志或 evidence；关闭时不传配置、不调用模型。Python 通过 ModelGateway 的请求级工厂接收配置，在 adapter 内解密并调用 HTTPS 专用 `/rerank` 接口，继续执行公网 DNS/IP 校验及禁用重定向。模型返回的 `results[index,relevance_score]` 必须完整、索引唯一且分数有限，先恢复输入顺序，再交给纯排序函数。最多重排 20 个 RRF 候选；启用时 Top-N（1–20）作为最终直接命中数量，仍受上下文预算及来源扩展规则约束。超时、429、5xx 和无效分数响应可降级至 RRF；无效密文、认证失败及其他不可重试请求错误必须明确失败。已有无配置的 RPC 调用保持兼容，用户配置不修改 Dataset Embedding 快照，不在共享客户端上存储请求级状态。
 
 本节描述最终产品路径，不是 Python RAG Worker 的职责。Python 只经 gRPC 执行 `Retrieve` 并返回 evidence；Go 负责会话、Agent 决策、Prompt、Chat Model 调用和向浏览器发送 SSE。
+
+2026-09-13 Agentic RAG Loop 迭代 1：Python 不实现 Agent Loop（意图路由、工具选择、会话策略与 SSE 均不在 Python），产品 Go 已经实现并独占 Agent Loop。路由结果必须直接控制 provider 请求的工具暴露与强制策略，而不是只在 Harness 内部事后忽略工具调用：`reply`/`reuse` 在任何轮次都以 `ToolNone` 发送请求，即 payload 完全省略 `tools` 与 `tool_choice`；`retrieve` 仅首轮使用 `ToolRequired(rag_retrieve)`，后续轮次降为 `ToolAuto`；`clarify` 不调用模型。DeepSeek thinking 模式继续沿用"thinking 开启时不强制 tool_choice"的兼容策略，但 `ToolNone` 在任何供应商下都不得暴露工具。若模型在 `ToolNone` 轮次仍返回 ToolCall，Harness 必须拒绝且不得触发任何检索，避免出现"识别为普通交流但仍强制检索"。
+
+2026-09-13 Agentic RAG Loop 迭代 2：Go Agent Loop 从隐式 for 循环迁移为显式状态机。合法主路径为 `Route → Model → Tool → Assess → Finalize → Done`、`Route → Model → Done`（普通交流）、`Route → Done`（澄清）以及 `Assess → Rewrite → Tool → Assess`（证据不足补检索）；`Done` 与 `Failed` 是终态，进入后不可重开，任何非法迁移返回稳定错误。每次 Run 的预算集中在 `RunLimits`：模型调用 ≤ 6、检索轮次 ≤ 3、改写轮次 ≤ 2、单轮工具调用 ≤ 4、Evidence ≤ 40 条、单次工具结果 ≤ 128 KiB；计数一律在动作开始前检查、动作成功后递增，取消、预算耗尽与不可恢复错误立即进入终态。`ContextBudget` 继续独立负责消息 token 预算，两者不得互相替代。此状态机只属于 Go 产品面，不改变 Python Job/Task 状态机定义。
+
+2026-09-13 Agentic RAG Loop 迭代 3：检索后执行结构化证据充分性判断（SCA）。Assessor 只返回 `{"sufficient": bool, "missing_facts": [...], "reason_code": "..."}` 严格 JSON：不接受 Markdown 围栏、缺失字段、未知字段、超过 5 个缺口、单个缺口超过 256 字符或空 reason code，输出中不得包含自由推理文本；非法输出与供应商故障统一归类为 `ErrSufficiencyUnavailable`，任何情况下都不得自动假定"证据充分"。Assessor 的模型调用使用 `ToolNone`，计入同一次 Run 的 `MaxModelCalls` 与 `ContextBudget`，不新增 API Key、HTTP Client 或授权路径。降级策略：Assessor 不可用时停止额外检索，把现有 Evidence 交给 Finalize，并在系统提示中要求明确说明证据不足；不得因 Assessor 失败无限重试，也不得把该失败当作"可以无引用回答事实"。
+
+2026-09-13 Agentic RAG Loop 迭代 3 接线：`Tool` 之后统一进入 `Assess`。判定充分时进入 `Finalize` 生成受限回答；判定不足时（I4 之前没有重写器，或改写额度已用尽）同样进入 `Finalize`，并在系统提示中追加"证据不足"约束，要求明确说明缺失事实且不得编造引用。Assessor 返回 `ErrSufficiencyUnavailable` 时按同一路径降级：只判断一次、不额外检索、不重试；Assessor 取消或超时立即进入 `Cancelled` 终态。Assessor 与受限回答各计一次 `MaxModelCalls` 并使用同一份 `ContextBudget` 默认值；两者都使用 `ToolNone`。`reply`/`reuse` 路径不进入 `Assess`。终止原因映射为：`evidence_sufficient`、`evidence_insufficient`（含降级）、`direct_reply`，未配置 SCA 的经典循环仍为 `completed`。
+
+2026-09-13 Agentic RAG Loop 迭代 4：证据不足时按缺口驱动查询重写。`QueryRewriter` 接收 `RewriteRequest{OriginalQuestion, StandaloneQuestion, MissingFacts, AttemptedQueries}`，模型只用 `ToolNone`，且只返回 `{"queries": [...]}`：每轮最多 2 条、每条 1–4096 字符，禁止空查询、禁止重复已尝试查询、禁止引入问题与缺口里不存在的 ASCII 标识符；去重后没有新查询时返回 `ErrNoNewQuery`，由状态机收敛而不是再次请求模型，重写器不可用或输出非法统一返回 `ErrRewriteUnavailable`。尝试账本以首次 `StandaloneQuestion` 为第一条并记录全部后续查询；去重使用 `NormalizeAttemptedQuery`（忽略大小写与空白，不改变实际发送文本），重复查询不调用 Retriever、不消耗检索轮次。查询原文只保留在本次 Run 的内存与请求中，日志只记录 SHA-256 前缀与长度（见迭代 5 的 Observer）。
+
+2026-09-13 Agentic RAG Loop 迭代 4 闭环：`Assess(insufficient)` 在仍有改写额度且配置了重写器时进入 `Rewrite`；重写查询以合成的 `rag_retrieve` 工具调用表达，因此 tool call/result 始终成对、检索事件顺序稳定。达到 `MaxRewriteRounds`、重写器不可用或返回 `ErrNoNewQuery` 时立即带不足约束收尾，不再调用下游；取消发生在重写或第二次检索时立即进入 `Cancelled`。初次检索使用路由得到的 `StandaloneQuery`，后续轮次必须使用模型或重写器给出的查询；重复查询既不调用 Retriever 也不消耗检索轮次，只补齐一个说明性 tool 结果。每次实际检索仍发送 `retrieval` 事件且 `hits` 结构不变，新增可选 `round`（1 基）与 `reason`（`initial`/`model`/`rewrite`）字段；`MissingFacts` 的自由文本不得直接暴露为前端推理链。 检索轮次预算用尽时不是失败：运行时为未执行的工具调用补齐说明性结果，并以 `retrieval_budget_exhausted` 标记证据不足、交给 Finalize 生成受限回答；模型预算、非法工具调用与供应商错误仍为终态失败，但 `chat.go` 必须通过 `FailureHint` 输出稳定错误码（`RUN_BUDGET_EXCEEDED`/`TOOL_CALL_INVALID`/`MODEL_UNAVAILABLE`/`REQUEST_CANCELLED`，未知错误保留 `CHAT_FAILED`），避免把可收敛问题误报成模型连通性故障。
+
+2026-09-13 Agentic RAG Loop 迭代 5：每次 Run 通过 `Observer` 输出脱敏事件 `RunEvent{RunID, Stage, Round, Action, QueryHash, EvidenceCount, ModelCalls, RetrievalCalls, RewriteCalls, DurationMS, ErrorCode, StopReason}`。成功路径按 `route → model → tool → assess → finalize → complete` 顺序产生事件，重写路径额外包含 `rewrite`；取消与失败在所有退出路径上只产生一个 `complete` 终态事件，并带稳定错误码（`cancelled`/`provider_error`/`invalid_tool_call`/`budget_exceeded`/`run_failed`）。事件不得包含问题原文、Evidence 正文、模型私有推理（`reasoning_content`）、工具原始参数或任何凭据；查询只记录 SHA-256 前 16 位十六进制与字节长度（`QueryFingerprint`）。Observer 的 panic 或日志失败必须被隔离，不得改变答案或终止 Run；`chat.go` 为每次请求生成 run ID，并用标准库 `slog` 输出单行 JSON 事件。
 
 ```mermaid
 sequenceDiagram
@@ -762,6 +778,12 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 {"event":"final","data":{"answer":"... [1]","citations":[{"ordinal":1,"source_name":"guide.md","locator":"L42-L58"}]}}
 {"event":"error","data":{"code":"MODEL_UNAVAILABLE","message":"..."}}
 ```
+
+2026-09-14 产品 Go 的事件与配置契约扩展：Chat SSE 在每轮模型调用前增加可选 `context` 事件，即 `{"event":"context","data":{"estimatedTokens":N,"usableTokens":N,"budgetTokens":N,"evidenceCount":N,"evidenceLimit":N}}`，其中用量由既有的 `ContextBudget.UsedTokens` 估算且 `usableTokens = maxTokens - reserveTokens`；同一 Run 内用量与证据数都不变时不得重复发送。该事件只服务于前端"上下文接近预算"告警，不改变回答、引用、裁剪或停止语义，也不得携带问题原文、Evidence 正文或模型私有推理。设置页新增 `POST /settings/models/:kind/test`（`kind` 为 `chat`/`embedding`/`rerank`）：服务端用已保存配置发起一次最小探测——chat 为不带 `tools` 的单轮补全，embedding 校验返回向量维度与索引维度一致，rerank 按 `/rerank` 协议校验返回条数与结果下标——探测总时长上限 30 秒。未配置 Key 返回 `MODEL_NOT_CONFIGURED`，密钥解密失败返回 `KEY_UNAVAILABLE`，供应商错误以 HTTP 200 加 `{"ok":false,"latencyMs":N,"detail":"..."}` 返回且回显必须截断；API Key 与完整供应商响应不得进入响应体、日志或前端存储。
+
+2026-09-14 产品 Go 的降级语义：产品库（`resource_index`）与 RAG 元数据可能失配（例如 RAG MySQL 被重置后产品库仍保留文档与任务引用）。此时 `GET /datasets`、`GET /datasets/:id` 必须仍然返回 200：单个文档在 RAG 侧查不到任务时，文档标记 `stale=true` 且 `status=FAILED`，任务列表给出等价的合成条目，禁止因为一条陈旧引用就让整个知识库列表返回 502——否则用户会完全看不到并无法清理自己的知识库。stale 文档不纳入批量重试，用户应删除后重新上传；产品库与 RAG 的真实一致性仍由重新上传与删除流程恢复。
+
+同一失配下删除路径必须仍然可用：RAG 返回 `DOCUMENT_NOT_FOUND`/`DATASET_NOT_FOUND` 时，`DELETE /documents/:id` 与 `DELETE /datasets/:id` 必须完成产品侧引用清理（分别返回 204 与 202），否则用户既删不掉陈旧记录也无法重建知识库。只有非 NOT_FOUND 的业务错误与传输错误才按失败处理，避免在 RAG 仍有数据时丢掉产品库引用。向 RAG 侧已不存在的知识库上传时，`BindEmbeddingProfile` 必须返回 `DATASET_STALE` 并提示删除后重建，而不是误报 Embedding 配置问题。
 
 ### 5.7 配置与可观测性
 

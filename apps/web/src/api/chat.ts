@@ -16,7 +16,7 @@ export function streamChat(payload: ChatRequest): ChatStream {
           const event = block.split("\n").find((line) => line.startsWith("event:"))?.slice(6).trim();
           const data = block.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
           if (!event || !data) continue;
-          if (!["retrieval","token","final","error"].includes(event)) continue;
+          if (!["context","retrieval","token","final","error"].includes(event)) continue;
           terminal ||= event === "final" || event === "error";
           yield { ...JSON.parse(data), type: event } as ChatEvent;
         }

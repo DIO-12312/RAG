@@ -126,3 +126,95 @@ async def test_fake_ip_resolution_uses_public_dns_before_connecting(
         assert seen == [("93.184.215.14", "model.example", "model.example")]
     finally:
         await transport.aclose()
+
+
+@pytest.mark.asyncio
+async def test_local_model_mode_allows_http_endpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = bytes(range(32))
+    path = tmp_path / "key"
+    path.write_text(base64.b64encode(key).decode())
+
+    async def send(self: httpx.AsyncHTTPTransport, request: httpx.Request) -> httpx.Response:
+        assert request.url.scheme == "http"
+        assert request.url.host == "host.docker.internal"
+        return httpx.Response(
+            200,
+            json={"object": "list", "data": [{"index": 0, "embedding": [1.0, 0.0]}]},
+            request=request,
+        )
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", send)
+
+    config = {
+        "modelName": "bge-m3",
+        "embeddingDimension": 2,
+        "baseUrl": "http://host.docker.internal:11434/v1",
+        "apiKey": "local",
+        "timeoutSeconds": 10,
+    }
+    nonce = bytes([7]) * 12
+    sealed = base64.b64encode(
+        nonce + AESGCM(key).encrypt(nonce, json.dumps(config).encode(), b"rag/embedding-profile/v1")
+    ).decode()
+
+    dataset = Dataset(
+        "local",
+        "test",
+        "bge-m3",
+        2,
+        datetime.now(UTC),
+        encrypted_embedding_profile=sealed,
+    )
+
+    gateway = module.DatasetProfileGateway(path, allow_local_models=True)
+    assert await gateway.for_dataset(dataset).embed(["hello"]) == [(1.0, 0.0)]
+
+
+@pytest.mark.asyncio
+async def test_default_mode_still_uses_public_endpoint_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = bytes(range(32))
+    path = tmp_path / "key"
+    path.write_text(base64.b64encode(key).decode())
+
+    used = []
+
+    def transport() -> httpx.MockTransport:
+        used.append(True)
+        return httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={"object": "list", "data": [{"index": 0, "embedding": [1.0, 0.0]}]},
+                request=request,
+            )
+        )
+
+    monkeypatch.setattr(module, "PublicEndpointTransport", transport)
+
+    config = {
+        "modelName": "test",
+        "embeddingDimension": 2,
+        "baseUrl": "https://model.example/v1",
+        "apiKey": "key",
+        "timeoutSeconds": 10,
+    }
+    nonce = bytes([8]) * 12
+    sealed = base64.b64encode(
+        nonce + AESGCM(key).encrypt(nonce, json.dumps(config).encode(), b"rag/embedding-profile/v1")
+    ).decode()
+
+    dataset = Dataset(
+        "public",
+        "test",
+        "test",
+        2,
+        datetime.now(UTC),
+        encrypted_embedding_profile=sealed,
+    )
+
+    gateway = module.DatasetProfileGateway(path)
+    assert await gateway.for_dataset(dataset).embed(["hello"]) == [(1.0, 0.0)]
+    assert used == [True]

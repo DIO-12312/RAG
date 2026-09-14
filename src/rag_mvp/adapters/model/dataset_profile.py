@@ -81,18 +81,19 @@ class DatasetProfileGateway:
         rerank_profile: str = "",
         rerank_dataset_id: str = "",
         *,
+        allow_local_models: bool = False,
         batch_size: int = 32,
         max_retries: int = 2,
         max_concurrency: int = 4,
     ) -> None:
         self._key_file = key_file
         self._dataset = dataset
+        self._rerank_profile = rerank_profile
+        self._rerank_dataset_id = rerank_dataset_id
+        self._allow_local_models = allow_local_models
         self._batch_size = batch_size
         self._max_retries = max_retries
         self._max_concurrency = max_concurrency
-
-        self._rerank_profile = rerank_profile
-        self._rerank_dataset_id = rerank_dataset_id
 
     def for_rerank(self, encrypted_profile: str, dataset_id: str) -> ModelGateway:
         return DatasetProfileGateway(
@@ -100,6 +101,7 @@ class DatasetProfileGateway:
             self._dataset,
             encrypted_profile,
             dataset_id,
+            allow_local_models=self._allow_local_models,
             batch_size=self._batch_size,
             max_retries=self._max_retries,
             max_concurrency=self._max_concurrency,
@@ -111,6 +113,7 @@ class DatasetProfileGateway:
             dataset,
             self._rerank_profile,
             self._rerank_dataset_id,
+            allow_local_models=self._allow_local_models,
             batch_size=self._batch_size,
             max_retries=self._max_retries,
             max_concurrency=self._max_concurrency,
@@ -150,8 +153,13 @@ class DatasetProfileGateway:
                     "EMBEDDING_PROFILE_INVALID", "embedding snapshot unavailable or invalid"
                 )
             ) from None
+        transport: httpx.AsyncBaseTransport
+        if self._allow_local_models:
+            transport = httpx.AsyncHTTPTransport(retries=0)
+        else:
+            transport = PublicEndpointTransport()
         async with httpx.AsyncClient(
-            transport=PublicEndpointTransport(),
+            transport=transport,
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=timeout,
             follow_redirects=False,

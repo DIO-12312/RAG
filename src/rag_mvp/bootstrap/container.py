@@ -323,6 +323,7 @@ async def _model_resource(settings: Settings) -> ManagedResource[ModelGateway]:
         return ManagedResource(
             DatasetProfileGateway(
                 settings.model_encryption_key_file,
+                allow_local_models=True,
                 batch_size=settings.embedding_batch_size,
                 max_retries=settings.embedding_max_retries,
                 max_concurrency=settings.embedding_max_concurrency,

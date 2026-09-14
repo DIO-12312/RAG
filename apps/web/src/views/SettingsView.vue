@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import {onMounted,ref} from "vue";
-import {getSettings,updateAgentSettings,updateChatSettings,updateEmbeddingSettings,updateRerankSettings} from "@/api/settings";
-import type {SettingsResponse} from "@/api/contracts";
+import {getSettings,testModel,updateAgentSettings,updateChatSettings,updateEmbeddingSettings,updateRerankSettings} from "@/api/settings";
+import type {ModelKind,SettingsResponse} from "@/api/contracts";
 import {useAuthStore} from "@/stores/auth";import {useRouter} from "vue-router";
 import AppIcon from "@/components/AppIcon.vue";
 const auth=useAuthStore();const router=useRouter();const settings=ref<SettingsResponse>();const error=ref("");const notice=ref("");const keys=ref({chat:"",embedding:"",rerank:""});const busy=ref(false);
 const rerankVisible = ref(false);
+const probe=ref<Partial<Record<ModelKind,{ok:boolean;latencyMs:number;detail:string}>>>({});const probing=ref("");
+async function probeModel(kind:ModelKind):Promise<void>{if(probing.value)return;probing.value=kind;const cleared={...probe.value};delete cleared[kind];probe.value=cleared;error.value="";try{probe.value={...probe.value,[kind]:await testModel(kind)};}catch(e){probe.value={...probe.value,[kind]:{ok:false,latencyMs:0,detail:e instanceof Error?e.message:"测试失败"}};}finally{probing.value="";}}
 onMounted(async()=>{try{settings.value=await getSettings();rerankVisible.value=settings.value.rerankEnabled;}catch(e){error.value=e instanceof Error?e.message:"配置加载失败";}});
 async function save(kind:"chat"|"embedding"|"rerank"):Promise<void>{if(!settings.value||busy.value)return;busy.value=true;error.value="";notice.value="";try{let result:SettingsResponse;if(kind==="chat")result=await updateChatSettings({...settings.value.chat,apiKey:keys.value.chat||undefined});else if(kind==="embedding")result=await updateEmbeddingSettings({...settings.value.embedding,apiKey:keys.value.embedding||undefined});else {result=await updateRerankSettings({...settings.value.rerank,apiKey:keys.value.rerank||undefined});settings.value=result;keys.value.rerank="";result=await updateAgentSettings({rerankEnabled:true});}settings.value=result;keys.value[kind]="";notice.value=kind==="rerank"?"Rerank 配置已保存并启用":"已保存";}catch(e){error.value=e instanceof Error?e.message:"保存失败";}finally{busy.value=false;}}
 async function toggleRerank(): Promise<void> {
@@ -82,7 +84,21 @@ async function logout():Promise<void>{try{await auth.logout();await router.push(
           >启用思考模式（需模型支持）</label><button :disabled="busy">
             保存对话模型
           </button>
-        </form>
+        </form><div class="model-probe">
+          <button
+            type="button"
+            class="button-quiet"
+            :disabled="busy||probing!==''||!settings.chat.apiKeyConfigured"
+            @click="probeModel('chat')"
+          >
+            {{ probing==='chat'?'测试中…':'测试连接' }}
+          </button><span v-if="!settings.chat.apiKeyConfigured">保存 API Key 后可测试</span>
+        </div><p
+          v-if="probe.chat"
+          :role="probe.chat.ok?'status':'alert'"
+        >
+          {{ probe.chat.ok?`✓ 连接正常（${probe.chat.latencyMs} ms）：${probe.chat.detail}`:`✗ ${probe.chat.detail}` }}
+        </p>
       </article>
       <article class="settings-card">
         <div class="settings-card-heading">
@@ -120,7 +136,21 @@ async function logout():Promise<void>{try{await auth.logout();await router.push(
           ></label><button :disabled="busy">
             保存 Embedding 配置
           </button>
-        </form>
+        </form><div class="model-probe">
+          <button
+            type="button"
+            class="button-quiet"
+            :disabled="busy||probing!==''||!settings.embedding.apiKeyConfigured"
+            @click="probeModel('embedding')"
+          >
+            {{ probing==='embedding'?'测试中…':'测试连接' }}
+          </button><span v-if="!settings.embedding.apiKeyConfigured">保存 API Key 后可测试</span>
+        </div><p
+          v-if="probe.embedding"
+          :role="probe.embedding.ok?'status':'alert'"
+        >
+          {{ probe.embedding.ok?`✓ 连接正常（${probe.embedding.latencyMs} ms）：${probe.embedding.detail}`:`✗ ${probe.embedding.detail}` }}
+        </p>
       </article>
       <article class="settings-card">
         <div class="settings-card-heading">
@@ -167,7 +197,24 @@ async function logout():Promise<void>{try{await auth.logout();await router.push(
           ></label><button :disabled="busy">
             保存并启用 Rerank
           </button>
-        </form>
+        </form><div
+          v-if="settings.rerank.apiKeyConfigured"
+          class="model-probe"
+        >
+          <button
+            type="button"
+            class="button-quiet"
+            :disabled="busy||probing!==''"
+            @click="probeModel('rerank')"
+          >
+            {{ probing==='rerank'?'测试中…':'测试连接' }}
+          </button>
+        </div><p
+          v-if="probe.rerank"
+          :role="probe.rerank.ok?'status':'alert'"
+        >
+          {{ probe.rerank.ok?`✓ 连接正常（${probe.rerank.latencyMs} ms）：${probe.rerank.detail}`:`✗ ${probe.rerank.detail}` }}
+        </p>
       </article>
     </template><p v-else>
       加载中…

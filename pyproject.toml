@@ -19,12 +19,12 @@ dependencies = [
     "httpx>=0.28.1,<1.0.0",
     "nats-py>=2.11.0,<3.0.0",
     "protobuf>=6.31.0,<7.0.0",
-    "pdfplumber>=0.11.9,<1.0.0",
     "pydantic-settings>=2.10.0,<3.0.0",
     "pypdf>=6.0.0,<7.0.0",
     "SQLAlchemy[asyncio]>=2.0.43,<3.0.0",
     "structlog>=25.4.0,<26.0.0",
     "xxhash>=3.5.0,<4.0.0",
+    "pdfminer-six>=20250506,<20270000",
 ]
 
 [project.scripts]
