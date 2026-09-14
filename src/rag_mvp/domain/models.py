@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from statistics import median
 from types import MappingProxyType
 
 from rag_mvp.domain.enums import (
@@ -272,9 +273,11 @@ class Evidence:
 
 
 def _evidence_display_content(content: str, metadata: Mapping[str, str]) -> str:
-    """Remove only the deterministic CHM/CHI retrieval prefix used by the chunker."""
+    """Return readable citation text without changing indexed retrieval content."""
 
     source_type = metadata.get("source_type")
+    if source_type == "pdf":
+        return _pdf_display_content(content, metadata.get("heading_path", ""))
     expected_labels: tuple[str, ...]
     if source_type == "chm":
         expected_labels = ("Topic", "Heading", "Symbol")
@@ -297,3 +300,63 @@ def _evidence_display_content(content: str, metadata: Mapping[str, str]) -> str:
     ):
         return content
     return body or content
+
+
+def _pdf_display_content(content: str, heading_path: str) -> str:
+    """Repair presentation-only artifacts from positioned PDF text fragments."""
+
+    lines = content.splitlines()
+    first_content = next((index for index, line in enumerate(lines) if line.strip()), None)
+    if first_content is not None and heading_path:
+        normalized_line = " ".join(lines[first_content].split()).casefold()
+        normalized_heading = " ".join(heading_path.split()).casefold()
+        if normalized_line == normalized_heading:
+            del lines[first_content]
+            if first_content < len(lines) and not lines[first_content].strip():
+                del lines[first_content]
+
+    output: list[str] = []
+    index = 0
+    while index < len(lines):
+        cells = _pdf_pipe_cells(lines[index])
+        if cells is None:
+            output.append(lines[index])
+            index += 1
+            continue
+        rows: list[list[str]] = []
+        while index < len(lines):
+            row = _pdf_pipe_cells(lines[index])
+            if row is None:
+                break
+            rows.append(row)
+            index += 1
+        if _looks_like_pdf_table(rows):
+            width = max(len(row) for row in rows)
+            padded = [row + [""] * (width - len(row)) for row in rows]
+            output.append("| " + " | ".join(padded[0]) + " |")
+            output.append("| " + " | ".join("---" for _ in range(width)) + " |")
+            output.extend("| " + " | ".join(row) + " |" for row in padded[1:])
+        else:
+            output.extend(" ".join(cell for cell in row if cell).strip() for row in rows)
+    return "\n".join(output).strip() or content
+
+
+def _pdf_pipe_cells(line: str) -> list[str] | None:
+    stripped = line.strip()
+    if len(stripped) < 2 or not stripped.startswith("|") or not stripped.endswith("|"):
+        return None
+    cells = [cell.strip() for cell in stripped[1:-1].split("|")]
+    return cells if any(cells) else None
+
+
+def _looks_like_pdf_table(rows: list[list[str]]) -> bool:
+    if len(rows) < 2:
+        return False
+    counts = [len(row) for row in rows]
+    cells = [cell for row in rows for cell in row if cell]
+    if min(counts) < 2 or max(counts) - min(counts) > 1 or not cells:
+        return False
+    if max(len(cell) for cell in cells) > 80 or median(len(cell) for cell in cells) > 32:
+        return False
+    prose_punctuation = sum(cell.count("。") + cell.count("；") for cell in cells)
+    return prose_punctuation < len(rows)

@@ -4,6 +4,28 @@
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
 
+### 2026-09-11 Go Agent 多查询证据预算
+
+| 文件 | 用例 / 职责 | 运行边界 |
+|---|---|---|
+| `backend/go-api/internal/agent/agent_test.go` | `TestParallelToolCallsShareEvidenceBudgetWithoutFailing`：模拟模型首轮并行生成 4 个检索子查询、每路由 CHM 邻居扩展返回 20 条结果，验证全局 40 条 evidence 预算按每路 10 条稳定截断，仍能进入最终回答和引用校验 | Go 离线单元测试 |
+
+### 2026-09-11 PDF 来源预览清理
+
+| 文件 | 用例 / 职责 | 运行边界 |
+|---|---|---|
+| `tests/unit/retrieval/test_provenance.py` | `test_pdf_evidence_repairs_false_tables_and_emits_valid_markdown_tables`：验证 PDF 展示文本移除重复标题路径，将误判成表格的正文恢复为连续文本，并为真实二维行补齐合法 Markdown 表头分隔线；索引正文与 chunk ID 不变 | Python 离线单元测试 |
+| `apps/web/tests/markdown-content.spec.ts` | `repairs legacy PDF citation paragraphs and renders stable rows as a table`：验证历史会话中持久化的旧 PDF 引用也会在前端移除长标题前缀和伪表格竖线，并将稳定二维行渲染为现有风格的表格 | Vitest/jsdom，离线产品交互测试 |
+
+### 2026-09-11 PDF 正文顺序与印刷页码
+
+| 文件 | 用例 / 职责 | 运行边界 |
+|---|---|---|
+| `tests/unit/ingestion/test_pdf_deepdoc_parser.py` | `test_deepdoc_pdf_uses_word_coordinates_and_records_printed_page_number`：验证单词坐标抽取保持中英文/接口名的原始阅读顺序，过滤页外幽灵文字，并同时保存内部物理页和页脚印刷页码 | Python 离线单元测试 |
+| `tests/unit/ingestion/test_multiformat_parsers.py` | `test_non_pdf_formats_do_not_fabricate_printed_page_numbers`：验证 TXT、Markdown 和代码只保留各自的行号/符号定位，不伪造 PDF 页脚页码 | Python 离线单元测试 |
+| `tests/unit/ingestion/test_chm_parser.py` | 既有 CHM/CHI 来源测试附加断言：两种格式保持 Topic/HTML 行或关键词来源定位，不写入 PDF 专属页码 | Python 离线单元测试 |
+| `backend/go-api/internal/ragclient/client_test.go` | `TestRetrieveDisplaysPrintedAndPhysicalPDFPages`、`TestRetrieveFallsBackToPhysicalPDFPageWithoutPrintedFooter`：验证产品引用同时展示文档页脚页码和 PDF 物理页码，缺少可信页脚时明确展示物理页码 | Go 离线单元测试 |
+
 ### 2026-09-11 用户级 Rerank
 
 ```text
@@ -32,14 +54,14 @@ apps/web/tests/rerank-settings.spec.ts
 apps/web/tests/
 └─ dataset-delete.spec.ts  # 二次确认、真实 DELETE 请求、列表隐藏与路由返回
 backend/go-api/internal/
-├─ ragclient/client_test.go            # DeleteDataset gRPC 转发及错误响应
+├─ ragclient/client_test.go            # Dataset 删除与 PDF 展示页码的 gRPC 转换
 └─ httpapi/integration_test.go          # 真实产品链路删除、归属隐藏与结果契约
 ```
 
 | 文件 | 用例 / 职责 | 运行边界 |
 |---|---|---|
 | `apps/web/tests/dataset-delete.spec.ts` | `requires confirmation, removes the dataset, and returns to the library`：详情页显示知识库名、文档数和不可恢复提示；确认后调用删除接口、从列表移除并返回知识库页 | Vitest/jsdom + MSW，离线产品交互测试 |
-| `backend/go-api/internal/ragclient/client_test.go` | `TestDeleteDatasetForwardsIdempotentCommand`、`TestDeleteDatasetRejectsBusinessErrorAndMissingResult`：验证 Dataset 作用域、幂等键、清理 Job 返回及异常响应 fail closed | Go 离线单元测试 |
+| `backend/go-api/internal/ragclient/client_test.go` | `TestDeleteDatasetForwardsIdempotentCommand`、`TestDeleteDatasetRejectsBusinessErrorAndMissingResult`：验证 Dataset 作用域、幂等键、清理 Job 返回及异常响应 fail closed；PDF 页码转换职责见上方专项清单 | Go 离线单元测试 |
 | `backend/go-api/internal/httpapi/server_test.go` | `TestUnauthenticatedAndCrossOrigin`：未登录用户不能调用知识库删除路由 | Go 离线 HTTP 测试 |
 | `backend/go-api/internal/httpapi/integration_test.go` | `TestLiveProductFlow` 的删除阶段：真实调用 HTTP → Go → gRPC，验证 `202`、清理 Job、详情 404 与列表即时隐藏 | 显式真实产品集成测试；依赖 MySQL、Python RAG、Worker、ES 和模型配置 |
 
@@ -339,11 +361,13 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_disabled_checkpoint_is_noop_and_cancellation_does_not_hang` | 未启用 checkpoint 无副作用，取消 barrier await 会立即传播。 |
 | `ingestion/test_multiformat_parsers.py` | `test_markdown_parser_preserves_heading_sections_and_lines` | Markdown 保留标题分段及行定位。 |
 | 同上 | `test_code_parser_preserves_language_symbols_and_lines` | 代码保留语言、符号和行定位。 |
+| 同上 | `test_non_pdf_formats_do_not_fabricate_printed_page_numbers` | TXT、Markdown 和代码不得伪造 PDF 页脚页码。 |
 | 同上 | `test_pdf_parser_returns_one_traceable_segment_per_text_page` | 文本 PDF 每页输出可追溯片段。 |
 | 同上 | `test_router_selects_supported_parser` | Router 为各受支持后缀选择正确 parser。 |
 | 同上 | `test_router_rejects_unsupported_source_type` | 不支持的类型返回稳定错误。 |
 | 同上 | `test_pdf_parser_rejects_corrupt_bytes` | 损坏 PDF 返回稳定错误。 |
 | `ingestion/test_pdf_deepdoc_parser.py` | `test_deepdoc_pdf_preserves_heading_bbox_table_and_removes_repeated_margins` | 复杂文本 PDF 恢复标题路径、表格型行和 bbox，删除跨页重复页眉页脚，并避免目录点线条目污染标题层级。 |
+| 同上 | `test_deepdoc_pdf_uses_word_coordinates_and_records_printed_page_number` | 单词坐标抽取保留混排正文，过滤页外幽灵文字，并分离物理页序号与页脚印刷页码。 |
 | 同上 | `test_deepdoc_pdf_uses_ocr_for_a_scanned_page_and_keeps_confidence` | 原生文字不足时只对扫描页调用 OCR，并保留页码、坐标和置信度。 |
 | 同上 | `test_forced_deepdoc_rejects_scanned_pdf_when_ocr_is_unavailable` | 强制 DeepDoc 且缺少 OCR 工具时返回稳定错误，不把空内容伪装成成功。 |
 | 同上 | `test_auto_mode_degrades_to_native_content_without_ocr_tools` | auto 模式缺少 OCR 工具时仍保留已有原生文字。 |

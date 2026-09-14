@@ -9,6 +9,7 @@ import (
 	"rag-mvp/backend/go-api/internal/agent"
 	pb "rag-mvp/backend/go-api/internal/ragpb"
 	"rag-mvp/backend/go-api/internal/security"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -160,8 +161,21 @@ func (c *Client) retrieve(ctx context.Context, dataset, query string, k int, pro
 	for _, h := range r.GetResult().GetEvidence() {
 		loc := []string{}
 		l := h.GetLocator()
-		if l.GetPageNumber() > 0 {
-			loc = append(loc, fmt.Sprintf("第 %d 页", l.GetPageNumber()))
+		metadata := make(map[string]string, len(h.GetMetadata())+1)
+		for key, value := range h.GetMetadata() {
+			metadata[key] = value
+		}
+		printedPageNumber := l.GetMetadata()["printed_page_number"]
+		physicalPageNumber := l.GetPageNumber()
+		if printedPageNumber != "" && physicalPageNumber > 0 {
+			loc = append(loc, fmt.Sprintf("文档第 %s 页（PDF 第 %d 页）", printedPageNumber, physicalPageNumber))
+			metadata["printed_page_number"] = printedPageNumber
+			metadata["physical_page_number"] = strconv.FormatUint(uint64(physicalPageNumber), 10)
+		} else if h.GetMetadata()["source_type"] == "pdf" && physicalPageNumber > 0 {
+			loc = append(loc, fmt.Sprintf("PDF 第 %d 页", physicalPageNumber))
+			metadata["physical_page_number"] = strconv.FormatUint(uint64(physicalPageNumber), 10)
+		} else if physicalPageNumber > 0 {
+			loc = append(loc, fmt.Sprintf("第 %d 页", physicalPageNumber))
 		}
 		if l.GetStartLine() > 0 {
 			loc = append(loc, fmt.Sprintf("L%d–L%d", l.GetStartLine(), l.GetEndLine()))
@@ -174,7 +188,7 @@ func (c *Client) retrieve(ctx context.Context, dataset, query string, k int, pro
 		if content == "" {
 			content = h.GetContentWithWeight()
 		}
-		hits = append(hits, agent.Evidence{ChunkID: h.ChunkId, DocumentID: h.DocumentId, IndexVersion: h.IndexVersion, Content: content, SourceName: h.SourceName, Locator: strings.Join(loc, " · "), Metadata: h.Metadata, Scores: scores})
+		hits = append(hits, agent.Evidence{ChunkID: h.ChunkId, DocumentID: h.DocumentId, IndexVersion: h.IndexVersion, Content: content, SourceName: h.SourceName, Locator: strings.Join(loc, " · "), Metadata: metadata, Scores: scores})
 	}
 	return hits, nil
 }

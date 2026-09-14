@@ -14,6 +14,15 @@ type deleteDatasetRPC struct {
 	result  *pb.DeleteDatasetResponse
 }
 
+type retrieveRPC struct {
+	pb.RagServiceClient
+	result *pb.RetrieveResponse
+}
+
+func (f *retrieveRPC) Retrieve(_ context.Context, _ *pb.RetrieveRequest, _ ...grpc.CallOption) (*pb.RetrieveResponse, error) {
+	return f.result, nil
+}
+
 func (f *deleteDatasetRPC) DeleteDataset(_ context.Context, request *pb.DeleteDatasetRequest, _ ...grpc.CallOption) (*pb.DeleteDatasetResponse, error) {
 	f.request = request
 	return f.result, nil
@@ -47,5 +56,53 @@ func TestDeleteDatasetRejectsBusinessErrorAndMissingResult(t *testing.T) {
 				t.Fatal("invalid response accepted")
 			}
 		})
+	}
+}
+
+func TestRetrieveDisplaysPrintedAndPhysicalPDFPages(t *testing.T) {
+	physicalPage := uint32(282)
+	startLine := uint32(23)
+	endLine := uint32(25)
+	client := &Client{RPC: &retrieveRPC{result: &pb.RetrieveResponse{
+		Outcome: &pb.RetrieveResponse_Result{Result: &pb.RetrieveResult{Evidence: []*pb.Evidence{{
+			ChunkId: "chunk-1", DocumentId: "document-1", IndexVersion: 1,
+			ContentWithWeight: "content", SourceName: "manual.pdf",
+			Locator:  &pb.Locator{PageNumber: &physicalPage, StartLine: &startLine, EndLine: &endLine, Metadata: map[string]string{"printed_page_number": "276"}},
+			Metadata: map[string]string{"source_type": "pdf"}, Scores: &pb.ScoreBreakdown{},
+		}}}},
+	}}}
+
+	hits, err := client.Retrieve(context.Background(), "dataset-1", "query", 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Locator != "文档第 276 页（PDF 第 282 页） · L23–L25" {
+		t.Fatalf("unexpected public locator: %#v", hits)
+	}
+	if hits[0].Metadata["printed_page_number"] != "276" {
+		t.Fatal("printed page number was not preserved in evidence metadata")
+	}
+	if hits[0].Metadata["physical_page_number"] != "282" {
+		t.Fatal("physical page number was not preserved in evidence metadata")
+	}
+}
+
+func TestRetrieveFallsBackToPhysicalPDFPageWithoutPrintedFooter(t *testing.T) {
+	physicalPage := uint32(282)
+	client := &Client{RPC: &retrieveRPC{result: &pb.RetrieveResponse{
+		Outcome: &pb.RetrieveResponse_Result{Result: &pb.RetrieveResult{Evidence: []*pb.Evidence{{
+			ChunkId: "chunk-1", DocumentId: "document-1", IndexVersion: 1,
+			ContentWithWeight: "content", SourceName: "manual.pdf",
+			Locator:  &pb.Locator{PageNumber: &physicalPage},
+			Metadata: map[string]string{"source_type": "pdf"}, Scores: &pb.ScoreBreakdown{},
+		}}}},
+	}}}
+
+	hits, err := client.Retrieve(context.Background(), "dataset-1", "query", 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Locator != "PDF 第 282 页" {
+		t.Fatalf("unexpected physical PDF locator fallback: %#v", hits)
 	}
 }

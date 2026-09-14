@@ -4,6 +4,7 @@ import { getSourceTopic } from '@/api/datasets';
 import type { Citation, SourceTopic } from '@/api/contracts';
 import AppIcon from './AppIcon.vue';
 import MarkdownContent from './MarkdownContent.vue';
+import { formatPdfCitationContent } from '@/utils/pdfCitation';
 
 const props = defineProps<{ citation: Citation; anchor: HTMLElement; expanded: boolean }>();
 const emit = defineEmits<{ expand: []; close: [restoreFocus: boolean]; keepOpen: []; leave: [] }>();
@@ -17,6 +18,7 @@ const sourceLoading = ref(false);
 const sourceError = ref('');
 const showWholeTopic = ref(false);
 let sourceRequest = 0;
+const isPdf = computed(() => props.citation.evidence.metadata?.source_type === 'pdf');
 const canLoadTopic = computed(() => (
   props.citation.evidence.metadata?.source_type === 'chm'
   && Boolean(props.citation.evidence.metadata.topic_path)
@@ -28,6 +30,17 @@ const sourceHeadingPath = computed(() => (
   || props.citation.evidence.metadata?.topic_title
   || props.citation.evidence.locator
   || '引用所在位置'
+));
+const sourceSectionTitle = computed(() => (
+  sourceHeadingPath.value.split(/\s*>\s*/).filter(Boolean).at(-1) || sourceHeadingPath.value
+));
+const citationContent = computed(() => (
+  isPdf.value
+    ? formatPdfCitationContent(
+      props.citation.evidence.content,
+      props.citation.evidence.metadata?.heading_path,
+    )
+    : props.citation.evidence.content
 ));
 function normalizedHeading(value: string): string {
   return value.replace(/\s+/g, ' ').replace(/[：:]$/, '').trim().toLocaleLowerCase();
@@ -51,7 +64,7 @@ function focusedSection(markdown: string): string {
     }
     if (start >= 0) break;
   }
-  if (start < 0) return props.citation.evidence.content;
+  if (start < 0) return citationContent.value;
   let end = lines.length;
   for (let index = start + 1; index < lines.length; index += 1) {
     const match = /^(#{1,6})\s+/.exec(lines[index] ?? '');
@@ -60,10 +73,10 @@ function focusedSection(markdown: string): string {
       break;
     }
   }
-  return lines.slice(start, end).join('\n').trim() || props.citation.evidence.content;
+  return lines.slice(start, end).join('\n').trim() || citationContent.value;
 }
 const focusedSource = computed(() => (
-  sourceTopic.value ? focusedSection(sourceTopic.value.markdown) : props.citation.evidence.content
+  sourceTopic.value ? focusedSection(sourceTopic.value.markdown) : citationContent.value
 ));
 const visibleSource = computed(() => (
   sourceTopic.value && showWholeTopic.value ? sourceTopic.value.markdown : focusedSource.value
@@ -224,6 +237,12 @@ onBeforeUnmount(() => {
             >
               {{ sourceTopic.topicTitle }}
             </p>
+            <p
+              v-else-if="expanded && isPdf"
+              class="citation-topic-title"
+            >
+              {{ sourceSectionTitle }}
+            </p>
           </div>
           <button
             v-if="expanded"
@@ -271,7 +290,7 @@ onBeforeUnmount(() => {
               <small>紫色框内是本次回答实际引用的片段，下方补充该标题所属章节的连续上下文。</small>
               <div class="citation-hit-snippet">
                 <span>本次回答引用片段</span>
-                <MarkdownContent :content="citation.evidence.content" />
+                <MarkdownContent :content="citationContent" />
               </div>
             </div>
             <p
@@ -286,7 +305,7 @@ onBeforeUnmount(() => {
             v-else
             class="citation-original"
           >
-            {{ citation.evidence.content }}
+            {{ citationContent }}
           </p>
         </div>
         <footer class="citation-footer">

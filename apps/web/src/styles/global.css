@@ -129,7 +129,11 @@ details { margin-top: 12px; border: 1px solid var(--border); border-radius: 10px
 .markdown-content pre { overflow-x: auto; white-space: pre; border-radius: 14px; padding: 18px; background: #252534; color: #f1edf9; max-width: 100%; }
 .markdown-content code { font-family: Consolas, monospace; font-size: .88em; background: #eeebf5; padding: .15em .35em; border-radius: 4px; }.markdown-content pre code { padding: 0; background: transparent; }
 .markdown-content blockquote { margin: 1em 0; padding: 2px 16px; border-left: 3px solid #b4a0df; background: #f6f3fa; }
-.markdown-content table { display: block; overflow-x: auto; border-collapse: collapse; max-width: 100%; }.markdown-content th,.markdown-content td { padding: 8px 12px; border: 1px solid #e5dfec; text-align: left; }.markdown-content a { color: #7259ab; text-decoration: underline; }
+.markdown-content { overflow-x: auto; }
+.markdown-content table { width: max-content; min-width: min(100%, 640px); max-width: 100%; margin: 1em 0; border-collapse: separate; border-spacing: 0; border: 1px solid #ded6e8; border-radius: 10px; overflow: hidden; font-size: .92em; }
+.markdown-content th,.markdown-content td { min-width: 120px; max-width: 360px; padding: 9px 12px; border-right: 1px solid #e5dfec; border-bottom: 1px solid #e5dfec; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.markdown-content th { background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; }
+.markdown-content th:last-child,.markdown-content td:last-child { border-right: 0; }.markdown-content tr:last-child td { border-bottom: 0; }.markdown-content a { color: #7259ab; text-decoration: underline; }
 .upload-pickers,.upload-actions { display: flex; flex-wrap: wrap; gap: 12px; }.upload-pickers label { flex: 1 1 220px; text-align: left; }.upload-pickers input { width: 100%; margin-top: 8px; }
 .upload-file-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(200px,1fr)); gap: 12px; width: 100%; max-height: 420px; overflow-y: auto; padding: 4px; text-align: left; }
 .upload-file-card { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; transition: border-color .2s, box-shadow .2s, transform .25s var(--ease-out); animation: rise-in .35s var(--ease-out) both; }

@@ -73,7 +73,7 @@ Python MVP 的唯一入口是 gRPC；本地调试也调用同一 gRPC 服务。P
   → 返回带来源、分数和上下文预算建议的 evidence
 ```
 
-必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java`、PDF、`.chm` 与 `.chi`。PDF 默认使用 `auto` 路由：优先读取原生文字和坐标，原生文字不足的页面才经 Poppler 渲染并使用 Tesseract OCR；输出标题路径、阅读顺序、段落/列表/表格型文本、页码与矩形坐标。OCR 只识别文字，不负责图片语义和公式结构理解。
+必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java`、PDF、`.chm` 与 `.chi`。PDF 默认使用 `auto` 路由：优先以单词级真实边界框恢复原生文字、字体和阅读顺序，丢弃页外定位文字，原生文字不足的页面才经 Poppler 渲染并使用 Tesseract OCR；输出标题路径、阅读顺序、段落/列表/表格型文本、页码与矩形坐标。OCR 只识别文字，不负责图片语义和公式结构理解。PDF `Locator.page_number` 始终保存从 1 开始的物理页序号，用于内部检索、过滤和评测；解析器从页面底部边距识别读者可见的页脚页码，保存为 `Locator.metadata.printed_page_number`。Go 产品层同时展示二者，格式为“文档第 276 页（PDF 第 282 页）”；没有可验证页脚页码时展示“PDF 第 282 页”。Markdown、TXT、代码、CHM 与 CHI 没有 PDF 页脚语义，不得伪造 `printed_page_number`。上述原生抽取和页码规则自 `source-router-v8` 起生效并改变 PDF 规范化正文、Embedding 与 `chunk_id`，旧 PDF 必须重建索引。PDF Evidence 的 `display_content` 是不参与 Embedding 和 `chunk_id` 的展示投影：移除正文前重复的标题路径，将被定位文本块误包围的竖线恢复为普通段落，并只把稳定二维短单元格行补成合法 Markdown 表格。
 
 一个上传的 CHM 对应一个既有 `Document`，不为 Topic 新建数据库 Document。CHM 内每个 HTML Topic 是逻辑子文档和不可跨越的切块硬边界；Topic 内先按 `h1`～`h6` 标题层级形成段落，超长标题段再依次优先选择段落、句子和词法 token 边界，单个不可分 token 才允许按字符硬截断。Topic 顺序优先采用 `.hhc` 目录，未列入目录的 HTML 按规范化路径稳定追加。每个 CHM Chunk 的 `content_with_weight` 必须在正文前稳定加入 `topic_title`、`heading_path` 与 locator `symbol` 上下文，使同一 Topic 的所有分块均可按页面标题、标题路径和接口符号检索；正文切分上限不包含该检索权重前缀。权重文本参与 Embedding、内容摘要和 `chunk_id` 计算，因此修改前缀规则必须提升 parser/chunker 配置版本并重建索引。Chunk 与 Evidence 必须同时保留原 CHM `source_name`，并在 metadata/locator metadata 中返回 `topic_path`、`topic_title`、`topic_order`、`heading_path` 和可选 `anchor`；行号仍表示 Topic 规范化正文中的行范围，不计算检索权重前缀。
 

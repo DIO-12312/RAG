@@ -17,6 +17,7 @@ from statistics import median
 from tempfile import TemporaryDirectory
 from typing import Any, Protocol
 
+import pdfplumber
 from pypdf import PdfReader
 
 from rag_mvp.domain.errors import DomainError, DomainFailure
@@ -28,6 +29,10 @@ _DOT_LEADER = re.compile(r"[.…·]{4,}")
 _TRIVIAL_HEADING = re.compile(r"^(?:[ivxlcdm]+|\d+|task\s+\d+)$", re.IGNORECASE)
 _LIST_PREFIX = re.compile(r"^(?:[-*•]|\d+[.)]|[（(]?[一二三四五六七八九十]+[）)])\s*")
 _SENTENCE_END = re.compile(r"[。！？!?；;.]$")
+_PRINTED_PAGE_NUMBER = re.compile(
+    r"^(?:(?:page|第)\s*)?([0-9]{1,6}|[ivxlcdm]{1,12})(?:\s*页)?$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +167,8 @@ class _PageLayout:
     width: float
     height: float
     lines: tuple[PdfLayoutLine, ...]
+    printed_page_number: str | None = None
+    printed_page_line_orders: frozenset[int] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,7 +222,7 @@ class PdfParser:
                     )
                 )
             if self._mode is PdfParserMode.PLAIN:
-                return self._parse_plain(reader)
+                return self._parse_plain(reader, content)
             return self._parse_structured(source_name, content, reader)
         except DomainError:
             raise
@@ -225,29 +232,42 @@ class PdfParser:
             ) from error
 
     @staticmethod
-    def _parse_plain(reader: PdfReader) -> tuple[ParsedSegment, ...]:
+    def _parse_plain(reader: PdfReader, content: bytes) -> tuple[ParsedSegment, ...]:
         segments: list[ParsedSegment] = []
-        for page_number, page in enumerate(reader.pages, start=1):
-            text = (page.extract_text() or "").replace("\r\n", "\n").replace("\r", "\n")
-            normalized = text.strip()
-            if not normalized:
-                continue
-            segments.append(
-                ParsedSegment(
-                    text=normalized,
-                    locator=Locator(
-                        page_number=page_number,
-                        start_line=1,
-                        end_line=normalized.count("\n") + 1,
-                    ),
-                    metadata={
-                        "source_type": "pdf",
-                        "parser_mode": PdfParserMode.PLAIN.value,
-                        "extraction_method": "native",
-                        "layout_type": "page",
-                    },
+        with pdfplumber.open(BytesIO(content)) as layout_reader:
+            for page_number, (page, layout_page) in enumerate(
+                zip(reader.pages, layout_reader.pages, strict=True), start=1
+            ):
+                text = (page.extract_text() or "").replace("\r\n", "\n").replace("\r", "\n")
+                normalized = text.strip()
+                if not normalized:
+                    continue
+                layout_lines = _extract_native_lines(
+                    layout_page, float(layout_page.width), float(layout_page.height)
                 )
-            )
+                printed_page_number, _ = _printed_page_number(
+                    layout_lines, float(layout_page.height)
+                )
+                locator_metadata = _printed_page_metadata(printed_page_number)
+                metadata = {
+                    "source_type": "pdf",
+                    "parser_mode": PdfParserMode.PLAIN.value,
+                    "extraction_method": "native",
+                    "layout_type": "page",
+                    **locator_metadata,
+                }
+                segments.append(
+                    ParsedSegment(
+                        text=normalized,
+                        locator=Locator(
+                            page_number=page_number,
+                            start_line=1,
+                            end_line=normalized.count("\n") + 1,
+                            metadata=locator_metadata,
+                        ),
+                        metadata=metadata,
+                    )
+                )
         return tuple(segments)
 
     def _parse_structured(
@@ -257,38 +277,43 @@ class PdfParser:
         reader: PdfReader,
     ) -> tuple[ParsedSegment, ...]:
         pages: list[_PageLayout] = []
-        for page_number, page in enumerate(reader.pages, start=1):
-            width = float(page.mediabox.width)
-            height = float(page.mediabox.height)
-            native_lines = _extract_native_lines(page, width, height)
-            native_chars = sum(len(line.text.replace("\t", "")) for line in native_lines)
-            lines = native_lines
-            if native_chars < self._native_text_min_chars:
-                if self._ocr.available():
-                    lines = self._ocr.extract(
-                        content,
-                        page_number=page_number,
-                        page_width=width,
-                        page_height=height,
-                        dpi=self._ocr_dpi,
-                        language=self._ocr_language,
-                        timeout_seconds=self._ocr_timeout_seconds,
-                    )
-                elif self._mode is PdfParserMode.DEEPDOC:
-                    raise DomainError(
-                        DomainFailure(
-                            "PDF_OCR_UNAVAILABLE",
-                            "scanned PDF requires pdftoppm and tesseract",
+        with pdfplumber.open(BytesIO(content)) as layout_reader:
+            for page_number, layout_page in enumerate(layout_reader.pages, start=1):
+                width = float(layout_page.width)
+                height = float(layout_page.height)
+                native_lines = _extract_native_lines(layout_page, width, height)
+                native_chars = sum(len(line.text.replace("\t", "")) for line in native_lines)
+                lines = native_lines
+                if native_chars < self._native_text_min_chars:
+                    if self._ocr.available():
+                        lines = self._ocr.extract(
+                            content,
+                            page_number=page_number,
+                            page_width=width,
+                            page_height=height,
+                            dpi=self._ocr_dpi,
+                            language=self._ocr_language,
+                            timeout_seconds=self._ocr_timeout_seconds,
                         )
+                    elif self._mode is PdfParserMode.DEEPDOC:
+                        raise DomainError(
+                            DomainFailure(
+                                "PDF_OCR_UNAVAILABLE",
+                                "scanned PDF requires pdftoppm and tesseract",
+                            )
+                        )
+                ordered = _order_page_lines(lines, width)
+                printed_page_number, printed_orders = _printed_page_number(ordered, height)
+                pages.append(
+                    _PageLayout(
+                        number=page_number,
+                        width=width,
+                        height=height,
+                        lines=ordered,
+                        printed_page_number=printed_page_number,
+                        printed_page_line_orders=printed_orders,
                     )
-            pages.append(
-                _PageLayout(
-                    number=page_number,
-                    width=width,
-                    height=height,
-                    lines=_order_page_lines(lines, width),
                 )
-            )
 
         repeated = _repeated_margin_keys(
             pages,
@@ -298,28 +323,32 @@ class PdfParser:
         document_title = _document_title(reader, source_name)
         heading_stack: dict[int, str] = {}
         segments: list[ParsedSegment] = []
-        for layout_page in pages:
+        for page_layout in pages:
             body_size = (
-                median(line.font_size for line in layout_page.lines) if layout_page.lines else 1.0
+                median(line.font_size for line in page_layout.lines) if page_layout.lines else 1.0
             )
             visible = tuple(
                 line
-                for line in layout_page.lines
-                if _margin_key(
-                    line,
-                    layout_page.height,
-                    self._margin_ratio,
-                    line_count=len(layout_page.lines),
-                    body_size=body_size,
+                for line in page_layout.lines
+                if line.order not in page_layout.printed_page_line_orders
+                and (
+                    _margin_key(
+                        line,
+                        page_layout.height,
+                        self._margin_ratio,
+                        line_count=len(page_layout.lines),
+                        body_size=body_size,
+                    )
+                    not in repeated
                 )
-                not in repeated
             )
             page_segments, heading_stack = _page_segments(
-                layout_page,
+                page_layout,
                 visible,
                 document_title=document_title,
                 parser_mode=self._mode,
                 heading_stack=heading_stack,
+                printed_page_number=page_layout.printed_page_number,
             )
             segments.extend(page_segments)
         return tuple(segments)
@@ -339,50 +368,37 @@ def _extract_native_lines(
 ) -> tuple[PdfLayoutLine, ...]:
     del page_width
     fragments: list[_TextFragment] = []
-
-    def visit_text(
-        text: str,
-        current_matrix: Sequence[float],
-        text_matrix: Sequence[float],
-        font_dictionary: dict[str, Any] | None,
-        font_size: float,
-    ) -> None:
-        cleaned_lines = [" ".join(line.split()) for line in text.splitlines() if line.strip()]
-        if not cleaned_lines:
-            return
-        size = max(float(font_size or 0.0), 1.0)
-        x, baseline = _transform_point(text_matrix, current_matrix)
-        font_name = str((font_dictionary or {}).get("/BaseFont", "")).casefold()
-        bold = "bold" in font_name or "black" in font_name
-        for offset, cleaned in enumerate(cleaned_lines):
-            top = max(0.0, page_height - baseline - size + offset * size * 1.2)
-            estimated_width = max(size * 0.45 * len(cleaned), size)
-            fragments.append(
-                _TextFragment(
-                    text=cleaned,
-                    x0=max(0.0, x),
-                    top=top,
-                    x1=max(0.0, x) + estimated_width,
-                    bottom=min(page_height, top + size * 1.25),
-                    font_size=size,
-                    bold=bold,
-                )
+    words = page.extract_words(
+        x_tolerance=2,
+        y_tolerance=3,
+        keep_blank_chars=False,
+        use_text_flow=False,
+        extra_attrs=["fontname", "size"],
+    )
+    for word in words:
+        text = " ".join(str(word.get("text", "")).split())
+        if not text:
+            continue
+        x0 = float(word.get("x0", 0.0))
+        x1 = float(word.get("x1", x0))
+        top = float(word.get("top", 0.0))
+        bottom = float(word.get("bottom", top))
+        if x1 <= 0 or x0 >= float(page.width) or bottom <= 0 or top >= page_height:
+            continue
+        size = max(float(word.get("size", 0.0) or 0.0), 1.0)
+        font_name = str(word.get("fontname", "")).casefold()
+        fragments.append(
+            _TextFragment(
+                text=text,
+                x0=max(0.0, x0),
+                top=max(0.0, top),
+                x1=min(float(page.width), x1),
+                bottom=min(page_height, bottom),
+                font_size=size,
+                bold="bold" in font_name or "black" in font_name,
             )
-
-    page.extract_text(visitor_text=visit_text)
+        )
     return _group_fragments(fragments)
-
-
-def _transform_point(
-    text_matrix: Sequence[float], current_matrix: Sequence[float]
-) -> tuple[float, float]:
-    if len(text_matrix) < 6 or len(current_matrix) < 6:
-        return 0.0, 0.0
-    x = text_matrix[4] * current_matrix[0] + text_matrix[5] * current_matrix[2]
-    x += current_matrix[4]
-    y = text_matrix[4] * current_matrix[1] + text_matrix[5] * current_matrix[3]
-    y += current_matrix[5]
-    return float(x), float(y)
 
 
 def _group_fragments(fragments: Iterable[_TextFragment]) -> tuple[PdfLayoutLine, ...]:
@@ -518,6 +534,31 @@ def _margin_key(
     return normalized if len(normalized) <= 160 else ""
 
 
+def _printed_page_number(
+    lines: Sequence[PdfLayoutLine], page_height: float
+) -> tuple[str | None, frozenset[int]]:
+    """Read the human-facing page number printed in the bottom page margin."""
+
+    candidates: list[tuple[float, PdfLayoutLine, str]] = []
+    for line in lines:
+        if line.top < page_height * 0.82:
+            continue
+        normalized = " ".join(line.text.split())
+        match = _PRINTED_PAGE_NUMBER.fullmatch(normalized)
+        if match is not None:
+            candidates.append((line.top, line, match.group(1)))
+    if not candidates:
+        return None, frozenset()
+    _, selected, number = max(candidates, key=lambda item: item[0])
+    return number, frozenset({selected.order})
+
+
+def _printed_page_metadata(printed_page_number: str | None) -> dict[str, str]:
+    if printed_page_number is None:
+        return {}
+    return {"printed_page_number": printed_page_number}
+
+
 def _repeated_margin_keys(
     pages: Sequence[_PageLayout],
     *,
@@ -555,6 +596,7 @@ def _page_segments(
     document_title: str,
     parser_mode: PdfParserMode,
     heading_stack: dict[int, str],
+    printed_page_number: str | None,
 ) -> tuple[tuple[ParsedSegment, ...], dict[int, str]]:
     if not lines:
         return (), dict(heading_stack)
@@ -572,6 +614,7 @@ def _page_segments(
         path = " > ".join(stack[level] for level in sorted(stack))
         text = _block_text(buffered, buffered_type, path)
         confidence_values = [line.confidence for line in buffered if line.confidence is not None]
+        printed_metadata = _printed_page_metadata(printed_page_number)
         metadata = {
             "source_type": "pdf",
             "parser_mode": parser_mode.value,
@@ -581,6 +624,7 @@ def _page_segments(
             "heading_path": path,
             "bbox": _bbox(buffered),
             "coordinate_space": "pdf_points_top_left",
+            **printed_metadata,
         }
         if confidence_values:
             metadata["ocr_confidence"] = f"{sum(confidence_values) / len(confidence_values):.2f}"
@@ -595,6 +639,7 @@ def _page_segments(
                     metadata={
                         "bbox": metadata["bbox"],
                         "coordinate_space": metadata["coordinate_space"],
+                        **printed_metadata,
                     },
                 ),
                 metadata=metadata,

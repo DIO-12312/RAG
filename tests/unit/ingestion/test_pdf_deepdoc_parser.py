@@ -83,6 +83,21 @@ def _blank_pdf() -> bytes:
     return buffer.getvalue()
 
 
+def _fragmented_pdf_with_printed_page() -> bytes:
+    buffer = BytesIO()
+    canvas = Canvas(buffer, pagesize=letter)
+    canvas.setFont("Helvetica-Bold", 12)
+    canvas.drawString(72, 720, "24.3.4 Run")
+    canvas.drawString(150, 720, "DDS")
+    canvas.drawString(178, 720, "application")
+    canvas.setFont("Helvetica", 10)
+    canvas.drawString(72, 690, "Set ZRDDS_HOME before starting the container.")
+    canvas.drawString(292, 20, "276")
+    canvas.drawString(0, -10, "duplicate duplicate duplicate")
+    canvas.save()
+    return buffer.getvalue()
+
+
 @pytest.mark.asyncio
 async def test_deepdoc_pdf_preserves_heading_bbox_table_and_removes_repeated_margins() -> None:
     segments = await PdfParser(
@@ -97,6 +112,11 @@ async def test_deepdoc_pdf_preserves_heading_bbox_table_and_removes_repeated_mar
     assert all("Chapter entry" not in segment.metadata["heading_path"] for segment in segments)
     assert all("Task 3" not in segment.metadata["heading_path"] for segment in segments)
     assert all(segment.locator.page_number in {1, 2, 3} for segment in segments)
+    assert {segment.locator.metadata["printed_page_number"] for segment in segments} == {
+        "1",
+        "2",
+        "3",
+    }
     assert all(segment.metadata["bbox"].startswith("[") for segment in segments)
     assert all(
         segment.locator.metadata["coordinate_space"] == "pdf_points_top_left"
@@ -105,6 +125,22 @@ async def test_deepdoc_pdf_preserves_heading_bbox_table_and_removes_repeated_mar
     tables = [segment for segment in segments if segment.metadata["layout_type"] == "table"]
     assert tables
     assert "| Field | Type | Meaning |" in tables[0].text
+
+
+@pytest.mark.asyncio
+async def test_deepdoc_pdf_uses_word_coordinates_and_records_printed_page_number() -> None:
+    segments = await PdfParser(
+        mode=PdfParserMode.DEEPDOC,
+        native_text_min_chars_per_page=1,
+    ).parse("manual.pdf", _fragmented_pdf_with_printed_page())
+
+    joined = "\n".join(segment.text for segment in segments)
+    assert "Run DDS application" in joined
+    assert "ZRDDS_HOME" in joined
+    assert "duplicate duplicate" not in joined
+    assert all(segment.locator.page_number == 1 for segment in segments)
+    assert all(segment.locator.metadata["printed_page_number"] == "276" for segment in segments)
+    assert all(segment.metadata["printed_page_number"] == "276" for segment in segments)
 
 
 @pytest.mark.asyncio

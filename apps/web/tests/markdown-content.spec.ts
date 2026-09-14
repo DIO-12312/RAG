@@ -75,6 +75,32 @@ it('renders expanded source Markdown safely without turning source numbers into 
   } finally { wrapper.unmount(); }
 });
 
+it('repairs legacy PDF citation paragraphs and renders stable rows as a table', async () => {
+  const heading = '编译后生成工程 > 第5章实体 > 5.3.1 Listener';
+  const content = `${heading}\n\n| Listener 是所有实体的 | DomainParticipant、Topic、Publisher、 |\n| Subscriber、DataWriter、DataReader 都关联特定 Listener，这些 | Listener |\n| 不同类型实体提供不同方法。 | 状态变化时由 ZRDDS 调用。 | extra |\n| 在使用 Listener 时需要实现回调接口函数。 | 回调通知用户。 |\n\n| Listeners | Callback Functions |\n| Topic | on_inconsistent_topic() |`;
+  const pdfCitation = [{ ordinal: 1, evidence: {
+    ...citations[0]!.evidence,
+    sourceName: 'ZRDDS用户手册.pdf',
+    locator: '第 40 页 · L10–L17',
+    content,
+    metadata: { source_type: 'pdf', heading_path: heading, layout_type: 'table' },
+  } }];
+  const wrapper = mount(MarkdownContent, { attachTo: document.body, props: {
+    content: '结论。[1]', citations: pdfCitation,
+  } });
+  try {
+    await wrapper.get('.citation-marker').trigger('click');
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('5.3.1 Listener');
+    expect(dialog.textContent).not.toContain('编译后生成工程 >');
+    expect(dialog.textContent).toContain('Listener 是所有实体的 DomainParticipant');
+    expect(dialog.querySelectorAll('table')).toHaveLength(1);
+    expect(dialog.querySelectorAll('th')).toHaveLength(2);
+    expect(dialog.querySelectorAll('td')).toHaveLength(2);
+    expect(dialog.textContent).not.toContain('| Listener 是所有实体的');
+  } finally { wrapper.unmount(); }
+});
+
 it('loads and renders the complete CHM Topic when the source is expanded', async () => {
   const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
     documentId: 'document-1', sourceName: 'manual.chm', topicPath: 'api/waitset.html',
