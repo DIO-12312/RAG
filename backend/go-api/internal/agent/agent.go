@@ -54,10 +54,18 @@ type Emit func(string, any) error
 type Harness struct {
 	Model     Model
 	Tool      Retriever
+	Registry  *ToolRegistry
 	MaxRounds int
 	TopK      int
 	Budget    *ContextBudget
 	Streaming bool
+}
+
+func (h Harness) ToolRegistry() *ToolRegistry {
+	if h.Registry != nil {
+		return h.Registry
+	}
+	return NewToolRegistry()
 }
 
 var reference = regexp.MustCompile(`\[(\d+)\]`)
@@ -180,25 +188,22 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 			return "", nil, errors.New("too many tool calls")
 		}
 		messages = append(messages, msg)
+		registry := h.ToolRegistry()
 		for _, call := range msg.ToolCalls {
 			if intent.Action == "reuse" {
 				return "", nil, errors.New("transformation must not call retrieval tool")
 			}
-			if call.ID == "" || call.Function.Name != "rag_retrieve" {
-				return "", nil, errors.New("unknown tool")
-			}
-			var args struct {
-				Query string `json:"query"`
-			}
-			if len(call.Function.Arguments) > 8192 || json.Unmarshal([]byte(call.Function.Arguments), &args) != nil || len(args.Query) == 0 || len(args.Query) > 4096 {
-				return "", nil, errors.New("invalid tool arguments")
+
+			query, e := registry.ValidateCall(call)
+			if e != nil {
+				return "", nil, e
 			}
 
 			if intent.Action == "retrieve" && intent.StandaloneQuery != "" {
-				args.Query = intent.StandaloneQuery
+				query = intent.StandaloneQuery
 			}
 
-			hits, e := h.Tool.Retrieve(ctx, dataset, args.Query, top)
+			hits, e := h.Tool.Retrieve(ctx, dataset, query, top)
 			if e != nil {
 				return "", nil, e
 			}

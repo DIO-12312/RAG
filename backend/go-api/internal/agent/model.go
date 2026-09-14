@@ -26,10 +26,23 @@ func (m OpenAI) Complete(ctx context.Context, messages []Message, force bool) (M
 	choice := any("auto")
 	endpoint, _ := url.Parse(m.BaseURL)
 	deepseek := strings.HasPrefix(strings.ToLower(m.Name), "deepseek-") || (endpoint != nil && endpoint.Hostname() == "api.deepseek.com")
+
+	registry := NewToolRegistry()
 	if force && !(deepseek && m.Thinking) {
-		choice = map[string]any{"type": "function", "function": map[string]string{"name": "rag_retrieve"}}
+		choice = map[string]any{
+			"type":     "function",
+			"function": map[string]string{"name": ragRetrieveToolName},
+		}
 	}
-	payload := map[string]any{"model": m.Name, "messages": messages, "stream": false, "tool_choice": choice, "tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "rag_retrieve", "description": "Search the user's selected knowledge base. Returns evidence with citation numbers.", "parameters": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]string{"type": "string"}}, "required": []string{"query"}, "additionalProperties": false}}}}, "max_tokens": 4096}
+
+	payload := map[string]any{
+		"model":       m.Name,
+		"messages":    messages,
+		"stream":      false,
+		"tool_choice": choice,
+		"tools":       registry.OpenAITools(),
+		"max_tokens":  4096,
+	}
 	// Common OpenAI-compatible providers expose this optional extension.
 	if deepseek {
 		mode := "disabled"
