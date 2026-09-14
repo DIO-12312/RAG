@@ -80,17 +80,41 @@ class DatasetProfileGateway:
         dataset: Dataset | None = None,
         rerank_profile: str = "",
         rerank_dataset_id: str = "",
+        *,
+        batch_size: int = 32,
+        max_retries: int = 2,
+        max_concurrency: int = 4,
     ) -> None:
         self._key_file = key_file
         self._dataset = dataset
+        self._batch_size = batch_size
+        self._max_retries = max_retries
+        self._max_concurrency = max_concurrency
+
         self._rerank_profile = rerank_profile
         self._rerank_dataset_id = rerank_dataset_id
 
     def for_rerank(self, encrypted_profile: str, dataset_id: str) -> ModelGateway:
-        return DatasetProfileGateway(self._key_file, self._dataset, encrypted_profile, dataset_id)
+        return DatasetProfileGateway(
+            self._key_file,
+            self._dataset,
+            encrypted_profile,
+            dataset_id,
+            batch_size=self._batch_size,
+            max_retries=self._max_retries,
+            max_concurrency=self._max_concurrency,
+        )
 
     def for_dataset(self, dataset: Dataset) -> ModelGateway:
-        return DatasetProfileGateway(self._key_file, dataset)
+        return DatasetProfileGateway(
+            self._key_file,
+            dataset,
+            self._rerank_profile,
+            self._rerank_dataset_id,
+            batch_size=self._batch_size,
+            max_retries=self._max_retries,
+            max_concurrency=self._max_concurrency,
+        )
 
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
         dataset = self._dataset
@@ -134,7 +158,13 @@ class DatasetProfileGateway:
             trust_env=False,
         ) as client:
             model = OpenAICompatibleModelGateway(
-                client, endpoint, dataset.embedding_model, dataset.embedding_dimension, 32, 2
+                client,
+                endpoint,
+                dataset.embedding_model,
+                dataset.embedding_dimension,
+                self._batch_size,
+                self._max_retries,
+                self._max_concurrency,
             )
             return await model.embed(texts)
 

@@ -26,6 +26,7 @@ class OpenAICompatibleModelGateway:
         dimension: int,
         batch_size: int,
         max_retries: int,
+        max_concurrency: int,
     ) -> None:
         normalized_endpoint = endpoint.strip().rstrip("/")
         if not normalized_endpoint:
@@ -40,6 +41,8 @@ class OpenAICompatibleModelGateway:
             raise ValueError("batch_size must be at least 1")
         if max_retries < 0:
             raise ValueError("max_retries must not be negative")
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency must be at least 1")
 
         self._client = client
         self._endpoint = normalized_endpoint
@@ -47,22 +50,33 @@ class OpenAICompatibleModelGateway:
         self._dimension = dimension
         self._batch_size = batch_size
         self._max_retries = max_retries
+        self._max_concurrency = max_concurrency
 
     # 返回不暴露敏感配置的调试表示。
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(model={self._model!r}, dimension={self._dimension}, "
-            f"batch_size={self._batch_size}, max_retries={self._max_retries})"
+            f"batch_size={self._batch_size}, max_retries={self._max_retries}, "
+            f"max_concurrency={self._max_concurrency})"
         )
 
     # 实现 embed 对应的局部职责。
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
         """Embed inputs in bounded batches while preserving original order."""
 
-        vectors: list[tuple[float, ...]] = []
-        for offset in range(0, len(texts), self._batch_size):
-            vectors.extend(await self._embed_batch(texts[offset : offset + self._batch_size]))
-        return vectors
+        batches = [
+            texts[offset : offset + self._batch_size]
+            for offset in range(0, len(texts), self._batch_size)
+        ]
+        semaphore = asyncio.Semaphore(self._max_concurrency)
+
+        async def embed_bounded(batch: list[str]) -> list[tuple[float, ...]]:
+            async with semaphore:
+                return await self._embed_batch(batch)
+
+        # gather 保持输入 batch 的顺序，因此并发不会改变 Chunk 与向量的对应关系。
+        embedded_batches = await asyncio.gather(*(embed_bounded(batch) for batch in batches))
+        return [vector for batch in embedded_batches for vector in batch]
 
     # 实现 rerank 对应的局部职责。
     async def rerank(self, query: str, passages: list[str]) -> list[float]:

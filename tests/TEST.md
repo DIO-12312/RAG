@@ -313,6 +313,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | `adapters/test_openai_compatible_model.py` | `test_embed_normalizes_url_preserves_batch_order_and_bearer_header` | 规范 endpoint、仅以 Bearer header 鉴权，并对分批乱序响应恢复全局输入顺序。 |
 | 同上 | `test_embed_bisects_provider_rejected_multi_input_batches` | 多输入批次被供应商以 HTTP 400 拒绝时按顺序二分，成功后恢复完整向量顺序。 |
 | 同上 | `test_embed_empty_input_does_not_call_provider` | 空输入直接返回空向量集合，不产生外部请求。 |
+| 同上 | `test_embed_limits_batch_concurrency_and_preserves_order` | 多批向量化按配置限制并发请求数，同时保持向量与原始输入的全局顺序。 |
 | 同上 | `test_embed_rejects_invalid_schema_count_dimension_and_numbers` | 参数化拒绝错误 object/data、数量、重复 index、维度和非有限数值。 |
 | 同上 | `test_auth_failure_is_non_retryable_and_redacts_provider_body` | 401/403 不重试，映射稳定鉴权错误且不泄漏供应商正文或密钥。 |
 | 同上 | `test_embed_does_not_duplicate_existing_embeddings_suffix` | 已带 `/embeddings` 的 endpoint 不被重复拼接。 |

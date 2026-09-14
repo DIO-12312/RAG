@@ -229,7 +229,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 
 | 能力 | MVP 策略 | 默认参数（可配置） |
 |---|---|---|
-| Embedding | OpenAI-compatible `/embeddings` | `batch_size=32`；多输入批次收到 HTTP 400 时按输入顺序二分并重试，单条仍被拒绝则返回 `EMBEDDING_REQUEST_REJECTED`；维度由模型返回后校验并固定 Elasticsearch index mapping。 |
+| Embedding | OpenAI-compatible `/embeddings` | `batch_size=32`、`max_concurrency=4`；一个文档内按有界并发发送批次并保持全局输入顺序。多输入批次收到 HTTP 400 时按输入顺序二分并重试，单条仍被拒绝则返回 `EMBEDDING_REQUEST_REJECTED`；429/5xx 仍执行有限退避重试；维度由模型返回后校验并固定 Elasticsearch index mapping。 |
 | Chunking | 多格式递归切分 | `chunk_size=800` 字符，`overlap=120`；代码按函数/类优先；CHM 固定 Topic/标题硬边界，超长标题段按段落→句子→词法 token 递归切分。 |
 | PDF 解析 | `plain / deepdoc / auto` | 默认 `auto`；每页原生文字少于 40 字符时尝试 `chi_sim+eng`、200 DPI OCR；最多 1000 页；重复页眉页脚在跨页统计后删除。 |
 | Dense 召回 | Cosine KNN | `dense_top_k=20` |
@@ -767,7 +767,7 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 
 PDF 运行参数包括 `plain/deepdoc/auto` 模式、原生文字阈值、OCR 语言、DPI、超时、最大页数和页眉页脚比例；这些参数与 parser 版本共同构成 `parser_fingerprint`，Server 计算上传 digest 与 Worker 实际解析必须使用同一组 Settings。
 
-`Settings` 只从环境变量/`.env` 读取：MySQL DSN、Alembic migration root、对象目录、Elasticsearch URL/索引名/用户名/密码/CA 证书路径、NATS URL/stream/consumer、模型 URL/名称/API Key/声明维度、parser 版本、chunk 大小/重叠、上传上限、`ack_wait`、`max_deliver`、Worker 空闲等待、Outbox 轮询/批量/Finalizer 尝试上限、staging sweep 间隔/TTL、重试退避和日志级别。容器镜像必须复制 Alembic 配置与版本脚本，并由 `rag-migrate` 显式设置 migration root 后执行 `upgrade head`；Search Guard 安全 bootstrap 必须先于 migration 成功，应用角色只能在二者成功后启动。RPC 上传计算 `config_digest` 与 Worker Pipeline 必须使用同一份 parser/chunk/model Settings，禁止入口使用硬编码配置造成去重摘要与真实执行参数不一致。所有循环在超时轮询期间仍必须能被 stop event 立即唤醒。生产容器要求 `EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_MODEL_API_KEY` 与 `EMBEDDING_MODEL_DIMENSION`；维度不得在代码中按供应商写死。API Key、Elasticsearch 密码、证书私钥和管理员客户端证书只存在环境变量、受保护挂载或密钥管理系统，禁止写入 Dataset、Job、日志、trace、镜像或测试 artifact。
+`Settings` 只从环境变量/`.env` 读取：MySQL DSN、Alembic migration root、对象目录、Elasticsearch URL/索引名/用户名/密码/CA 证书路径、NATS URL/stream/consumer、模型 URL/名称/API Key/声明维度、Embedding 批大小/并发上限/超时/重试上限、parser 版本、chunk 大小/重叠、上传上限、`ack_wait`、`max_deliver`、Worker 空闲等待、Outbox 轮询/批量/Finalizer 尝试上限、staging sweep 间隔/TTL、重试退避和日志级别。容器镜像必须复制 Alembic 配置与版本脚本，并由 `rag-migrate` 显式设置 migration root 后执行 `upgrade head`；Search Guard 安全 bootstrap 必须先于 migration 成功，应用角色只能在二者成功后启动。RPC 上传计算 `config_digest` 与 Worker Pipeline 必须使用同一份 parser/chunk/model Settings，禁止入口使用硬编码配置造成去重摘要与真实执行参数不一致。所有循环在超时轮询期间仍必须能被 stop event 立即唤醒。产品模式的 Dataset 加密快照固定供应商 endpoint、模型、维度、密钥和请求超时；批大小、并发与重试上限属于 Worker 运行策略，必须从当前 `Settings` 注入，不得硬编码在 Dataset gateway。生产容器要求 `EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_NAME`、`EMBEDDING_MODEL_API_KEY` 与 `EMBEDDING_MODEL_DIMENSION`；维度不得在代码中按供应商写死。API Key、Elasticsearch 密码、证书私钥和管理员客户端证书只存在环境变量、受保护挂载或密钥管理系统，禁止写入 Dataset、Job、日志、trace、镜像或测试 artifact。
 
 真实模型 integration 和 Docker E2E 被显式选择时，缺少模型配置必须使门禁失败，不得静默 skip 或回退 Fake。Unit、快速 Contract 与 pre-commit 继续使用确定性 Fake，避免将外部网络抖动和费用引入每次提交；Fake 结果仍不能替代真实发布验收。
 

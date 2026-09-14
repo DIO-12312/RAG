@@ -83,6 +83,7 @@ def test_settings_builds_a_normalized_secret_embedding_profile() -> None:
     assert profile.endpoint == "https://model.example/v1/embeddings"
     assert profile.model == "embedding-model"
     assert profile.dimension == 1024
+    assert profile.max_concurrency == 4
     assert profile.api_key.get_secret_value() == api_key
     assert api_key not in repr(settings)
     assert api_key not in repr(profile)

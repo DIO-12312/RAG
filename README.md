@@ -219,7 +219,8 @@ npm --prefix apps/web run build  # 包含 TypeScript 类型检查
 ## 配置与安全
 
 - 从 `.env.example` 创建本地 `.env`；`.env`、API Key、真实用户数据、`data/`、缓存和日志都不得提交。
-- 在网页设置中保存 Chat/Embedding 配置，API Key 加密存储且不回传原文。知识库绑定 Embedding 快照，不能在同一 ES 向量字段中混用维度。
+- 在网页设置中保存 Chat/Embedding/Rerank 配置，API Key 加密存储且不回传原文。知识库绑定 Embedding 快照，不能在同一 ES 向量字段中混用维度。
+- Dataset 的 Embedding 模型和维度在首个 READY Document 后冻结；大文档向量化默认每批 32 个 Chunk、最多 4 批并发，可用 `RAG_EMBEDDING_BATCH_SIZE` 与 `RAG_EMBEDDING_MAX_CONCURRENCY` 按供应商限流能力调整。
 - 产品 MySQL 与 RAG MySQL 分离；`product-keys` 外部卷保存共享加密密钥与 Go 签名密钥，备份数据库时也需保存密钥。不要删除数据卷或密钥卷。
 - 开发 Compose 使用本地对象卷；未来可通过 `ObjectStorage` port 替换为 MinIO 等实现，不改变应用用例。
 - 当前 Compose 使用开发数据库密码和非 Secure Cookie。公网部署需配置 HTTPS、`PRODUCT_COOKIE_SECURE=true`、准确的 `PRODUCT_ORIGIN` 与外部密钥；Python gRPC 50051 不应直接暴露公网。

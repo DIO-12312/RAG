@@ -320,7 +320,14 @@ async def _search_resource(settings: Settings) -> ManagedResource[SearchEngine]:
 # 内部辅助：完成 model_resource 所需的局部转换或校验。
 async def _model_resource(settings: Settings) -> ManagedResource[ModelGateway]:
     if settings.model_encryption_key_file:
-        return ManagedResource(DatasetProfileGateway(settings.model_encryption_key_file))
+        return ManagedResource(
+            DatasetProfileGateway(
+                settings.model_encryption_key_file,
+                batch_size=settings.embedding_batch_size,
+                max_retries=settings.embedding_max_retries,
+                max_concurrency=settings.embedding_max_concurrency,
+            )
+        )
     profile = settings.require_embedding_profile()
     client = httpx.AsyncClient(
         headers={"Authorization": f"Bearer {profile.api_key.get_secret_value()}"},
@@ -333,6 +340,7 @@ async def _model_resource(settings: Settings) -> ManagedResource[ModelGateway]:
         profile.dimension,
         profile.batch_size,
         profile.max_retries,
+        profile.max_concurrency,
     )
     return ManagedResource(model, model.close)
 

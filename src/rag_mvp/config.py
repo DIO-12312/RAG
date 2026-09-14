@@ -35,6 +35,7 @@ class EmbeddingProfile:
     batch_size: int
     timeout_seconds: float
     max_retries: int
+    max_concurrency: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +131,7 @@ class Settings(BaseSettings):
         validation_alias="EMBEDDING_MODEL_DIMENSION",
     )
     embedding_batch_size: int = Field(default=32, ge=1, le=256)
+    embedding_max_concurrency: int = Field(default=4, ge=1, le=32)
     embedding_timeout_seconds: float = Field(default=30.0, gt=0)
     embedding_max_retries: int = Field(default=3, ge=0, le=10)
 
@@ -187,6 +189,7 @@ class Settings(BaseSettings):
             batch_size=self.embedding_batch_size,
             timeout_seconds=self.embedding_timeout_seconds,
             max_retries=self.embedding_max_retries,
+            max_concurrency=self.embedding_max_concurrency,
         )
 
     # 实现 require_elasticsearch_profile 对应的局部职责。
