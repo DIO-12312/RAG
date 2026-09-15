@@ -16,8 +16,10 @@ _OFFICE_REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relatio
 _PACKAGE_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 _PRESENTATION_NS = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
 _MAX_ARCHIVE_FILES = 4096
-_MAX_ARCHIVE_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
-_MAX_ARCHIVE_ENTRY_BYTES = 32 * 1024 * 1024
+# 单条目上限与单文件上限（64 MiB）对齐：合法的 41 MiB 讲稿若含一张大图或一段视频，
+# 不应因为"单条目 32 MiB"这种比入口更严的隐性限制而解析失败。总量与压缩比继续兜底。
+_MAX_ARCHIVE_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
+_MAX_ARCHIVE_ENTRY_BYTES = 64 * 1024 * 1024
 _MAX_COMPRESSION_RATIO = 100
 _MAX_XML_BYTES = 16 * 1024 * 1024
 

@@ -171,3 +171,47 @@ async def test_pdf_parser_rejects_corrupt_bytes() -> None:
         await PdfParser().parse("bad.pdf", b"not a pdf")
 
     assert error.value.failure.code == "INVALID_PDF"
+
+
+def test_pptx_archive_limits_are_aligned_with_the_upload_limit(monkeypatch) -> None:
+    """单条目上限不得比单文件上限更严，否则合法的大讲稿会出现"上传成功但解析失败"。"""
+
+    from rag_mvp.adapters import parsers as parsers_package
+
+    assert parsers_package.pptx._MAX_ARCHIVE_ENTRY_BYTES == 64 * 1024 * 1024
+    assert parsers_package.pptx._MAX_ARCHIVE_UNCOMPRESSED_BYTES == 256 * 1024 * 1024
+    assert parsers_package.pptx._MAX_ARCHIVE_FILES == 4096
+
+
+@pytest.mark.asyncio
+async def test_pptx_parser_rejects_entries_and_totals_beyond_limits(monkeypatch) -> None:
+    """压缩炸弹防护仍然生效：超单条目或超总展开字节一律以 INVALID_PPTX 拒绝。"""
+
+    from rag_mvp.adapters import parsers as parsers_package
+
+    monkeypatch.setattr(parsers_package.pptx, "_MAX_ARCHIVE_ENTRY_BYTES", 1024)
+    with pytest.raises(DomainError) as entry_error:
+        await PptxParser().parse("deck.pptx", _pptx_with_media(b"x" * 4096))
+    assert entry_error.value.failure.code == "INVALID_PPTX"
+
+    monkeypatch.setattr(parsers_package.pptx, "_MAX_ARCHIVE_ENTRY_BYTES", 64 * 1024 * 1024)
+    monkeypatch.setattr(parsers_package.pptx, "_MAX_ARCHIVE_UNCOMPRESSED_BYTES", 2048)
+    with pytest.raises(DomainError) as total_error:
+        await PptxParser().parse("deck.pptx", _pptx_with_media(b"y" * 4096, stored=True))
+    assert total_error.value.failure.code == "INVALID_PPTX"
+
+
+def _pptx_with_media(payload: bytes, stored: bool = False) -> bytes:
+    """在文本讲稿基础上追加一个媒体条目，用于验证归档上限。"""
+
+    from io import BytesIO
+    from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
+
+    base = _text_pptx()
+    buffer = BytesIO()
+    compression = ZIP_STORED if stored else ZIP_DEFLATED
+    with ZipFile(BytesIO(base)) as source, ZipFile(buffer, "w", compression) as target:
+        for info in source.infolist():
+            target.writestr(info, source.read(info))
+        target.writestr("ppt/media/image1.png", payload, compress_type=ZIP_STORED)
+    return buffer.getvalue()

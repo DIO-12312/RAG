@@ -26,7 +26,7 @@
 | `tests/unit/ingestion/test_multiformat_parsers.py::test_non_pdf_formats_do_not_fabricate_printed_page_numbers` | 非 PDF 输入不伪造印刷页码，离线解析测试 |
 | `backend/go-api/internal/ragclient/client_test.go::TestRetrieveDisplaysPrintedAndPhysicalPDFPages`、`TestRetrieveFallsBackToPhysicalPDFPageWithoutPrintedFooter` | 兼容历史双页码 metadata，新结果无印刷页码时回退物理页；离线 Go RPC 替身 |
 
-2026-09-15 PDF 索引回退说明：`source-router-v9` 恢复 CHM3 验证过的 pdfplumber 词级坐标与版面分段路径，同时保留页脚印刷页码、物理页码、OCR、重复页眉页脚过滤和来源 bbox。`tests/unit/ingestion/test_pdf_deepdoc_parser.py` 覆盖标题、表格、OCR、页码与 CHM3 风格分段；Python 离线检查只验证确定性结构，不替代真实 ZRDDS PDF 重新索引后的人工质量验收。
+2026-09-15 PDF 索引回退说明：`source-router-v10`（此前 v9）恢复 CHM3 验证过的 pdfplumber 词级坐标与版面分段路径，同时保留页脚印刷页码、物理页码、OCR、重复页眉页脚过滤和来源 bbox。`tests/unit/ingestion/test_pdf_deepdoc_parser.py` 覆盖标题、表格、OCR、页码与 CHM3 风格分段；Python 离线检查只验证确定性结构，不替代真实 ZRDDS PDF 重新索引后的人工质量验收。
 
 main 中无冲突的展示兼容仍保留：`tests/unit/retrieval/test_provenance.py` 的 `test_pdf_evidence_repairs_false_tables_and_emits_valid_markdown_tables` 与 `apps/web/tests/markdown-content.spec.ts` 的历史 PDF 修复用例验证展示投影；`backend/go-api/internal/ragclient/client_test.go` 的双页码及物理页回退用例验证历史 metadata 兼容；`tests/unit/ingestion/test_multiformat_parsers.py` 与 CHM/CHI 测试继续保证非 PDF 来源不伪造页码。这些均为离线测试，不要求新解析器产出印刷页码。
 
@@ -375,6 +375,8 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_router_selects_supported_parser` | Router 为各受支持后缀选择正确 parser。 |
 | 同上 | `test_router_rejects_unsupported_source_type` | 不支持的类型返回稳定错误。 |
 | 同上 | `test_pdf_parser_rejects_corrupt_bytes` | 损坏 PDF 返回稳定错误。 |
+| 同上 | `test_pptx_archive_limits_are_aligned_with_the_upload_limit` | PPTX 单条目/总量归档上限与单文件上限对齐，避免合法大讲稿出现「上传成功但解析失败」。 |
+| 同上 | `test_pptx_parser_rejects_entries_and_totals_beyond_limits` | 超单条目或超总展开字节的 PPTX 仍以 `INVALID_PPTX` 拒绝，压缩炸弹防护不退化。 |
 | `ingestion/test_pdf_deepdoc_parser.py` | `test_deepdoc_pdf_preserves_heading_bbox_table_and_removes_repeated_margins` | 复杂文本 PDF 恢复标题路径、表格型行和 bbox，删除跨页重复页眉页脚，并避免目录点线条目污染标题层级。 |
 | 同上 | `test_deepdoc_pdf_uses_ocr_for_a_scanned_page_and_keeps_confidence` | 原生文字不足时只对扫描页调用 OCR，并保留页码、坐标和置信度。 |
 | 同上 | `test_forced_deepdoc_rejects_scanned_pdf_when_ocr_is_unavailable` | 强制 DeepDoc 且缺少 OCR 工具时返回稳定错误，不把空内容伪装成成功。 |
