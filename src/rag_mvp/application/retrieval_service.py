@@ -6,7 +6,7 @@ import asyncio
 import re
 from collections.abc import Mapping, Sequence
 from time import perf_counter
-from typing import TypeVar
+from typing import overload
 
 from rag_mvp.application.dto import RetrieveQuery
 from rag_mvp.domain.enums import DatasetStatus
@@ -34,7 +34,7 @@ from rag_mvp.retrieval.provenance import hybrid_evidence, reranked_evidence
 from rag_mvp.retrieval.query_analysis import QueryIntent, analyze_query
 from rag_mvp.retrieval.rerank import RerankedCandidate, apply_rerank_scores
 
-CandidateT = TypeVar("CandidateT", HybridCandidate, RerankedCandidate)
+RetrievalCandidate = HybridCandidate | RerankedCandidate
 
 
 class RetrievalService:
@@ -332,20 +332,38 @@ class RetrievalService:
                     retryable=True,
                 )
             ) from error
-        selected = self._select_diverse_anchors(ranked, query.top_k, intent=intent)
-        return tuple(reranked_evidence(candidate) for candidate in selected)
+        reranked_selected = self._select_diverse_anchors(ranked, query.top_k, intent=intent)
+        return tuple(reranked_evidence(candidate) for candidate in reranked_selected)
 
     @staticmethod
+    @overload
     def _select_diverse_anchors(
-        candidates: Sequence[CandidateT],
+        candidates: Sequence[HybridCandidate],
         top_k: int,
         *,
         intent: QueryIntent,
-    ) -> tuple[CandidateT, ...]:
+    ) -> tuple[HybridCandidate, ...]: ...
+
+    @staticmethod
+    @overload
+    def _select_diverse_anchors(
+        candidates: Sequence[RerankedCandidate],
+        top_k: int,
+        *,
+        intent: QueryIntent,
+    ) -> tuple[RerankedCandidate, ...]: ...
+
+    @staticmethod
+    def _select_diverse_anchors(
+        candidates: Sequence[RetrievalCandidate],
+        top_k: int,
+        *,
+        intent: QueryIntent,
+    ) -> tuple[RetrievalCandidate, ...]:
         """Keep ranking relevance while preventing duplicate CHM topics from crowding sources."""
 
-        unique: list[CandidateT] = []
-        deferred_topics: list[CandidateT] = []
+        unique: list[RetrievalCandidate] = []
+        deferred_topics: list[RetrievalCandidate] = []
         seen_content: set[str] = set()
         seen_topics: set[str] = set()
         for candidate in candidates:
