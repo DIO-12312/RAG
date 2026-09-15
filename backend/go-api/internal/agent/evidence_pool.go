@@ -34,7 +34,9 @@ func (p *EvidencePool) Add(hits []Evidence) ([]Citation, error) {
 			continue
 		}
 		if len(p.items) >= p.limits.MaxEvidence {
-			return nil, fmt.Errorf("evidence budget exceeded: %d", p.limits.MaxEvidence)
+			// Evidence 容量是模型上下文保护边界，不应把一次本可回答的请求
+			// 变成硬失败。保留稳定的前 N 条及其 citation 编号，忽略尾部候选。
+			continue
 		}
 		ordinal := len(p.items) + 1
 		p.ordinals[key] = ordinal
@@ -55,12 +57,15 @@ func (p *EvidencePool) Len() int { return len(p.items) }
 
 // EncodeResult 序列化本轮工具结果，并执行单次工具结果大小预算。
 func (p *EvidencePool) EncodeResult(citations []Citation) ([]byte, error) {
-	body, err := json.Marshal(citations)
-	if err != nil {
-		return nil, errors.New("tool result encode failed")
+	for {
+		body, err := json.Marshal(citations)
+		if err != nil {
+			return nil, errors.New("tool result encode failed")
+		}
+		if len(body) <= p.limits.MaxToolOutputBytes || len(citations) == 0 {
+			return body, nil
+		}
+		// 尾部候选优先级最低；逐条移除直到工具结果可以安全送入模型。
+		citations = citations[:len(citations)-1]
 	}
-	if len(body) > p.limits.MaxToolOutputBytes {
-		return nil, fmt.Errorf("tool output budget exceeded: %d > %d", len(body), p.limits.MaxToolOutputBytes)
-	}
-	return body, nil
 }

@@ -136,8 +136,9 @@ func (h Harness) modelPhase(ctx context.Context, state *RunState, emit Emit) err
 	}
 
 	if err := state.CheckToolCalls(len(msg.ToolCalls)); err != nil {
-		state.MarkFailed(StopReasonBudgetExceeded)
-		return err
+		// 只执行模型给出的前 N 个调用，避免单轮工具数量异常导致整次问答失败。
+		// 同时裁剪写入消息历史的 assistant tool_calls，保持调用与结果严格成对。
+		msg.ToolCalls = append([]ToolCall(nil), msg.ToolCalls[:state.Limits.MaxToolCallsPerRound]...)
 	}
 
 	state.Messages = append(state.Messages, msg)

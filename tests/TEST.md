@@ -15,7 +15,7 @@
 | `backend/go-api/internal/ragclient/client_test.go::TestReindexDocumentForwardsIdempotentCommand`、`TestReindexDocumentRejectsBusinessErrorAndMissingResult` | 验证 Go 控制面正确转发主动重建命令，并对业务错误和缺失结果 fail closed。 |
 | `apps/web/tests/dataset-batch.spec.ts` | 验证单个及批量已索引文档可发起重新索引，并展示已受理数量。 |
 | `apps/web/tests/api-contracts.spec.ts` | 验证前端重新索引路由与 Go API 路径一致。 |
-| `backend/go-api/internal/agent/*_test.go` | 验证模型调用次数仅用于观测而不再硬性终止；查询改写、检索、工具和上下文预算仍然生效，重复查询会收敛到最终回答。 |
+| `backend/go-api/internal/agent/*_test.go` | 验证模型调用次数仅用于观测而不再硬性终止；检索轮次、工具、Evidence 与上下文容量仍有界，但容量耗尽通过截断/压缩收敛而不是把正常问答判为失败；重复查询会收敛到最终回答。 |
 
 ### 2026-09-13 开发环境 Make 入口
 

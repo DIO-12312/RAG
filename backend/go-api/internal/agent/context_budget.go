@@ -142,10 +142,21 @@ func (b ContextBudget) TrimMessages(messages []Message) []Message {
 		groups = groups[1:]
 	}
 
-	// Even the minimum required context does not fit.
-	// Keep the system prompt and current interaction intact; the caller
-	// will return an explicit context-budget error.
-	return append([]Message{messages[0]}, tail...)
+	// 历史已经清空但当前交互仍过大时，优先压缩较早的工具结果。工具调用消息
+	// 仍然保留，因此 provider 所要求的 tool call/result 配对不会被破坏。
+	candidate := append([]Message{messages[0]}, tail...)
+	for i := 1; i < len(candidate); i++ {
+		if candidate[i].Role != "tool" {
+			continue
+		}
+		candidate[i].Content = `{"note":"older tool evidence omitted to fit model context"}`
+		if b.Fits(candidate) {
+			return candidate
+		}
+	}
+
+	// 连系统提示和当前问题都无法容纳时才返回超限，由调用方报告真实上下文错误。
+	return candidate
 }
 
 // DefaultContextBudget 是 Harness 与 SCA 共用的默认消息 token 预算。

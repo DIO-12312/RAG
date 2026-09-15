@@ -50,11 +50,15 @@ func TestEvidencePoolEnforcesBudget(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("budget-sized add failed: %v", err)
 	}
-	if _, err := pool.Add([]Evidence{{DocumentID: "d", IndexVersion: 1, ChunkID: "c"}}); err == nil {
-		t.Fatal("evidence over budget must fail")
+	overflow, err := pool.Add([]Evidence{{DocumentID: "d", IndexVersion: 1, ChunkID: "c"}})
+	if err != nil {
+		t.Fatalf("evidence overflow must converge instead of failing: %v", err)
+	}
+	if len(overflow) != 0 {
+		t.Fatalf("overflow evidence must be omitted: %+v", overflow)
 	}
 	if pool.Len() != 2 {
-		t.Fatalf("failed add must not mutate the pool: %d", pool.Len())
+		t.Fatalf("overflow add must keep the bounded pool: %d", pool.Len())
 	}
 }
 
@@ -79,7 +83,11 @@ func TestEvidencePoolEncodesToolResultWithinBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add failed: %v", err)
 	}
-	if _, err := small.EncodeResult(smallCitations); err == nil {
-		t.Fatal("tool result over budget must fail")
+	body, err = small.EncodeResult(smallCitations)
+	if err != nil {
+		t.Fatalf("tool result overflow must converge instead of failing: %v", err)
+	}
+	if string(body) != "[]" {
+		t.Fatalf("oversized tail citations must be omitted, got %s", body)
 	}
 }
