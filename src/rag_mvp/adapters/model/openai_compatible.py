@@ -34,6 +34,9 @@ _LOGGER = structlog.get_logger("rag_mvp.model")
 # 触发限流后按半数收紧，避免大文档以突发流量反复撞 429。
 _PACING_WINDOW_SECONDS = 60.0
 _MIN_PACING_FRACTION = 16.0
+# 每累计这么多次成功后小幅提高预算：一次限流不该让整篇文档停留在最低速率。
+_PACING_RECOVERY_SUCCESSES = 20
+_PACING_RECOVERY_FACTOR = 1.1
 
 
 class _CharacterPacer:
@@ -45,8 +48,10 @@ class _CharacterPacer:
         clock: Callable[[], float],
         sleep: Callable[[float], Awaitable[None]],
     ) -> None:
+        self._initial = float(limit_per_minute)
         self._limit = float(limit_per_minute)
         self._floor = max(float(limit_per_minute) / _MIN_PACING_FRACTION, 1.0)
+        self._successes = 0
         self._clock = clock
         self._sleep = sleep
         self._window: deque[tuple[float, int]] = deque()
@@ -65,6 +70,16 @@ class _CharacterPacer:
             return 0.0
         self._limit = max(self._limit / 2, self._floor)
         return self._limit
+
+    # 成功后按固定间隔小幅恢复预算，避免一次限流把整篇文档压到最低速率。
+    def succeeded(self) -> None:
+        """Raise the budget slowly after sustained success."""
+
+        if self._limit <= 0 or self._initial <= 0 or self._limit >= self._initial:
+            return
+        self._successes += 1
+        if self._successes % _PACING_RECOVERY_SUCCESSES == 0:
+            self._limit = min(self._limit * _PACING_RECOVERY_FACTOR, self._initial)
 
     # 在预算内为本次请求预留额度；超出时等到最早的一次记录滑出窗口。
     async def reserve(self, chars: int) -> None:
@@ -276,7 +291,9 @@ class OpenAICompatibleModelGateway:
                         retryable=False,
                     )
                 )
-            return self._parse_response(response, len(texts))
+            vectors = self._parse_response(response, len(texts))
+            self._pacer.succeeded()
+            return vectors
 
         raise RuntimeError("embedding retry loop terminated unexpectedly")
 

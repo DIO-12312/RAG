@@ -374,6 +374,21 @@ func (s *Server) jobAction(c *gin.Context) {
 	c.JSON(200, jobDTO(j, r.Name))
 }
 
+// reindexFailure 把重新索引失败映射为可执行的用户提示：未建立索引或源对象缺失时，
+// 用户需要的是「先重试」或「删除后重新上传」，而不是笼统的「暂时无法重新索引」。
+func reindexFailure(err error) (int, string, string) {
+	var business *ragclient.BusinessError
+	if errors.As(err, &business) {
+		switch business.Code {
+		case "DOCUMENT_NOT_INDEXED":
+			return 409, "DOCUMENT_NOT_INDEXED", "该文档尚未成功建立索引：请先重试失败的任务，或删除后重新上传。"
+		case "REINDEX_OBJECT_MISSING":
+			return 409, "REINDEX_OBJECT_MISSING", "该文档的源文件已不可用，请删除后重新上传。"
+		}
+	}
+	return 409, "REINDEX_FAILED", "此文档暂时无法重新索引。"
+}
+
 func (s *Server) reindexDocument(c *gin.Context) {
 	r, ok := s.owned(c, c.Param("id"), "document")
 	if !ok {
@@ -388,7 +403,10 @@ func (s *Server) reindexDocument(c *gin.Context) {
 	defer cancel()
 	j, e := s.RAG.ReindexDocument(ctx, r.ID, uid(c)+"-"+key(c))
 	if e != nil || j == nil {
-		fail(c, 409, "REINDEX_FAILED", "此文档暂时无法重新索引。")
+		// 未建立索引或源对象缺失时，重试/重新上传才是可行路径；
+		// 统一回「暂时无法重新索引」会让用户不知道该做什么。
+		status, code, message := reindexFailure(e)
+		fail(c, status, code, message)
 		return
 	}
 	job := storage.Resource{

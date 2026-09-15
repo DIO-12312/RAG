@@ -411,6 +411,20 @@ class FakeMetadataRepository:
                 document=document,
             )
 
+    async def set_job_progress(self, task_id: str, progress: float, now: datetime) -> bool:
+        """仅推进仍为 RUNNING 且未被取消的 Job 进度。"""
+        async with self._lock:
+            task = self.tasks.get(task_id)
+            if task is None or task.status is not TaskStatus.RUNNING:
+                return False
+            job = self.jobs.get(task.job_id)
+            if job is None or job.status is not JobStatus.RUNNING or job.cancel_requested_at:
+                return False
+            if progress <= job.progress:
+                return False
+            self.jobs[job.id] = replace(job, progress=progress)
+            return True
+
     async def complete_ingestion(
         self, task_id: str, chunks: Sequence[Chunk], now: datetime
     ) -> bool:

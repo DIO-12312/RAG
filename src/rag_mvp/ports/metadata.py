@@ -167,6 +167,9 @@ class MetadataRepository(Protocol):
         self, task_id: str, delivery_sequence: int, now: datetime
     ) -> TaskClaim | None: ...
 
+    # 在 Task 仍为 RUNNING 时推进 Job 进度，让长时间摄取对用户可见。
+    async def set_job_progress(self, task_id: str, progress: float, now: datetime) -> bool: ...
+
     # 条件完成该方法负责的领域数据或基础设施状态。
     async def complete_ingestion(
         self, task_id: str, chunks: Sequence[Chunk], now: datetime

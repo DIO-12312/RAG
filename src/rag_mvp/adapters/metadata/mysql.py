@@ -823,6 +823,29 @@ class MySQLMetadataRepository:
             )
 
     # 条件完成该方法负责的领域数据或基础设施状态。
+    # 只推进 RUNNING 任务的进度，且不回退已有进度：取消或终态后不得再更新。
+    async def set_job_progress(self, task_id: str, progress: float, now: datetime) -> bool:
+        if not 0.0 <= progress <= 1.0:
+            raise ValueError("progress must be between 0 and 1")
+        async with self._session_factory() as session, session.begin():
+            result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    update(JobTable)
+                    .where(
+                        JobTable.id
+                        == select(TaskTable.job_id)
+                        .where(TaskTable.id == task_id)
+                        .scalar_subquery(),
+                        JobTable.status == JobStatus.RUNNING,
+                        JobTable.cancel_requested_at.is_(None),
+                        JobTable.progress < Decimal(str(progress)),
+                    )
+                    .values(progress=Decimal(str(progress)), updated_at=now)
+                ),
+            )
+            return bool(result.rowcount)
+
     async def complete_ingestion(
         self,
         task_id: str,

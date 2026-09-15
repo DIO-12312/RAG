@@ -235,7 +235,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 
 | 能力 | MVP 策略 | 默认参数（可配置） |
 |---|---|---|
-| Embedding | OpenAI-compatible `/embeddings` | `batch_size=20`、`max_concurrency=4`；一个文档内按有界并发发送批次并保持全局输入顺序。默认批次大小按提供方常见上限（20）设定：超限会被 400 拒绝并触发二分，等于把每个批次放大成三次请求。多输入批次收到 HTTP 400 时按输入顺序二分并重试，并从错误文本中学习提供方声明的单请求上限以收紧后续批次；单条仍被拒绝则返回 `EMBEDDING_REQUEST_REJECTED`；429/5xx 执行遵循 `Retry-After` 的有限退避重试，并按 `embedding_max_chars_per_minute`（默认 100 万字符/分钟，0 表示不限制）以字符数近似输入量做滑动窗口节流，被限流后按半数收紧预算，避免大文档以突发流量反复触发配额窗口，额度类错误码（如 `insufficient_quota`）单独返回 `EMBEDDING_QUOTA_EXCEEDED`，避免把额度问题显示成网络故障；维度由模型返回后校验并固定 Elasticsearch index mapping。 |
+| Embedding | OpenAI-compatible `/embeddings` | `batch_size=20`、`max_concurrency=4`；一个文档内按有界并发发送批次并保持全局输入顺序。默认批次大小按提供方常见上限（20）设定：超限会被 400 拒绝并触发二分，等于把每个批次放大成三次请求。多输入批次收到 HTTP 400 时按输入顺序二分并重试，并从错误文本中学习提供方声明的单请求上限以收紧后续批次；单条仍被拒绝则返回 `EMBEDDING_REQUEST_REJECTED`；429/5xx 执行遵循 `Retry-After` 的有限退避重试，并按 `embedding_max_chars_per_minute`（默认 25 万字符/分钟，0 表示不限制）以字符数近似输入量做滑动窗口节流，被限流后按半数收紧预算，避免大文档以突发流量反复触发配额窗口，额度类错误码（如 `insufficient_quota`）单独返回 `EMBEDDING_QUOTA_EXCEEDED`，避免把额度问题显示成网络故障；维度由模型返回后校验并固定 Elasticsearch index mapping。 |
 | Chunking | 多格式递归切分 | `chunk_size=800` 字符，`overlap=120`；代码按函数/类优先；CHM 固定 Topic/标题硬边界，超长标题段按段落→句子→词法 token 递归切分。 |
 | PDF 解析 | `plain / deepdoc / auto` | 默认 `auto`；每页原生文字少于 40 字符时尝试 `chi_sim+eng`、200 DPI OCR；最多 1000 页；重复页眉页脚在跨页统计后删除。 |
 | Dense 召回 | Cosine KNN | `dense_top_k=20` |
@@ -733,6 +733,7 @@ sequenceDiagram
 ```
 
 失败语义：可重试异常发送 `NAK(delay)` 或不 ACK 等待 JetStream 的 `ack_wait` 到期重投；`delay` 必须随投递次数指数增长（`nats_retry_backoff_seconds` 为基数），不得以 0 延迟把可恢复失败立即回队。Worker 在单次投递执行期间必须按 `worker_keepalive_seconds`（小于 `ack_wait`）周期性续约投递，使长耗时文档摄取不会因 `ack_wait` 到期被判定超时并重复投递；未续约的重复投递会让同一文档被反复解析和向量化，在模型限流窗口内把可恢复失败放大为终态失败。Worker 以 `last_delivery_sequence` 条件更新 Task attempt，避免同一 delivery 的并发处理重复计数。Worker 从 delivery metadata 读取投递次数；在最后一次允许投递中，必须先将 Task/Job 标记 `FAILED` 并记录错误，再 ACK，不能依赖 `max_deliver` 自动回写 MySQL。此时若 Document 有正式 `object_key` 且 Job 可重试，关联 IngestionFingerprint 置为 `FAILED_RETRYABLE`；没有正式对象的失败由 Finalizer 置为 `RELEASED`。另订阅 JetStream `MAX_DELIVERIES` advisory，由补偿器扫描并修复遗漏终态。取消在每个阶段 checkpoint 检查；收到已取消任务、或完成事务发现 cancellation/document fence 失配时，Worker 不再写成功而是创建系统版本清理 Job 后 ACK。不支持的文件类型直接 `FAILED` 并写清错误码。Worker 只有确认 MySQL 终态持久化、Elasticsearch 写入完成后才 ACK。
+摄取进度必须由流水线按阶段上报：解析完成 5%，Embedding 期间按已完成 Chunk 数线性推进到 90%，写入索引后 95%，终态由完成事务写为 100%。进度只用于展示，写进度失败不得让摄取失败；进度写入必须带 `Task=RUNNING`、`Job` 未取消与「不回退」三个条件，取消或终态后不得再更新。
 Worker 的每一条 `ingestion_*`/`delivery_*` 事件必须包含可定位字段 `job_id`、`document_id`、`dataset_id`、`index_version`，失败事件还必须携带 `error_code` 与截断后的 `failure_message`；缺少这些字段就无法把一次失败关联回具体文档。关联字段来自条件认领结果（`TaskClaim`），不得只记录全局投递序号。
 
 外部模型调用（Embedding）的重试语义：可重试的 429 必须优先遵循提供方 `Retry-After`（秒数或 HTTP 日期），并叠加有上限的指数退避与抖动；退避基数以秒计（`INITIAL_RETRY_DELAY_SECONDS=1`、上限 `MAX_RETRY_DELAY_SECONDS=30`），0.1 秒级别的退避等同于没有限流保护。某个批次一旦收到 429，同一文档后续并发批次必须共享该节流窗口后再发请求。重试耗尽后的失败信息必须包含提供方 HTTP 状态码与结构化错误码（如 `Throttling.RateQuota`），但不得回显提供方的自由文本、请求正文或凭据。

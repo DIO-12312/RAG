@@ -483,6 +483,46 @@ async def test_pacer_reserves_within_window_and_reports_remaining_wait() -> None
 
 
 @pytest.mark.asyncio
+async def test_pacing_recovers_budget_after_sustained_success() -> None:
+    """持续成功后小幅恢复预算，避免一次限流让整篇文档停在最低速率。"""
+
+    clock = FakeClock()
+    statuses = iter([429] + [200] * 21)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
+        status = next(statuses)
+        if status == 429:
+            return httpx.Response(
+                429,
+                json={"error": {"code": "Throttling.RateQuota", "message": "too many requests"}},
+            )
+        batch = json.loads(request.read())["input"]
+        return httpx.Response(
+            200,
+            json={
+                "object": "list",
+                "data": [{"index": index, "embedding": [1, 2, 3]} for index in range(len(batch))],
+            },
+        )
+
+    client = _client(handler)
+    gateway = _gateway(
+        client, max_retries=1, jitter=lambda: 1.0, clock=clock, max_chars_per_minute=1000
+    )
+    try:
+        await gateway.embed(["a"])
+        assert gateway.pacing_limit == 500.0
+        for _ in range(20):
+            await gateway.embed(["b"])
+    finally:
+        await gateway.close()
+
+    # 20 次成功后按 1.1 倍恢复，但不越过初始预算。
+    assert gateway.pacing_limit == pytest.approx(550.0)
+
+
+@pytest.mark.asyncio
 async def test_throttling_halves_the_pacing_budget() -> None:
     """被限流后收紧每分钟字符预算，避免继续以突发流量重试。"""
 

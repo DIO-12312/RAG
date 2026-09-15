@@ -331,6 +331,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_quota_exhaustion_is_reported_as_quota_not_transport` | 额度类 429 返回 `EMBEDDING_QUOTA_EXCEEDED`，不与地址/网络故障混淆。 |
 | 同上 | `test_pacer_reserves_within_window_and_reports_remaining_wait` | 按字符数限制每分钟输入量，超出预算的批次等待窗口滑出后再发送。 |
 | 同上 | `test_throttling_halves_the_pacing_budget` | 被限流后按半数收紧每分钟字符预算，避免持续突发。 |
+| 同上 | `test_pacing_recovers_budget_after_sustained_success` | 持续成功后小幅恢复每分钟字符预算，避免一次限流把整篇文档压到最低速率。 |
 | 同上 | `test_timeout_exhaustion_maps_to_retryable_unavailable` | 网络超时耗尽重试后映射为可重试 `EMBEDDING_UNAVAILABLE`。 |
 | `application/test_document_service.py` | `test_create_dataset_rejects_runtime_embedding_mismatch` | Dataset 声明的 Embedding 模型或维度与运行配置不一致时返回稳定错误。 |
 | `application/test_cleanup_service.py` | `test_dataset_cleanup_deletes_search_then_objects_then_purges_metadata` | Dataset cleanup 按 ES、对象、MySQL 顺序执行并最终移除完整聚合。 |
@@ -408,6 +409,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_chm_parser_rejects_absolute_topic_path` | 绝对 Topic 路径在进入 HTML 解析前被 fail closed 拒绝。 |
 | 同上 | `test_chmlib_extractor_rejects_non_chm_before_starting_process` | 非 CHM 签名字节在启动外部解包进程前返回稳定 `INVALID_CHM`。 |
 | `ingestion/test_pipeline.py` | `test_pipeline_builds_stable_versioned_chunks_and_upserts_search` | Pipeline 生成稳定的版本化 chunk 并幂等写入检索端。 |
+| 同上 | `test_pipeline_reports_monotonic_progress_during_embedding` | 摄取按解析/Embedding/写索引阶段单调上报进度，长文档不再停在初始进度。 |
 | 同上 | `test_pipeline_collapses_duplicate_chunk_ids_before_embedding` | 同一 Document 内相同逻辑 Chunk 在 Embedding 前稳定折叠，保留首次来源并汇总 PDF 的 page_numbers，验证 Evidence/protobuf metadata 透传且重复执行仍输出相同记录，避免重复向量化及 manifest 唯一键冲突。 |
 | `ingestion/test_recursive_chunker.py` | `test_recursive_chunker_is_stable_bounded_and_overlapping` | 切块边界稳定、长度受限且 overlap 正确。 |
 | 同上 | `test_recursive_chunker_rejects_invalid_overlap` | 非法 overlap 参数被拒绝。 |
@@ -417,6 +419,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | `ingestion/test_text_parser.py` | `test_text_parser_normalizes_bom_and_newlines_with_line_locator` | 规范 BOM/换行并生成行定位。 |
 | 同上 | `test_text_parser_rejects_invalid_utf8_with_stable_error` | 非法 UTF-8 返回稳定错误码。 |
 | `ingestion/test_worker.py` | `test_worker_claims_executes_completes_then_acks` | Worker 的认领、执行、完成、ACK 顺序正确。 |
+| 同上 | `set_job_progress`（MetadataRepository） | 进度写入仅在 Task 仍 RUNNING、Job 未取消且进度不回退时生效；由 pipeline 进度用例与 `tests/fakes/metadata.py` 实现共同覆盖。 |
 | 同上 | `test_worker_returns_false_when_queue_is_empty` | 空队列时 Worker 不执行任务并返回空结果。 |
 | 同上 | `test_worker_naks_retryable_failure_then_fails_at_delivery_limit` | 可重试失败 NAK，达到投递上限后写入失败终态。 |
 | 同上 | `test_retryable_failure_naks_with_growing_backoff_delay` | 可恢复失败按递增延迟重投，不再立即回队冲击限流中的提供方。 |

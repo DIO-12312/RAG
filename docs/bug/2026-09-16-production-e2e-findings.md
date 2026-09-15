@@ -306,3 +306,63 @@ curl -X POST $B/auth/register -d '{"email":"weak-…","password":"87654321"}' �
 - 测试知识库与测试会话已删除，账号回到 2 个知识库
 
 顺带修复的红色门禁（用户 `make test` 失败）：`tests/contract/test_grpc_application_contract.py` 仍期望 `source-router-v9` 摘要，而 `ae73ac0` 已把解析器版本升到 **v10**（实际摘要 `23744eb2…` 正是 v10）；同时 `ruff format --check` 在 `config.py`/`rag_service.py`/`test_job_service.py` 上失败。三者已全部转绿。
+
+## 10. CHM 手册无法入库与目录噪声（2026-09-16 第二轮，用户长线测试）
+
+### 10.1 现象与证据链
+
+以真实用户身份连续追问 ZRDDS 知识库时发现：三份 `.chm` 官方手册（C/CPP/JAVA，1.7–2.6 MB）长期处于 **FAILED**，而它们的 `.chi` 索引文件却显示 INDEXED。用户可见的错误是：
+
+```
+Embedding 服务不可用，请检查模型地址与网络
+```
+
+按顺序定位到的真实原因：
+
+| # | 事实 | 证据 |
+|---|---|---|
+| 1 | Worker 日志**无法定位到文档** | `ingestion_failed … job_id=None document_id=None dataset_id=None`，只能靠时间戳猜 |
+| 2 | 退避基数 0.1 秒、三次重试合计 0.7 秒 | `INITIAL_RETRY_DELAY_SECONDS = 0.1`，`_backoff = 0.1 * 2**attempt` |
+| 3 | 429 不读 `Retry-After`，且一个批次被限流时其余并发批次继续加压 | 代码路径 `if status == 429: backoff` |
+| 4 | `ack_wait=60s` 短于大文档摄取时长，且**从不续约** | 全仓无 `in_progress()` 调用；`last_delivery_sequence` 显示同一 Task 被多次投递 |
+| 5 | 可恢复失败以 **0 延迟**立即回队 | `queue.nak(delivery, delay_seconds=0.0, …)` |
+| 6 | `embedding_batch_size=32` 超过提供方上限 20 | 提供方返回 `400 InvalidParameter: batch size … should not be larger than 20.`，适配器按二分再发，等于每个批次 3 个请求 |
+| 7 | 提供方是**窗口配额**而非纯 QPS | 实测：连续 18 次 20×850 字符请求（约 32 万字符）后开始 `429 insufficient_quota`，约 2.8 秒后恢复；单条请求始终 200 |
+| 8 | 额度问题被显示成网络故障 | 429 的 `insufficient_quota` 一律映射 `EMBEDDING_UNAVAILABLE` |
+
+结论：这不是单一 bug，而是「缺少续约 + 几乎无退避 + 批次超限放大请求数 + 无节流」共同作用，使**任何大文档在该账号下必然失败**。
+
+### 10.2 修复（按提交）
+
+| 提交 | 内容 |
+|---|---|
+| `c5839e2` | 退避基数 1s、上限 30s、抖动；429 遵循 `Retry-After`；429 触发**共享暂停窗口**；失败信息带提供方状态码与错误码 |
+| `59d2d88` | Worker 事件带 `job_id/document_id/dataset_id/index_version` 与截断失败原因；可恢复失败按指数延迟 NAK；摄取期间按 `worker_keepalive_seconds` 续约投递；`TaskQueue` 新增 `in_progress` |
+| `a159cbd` | `embedding_batch_size` 默认 32 → 20；从提供方 400 文本**学习单请求上限**；额度类 429 单独返回 `EMBEDDING_QUOTA_EXCEEDED`，Go 映射为「额度不足或已达限流上限，请检查配额与计费」 |
+| `d3e3b7b` | `embedding_max_chars_per_minute`（默认 100 万字符/分钟）滑动窗口节流；被限流按半数收紧（下限为初始预算的 1/16） |
+| 待提交 | 持续成功后台账式恢复预算（每 20 次成功 ×1.1，不超过初始值），避免一次限流把整篇文档压到最低速率 |
+
+### 10.3 目录噪声（分割策略调整）
+
+问答中出现引用卡片指向 `第 10 章 QoS 策略……… 119` 这类**纯目录行**：它们重复章节标题与页码、没有可核对信息，却占用引用编号与证据额度。ZRDDS 用户手册与故障排查指南分别有 59 与 19 个这样的 Chunk。
+
+- 新增 `domain/textnoise.py`：仅当段落**每一行**都是「文字 + 导引点 + 页码」时判定为目录；正文里的 `...` 与「内存：256M」不受影响（CHM/CHI 实测 0 误判）
+- 切块阶段丢弃目录段落；`parser_version` 提升到 `source-router-v11`，重新索引生成新版本
+- 实测：用户手册 1550 → 1488 Chunk，故障排查指南 415 → 384；CHM/CHI 完全不变
+
+### 10.4 生产复验（部署 `d3e3b7b` 前，含 `59d2d88` 的退避与续约）
+
+- 三份 CHM 全部成功入库：JAVA 40.6s、C 61.0s；CPP 因 `max_user_retries` 已用尽无法重试，按产品正确路径**删除后重新上传**，61.1s 成功 → 11 个文档全部 INDEXED
+- 5 份 PDF 重新索引到 v2（应用 v11 目录过滤），全部 SUCCEEDED
+- 问答质量对比（同一问题）：
+  - 「数据读者怎么等待历史数据接收完成？」修复前答「知识库中没有直接给出…」；修复后给出 `wait_for_historical_data` 的适用条件、参数、返回值与 C/C++/Java 三种签名，并引用三份 CHM
+  - 「域参与者工厂的主要功能有哪些？」修复后直接引用 C 手册「表 4. 域参与者工厂功能描述」
+  - CHI 命中现在会**回指 CHM 正文**（引用落在 `ZRDDS_C_UserManual.chm`），不再是 `CDomain, DDS_DomainParticipantFactory_get_qos` 这样的裸关键词
+  - 「QoS 包含哪些策略」的引用中不再出现目录页（原 `第 II 页 L14–L16`）
+- 节流实测：一次 2578 Chunk 的 CHM 重新索引在触发 3 次 429 后把预算收紧到 12.5 万字符/分钟，此后**不再出现 429**，摄取持续进行（未失败）
+
+### 10.5 仍然存在的产品缺口（未修复，记录备查）
+
+1. **进度不可见**：大文档摄取期间 Job 进度长期停在 1%，用户无法判断是否卡住（本次实测一次摄取 10 分钟以上）。
+2. **失败重试预算用尽后没有界面出口**：FAILED 文档既不能 Retry（预算用尽）也不能 Reindex（未建立索引），只能删除后重新上传；本次已把 Reindex 的错误文案改为可执行提示，但界面仍缺少「删除后重新上传」的引导。
+3. 账号级 Embedding 窗口配额没有在界面上体现，用户只能在任务失败后才看到额度提示。

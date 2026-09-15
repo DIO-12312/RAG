@@ -57,8 +57,13 @@ class IngestionService:
                 index_version=claim.job.index_version,
             )
 
+        async def report(progress: float) -> None:
+            """把流水线阶段进度写回 Job，让长耗时摄取对用户可见。"""
+
+            await self._metadata.set_job_progress(task_id, progress, now)
+
         try:
-            chunks = await self._pipeline.execute(claim)
+            chunks = await self._pipeline.execute(claim, on_progress=report)
         except DomainError as error:
             if not error.failure.retryable:
                 await self._metadata.fail_task(task_id, error.failure, now)
