@@ -13,17 +13,18 @@
 	request_body {
 		max_size 70MB
 	}
-	header {
-		X-Content-Type-Options nosniff
-		X-Frame-Options DENY
-		Referrer-Policy strict-origin-when-cross-origin
-	}
-
 	# Reserved explicit API prefix for external integrations. The Vue client keeps
 	# its existing same-origin root paths, which are handled by the web container.
 	@prefixed_api path /api /api/*
 	handle @prefixed_api {
 		uri strip_prefix /api
+		# 该分支直连 API 容器，不经 web 容器，因此这里补齐基础安全头；
+		# 根路径由 web 容器（nginx）下发，避免同一响应出现重复头。
+		header {
+			X-Content-Type-Options nosniff
+			X-Frame-Options DENY
+			Referrer-Policy strict-origin-when-cross-origin
+		}
 		reverse_proxy api:8080 {
 			flush_interval -1
 		}
