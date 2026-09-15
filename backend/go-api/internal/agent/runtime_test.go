@@ -159,6 +159,52 @@ func TestRuntimeBudgetAndCancellationAreTerminal(t *testing.T) {
 		}
 	})
 
+	t.Run("tool call overflow is truncated instead of failing", func(t *testing.T) {
+		first := Message{}
+		for i := 1; i <= 5; i++ {
+			call := toolCallMessage(fmt.Sprintf("call-%d", i), fmt.Sprintf("q%d", i)).ToolCalls[0]
+			first.ToolCalls = append(first.ToolCalls, call)
+		}
+		model := &scriptedModel{responses: []Message{first, {Content: "answer [1]"}}}
+		tool := &retriever{}
+		limits := DefaultRunLimits()
+		limits.MaxToolCallsPerRound = 2
+		h := Harness{Model: model, Tool: tool, Limits: limits}
+
+		state, err := runScripted(t, h, "question")
+		if err != nil {
+			t.Fatalf("tool call overflow must converge instead of failing: %v", err)
+		}
+		if tool.calls != 2 || state.StopReason != StopReasonCompleted {
+			t.Fatalf("unexpected bounded run: tool=%d state=%+v", tool.calls, state)
+		}
+		assertToolCallsPaired(t, state.Messages)
+	})
+
+	t.Run("evidence overflow keeps the bounded pool and completes", func(t *testing.T) {
+		model := &scriptedModel{responses: []Message{
+			toolCallMessage("call-1", "q1"),
+			toolCallMessage("call-2", "q2"),
+			{Content: "answer [1]"},
+		}}
+		tool := &scriptedRetriever{results: [][]Evidence{
+			{{DocumentID: "d", IndexVersion: 1, ChunkID: "c1", Content: "first"}},
+			{{DocumentID: "d", IndexVersion: 1, ChunkID: "c2", Content: "second"}},
+		}}
+		limits := DefaultRunLimits()
+		limits.MaxEvidence = 1
+		h := Harness{Model: model, Tool: tool, Limits: limits}
+
+		state, err := runScripted(t, h, "question")
+		if err != nil {
+			t.Fatalf("evidence overflow must converge instead of failing: %v", err)
+		}
+		if tool.calls != 2 || state.Pool.Len() != 1 || state.StopReason != StopReasonCompleted {
+			t.Fatalf("unexpected bounded run: tool=%d evidence=%d state=%+v", tool.calls, state.Pool.Len(), state)
+		}
+		assertToolCallsPaired(t, state.Messages)
+	})
+
 	t.Run("retrieval round budget converges instead of failing", func(t *testing.T) {
 		model := &scriptedModel{responses: []Message{
 			toolCallMessage("call-1", "q1"),

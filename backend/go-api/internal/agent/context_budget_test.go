@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -356,12 +357,12 @@ func TestTrimMessagesPreservesToolCallPair(t *testing.T) {
 		{
 			Role:       "tool",
 			ToolCallID: "call-1",
-			Content:    "retrieved evidence",
+			Content:    strings.Repeat("retrieved evidence ", 64),
 		},
 	}
 
 	budget := ContextBudget{
-		MaxTokens:        32,
+		MaxTokens:        48,
 		ReserveTokens:    2,
 		SystemTokens:     2,
 		ToolSchemaTokens: 2,
@@ -392,6 +393,9 @@ func TestTrimMessagesPreservesToolCallPair(t *testing.T) {
 				i, msg.Role, msg.Content, len(msg.ToolCalls), msg.ToolCallID)
 		}
 		t.Fatal("latest user question was not preserved")
+	}
+	if trimmed[len(trimmed)-1].Role != "tool" || !strings.Contains(trimmed[len(trimmed)-1].Content, "omitted") {
+		t.Fatalf("oversized current tool result was not compacted: %+v", trimmed[len(trimmed)-1])
 	}
 
 	if trimmed[len(trimmed)-2].Role != "assistant" ||
