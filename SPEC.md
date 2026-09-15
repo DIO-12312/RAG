@@ -793,6 +793,8 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 
 2026-09-14 产品 Go 的事件与配置契约扩展：Chat SSE 在每次将要调用模型前增加可选 `context` 事件（包括 `modelPhase` 的工具选择轮与 `finalizePhase` 生成最终回答的那一轮，后者必须带检索后的证据数，否则占用告警只会看到检索前的估算），即 `{"event":"context","data":{"estimatedTokens":N,"usableTokens":N,"budgetTokens":N,"evidenceCount":N,"evidenceLimit":N}}`，其中用量由既有的 `ContextBudget.UsedTokens` 估算且 `usableTokens = maxTokens - reserveTokens`；同一 Run 内用量与证据数都不变时不得重复发送。该事件只服务于前端"上下文接近预算"告警，不改变回答、引用、裁剪或停止语义，也不得携带问题原文、Evidence 正文或模型私有推理。设置页新增 `POST /settings/models/:kind/test`（`kind` 为 `chat`/`embedding`/`rerank`）：服务端用已保存配置发起一次最小探测——chat 为不带 `tools` 的单轮补全，embedding 校验返回向量维度与索引维度一致，rerank 按 `/rerank` 协议校验返回条数与结果下标——探测总时长上限 30 秒。未配置 Key 返回 `MODEL_NOT_CONFIGURED`，密钥解密失败返回 `KEY_UNAVAILABLE`，供应商错误以 HTTP 200 加 `{"ok":false,"latencyMs":N,"detail":"..."}` 返回且回显必须截断；API Key 与完整供应商响应不得进入响应体、日志或前端存储。
 
+2026-09-16 产品 Go 的引用编号语义：EvidencePool 仍按「首次加入」分配稳定 ordinal，但 `finalizePhase` 必须按正文中引用首次出现的顺序把被引用项重新编号为连续的 1..n，并同步改写正文里的 `[n]` 标记；禁止只保留被引用项而不重编号，否则会出现 `[1][2][4]` 这类空洞，正文标记与来源卡片编号错位。流式过程中先按原编号呈现、`final` 事件以重编号后的正文覆盖是允许的。
+
 2026-09-16 产品 Go 的聊天入口语义：知识库一个文档都没有时，`POST /chat/stream` 必须直接返回固定说明（无引用、不调用模型、不触发检索），因为空库不可能检索到证据——生产实测空库提问会消耗 7 次模型调用与 5 次检索才回答「无法回答」。判据只取「文档数为 0」，不得把「文档都在处理中或失败」误判为空库。上传入口必须在建立 Job/Document 之前拒绝 0 字节文件（`EMPTY_FILE`），并把 RAG 的 `UPLOAD_TOO_LARGE` 映射为 413 `UPLOAD_TOO_LARGE` 而不是笼统的 502。作业失败原因必须按 RAG 的稳定错误码映射为面向用户的中文说明（未收录的码回退原始 message），前端只在 PENDING/RUNNING 展示进度。
 
 2026-09-16 产品 Go 的会话并发语义：会话 id 由客户端生成，服务端必须把它当作不可信输入。写会话行使用幂等 upsert（`ON DUPLICATE KEY UPDATE`）后按 `(id, user_id)` 读回，读不到即视为该 id 被其他用户占用并返回 404 `NOT_FOUND`，禁止把主键冲突暴露成 5xx——否则并发首条消息与使用他人会话 id 都会得到 503，且响应差异构成跨租户存在性探针。会话的并发运行锁必须按「用户 + 会话」隔离，只按会话 id 加锁会让不同用户互相阻塞。会话行只保存最近一次选择的知识库，历史会话可切换到任一可用知识库继续。

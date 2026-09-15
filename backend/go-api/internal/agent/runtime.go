@@ -407,18 +407,32 @@ func (h Harness) finalizePhase(ctx context.Context, state *RunState, emit Emit) 
 		return errors.New("model did not call retrieval tool")
 	}
 
+	// 引用编号必须连续：候选池按加入顺序分配稳定 ordinal，若只保留被引用项就会出现
+	// [1][2][4] 这类空洞（前端来源卡片与正文标记都按 ordinal 对齐）。这里按「正文首次出现
+	// 的顺序」重新编号 1..n，并把正文中的 [old] 同步改写为 [new]，两者始终一一对应。
 	valid := []Citation{}
 	used := map[int]bool{}
+	renumber := map[int]int{}
 	for _, match := range reference.FindAllStringSubmatch(state.Final.Content, -1) {
 		n, _ := strconv.Atoi(match[1])
 		if n < 1 || n > len(citations) {
 			state.MarkFailed(StopReasonInvalidToolCall)
 			return errors.New("model returned unsupported citation")
 		}
-		if !used[n] {
-			valid = append(valid, citations[n-1])
-			used[n] = true
+		if used[n] {
+			continue
 		}
+		used[n] = true
+		renumber[n] = len(valid) + 1
+		citation := citations[n-1]
+		citation.Ordinal = len(valid) + 1
+		valid = append(valid, citation)
+	}
+	if len(renumber) > 0 {
+		state.Final.Content = reference.ReplaceAllStringFunc(state.Final.Content, func(token string) string {
+			n, _ := strconv.Atoi(token[1 : len(token)-1])
+			return "[" + strconv.Itoa(renumber[n]) + "]"
+		})
 	}
 
 	if state.Final.Content == "" {

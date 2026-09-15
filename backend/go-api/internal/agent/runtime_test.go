@@ -854,3 +854,38 @@ func TestRuntimeReportsContextForFinalAnswerRound(t *testing.T) {
 		t.Fatalf("unexpected stop state: %+v", state)
 	}
 }
+
+// TestFinalizeRenumbersCitationsContiguously 验证正文引用与来源列表编号连续且一一对应：
+// 只保留被引用项而不重编号会产出 [1][2][4] 这类空洞，前端来源卡片与标记会错位。
+func TestFinalizeRenumbersCitationsContiguously(t *testing.T) {
+	citations := []Citation{
+		{Ordinal: 1, Evidence: Evidence{ChunkID: "c1", DocumentID: "d", IndexVersion: 1, Content: "第一段"}},
+		{Ordinal: 2, Evidence: Evidence{ChunkID: "c2", DocumentID: "d", IndexVersion: 1, Content: "第二段"}},
+		{Ordinal: 3, Evidence: Evidence{ChunkID: "c3", DocumentID: "d", IndexVersion: 1, Content: "第三段"}},
+		{Ordinal: 4, Evidence: Evidence{ChunkID: "c4", DocumentID: "d", IndexVersion: 1, Content: "第四段"}},
+	}
+	model := &scriptedModel{responses: []Message{{Content: "先引用第四段 [4]，再引用第二段 [2]，重复一次 [4]。"}}}
+	h := Harness{Model: model, Tool: &retriever{}, Assessor: stubAssessor{decision: SufficiencyDecision{Sufficient: true}}}
+	state := h.newRunState("owned-dataset", "question", nil)
+	state.AnswerNeeded = true
+	state.RetrievalRounds = 1
+	hits := make([]Evidence, 0, len(citations))
+	for _, citation := range citations {
+		hits = append(hits, citation.Evidence)
+	}
+	if _, err := state.Pool.Add(hits); err != nil {
+		t.Fatalf("准备证据池失败: %v", err)
+	}
+	if err := h.finalizePhase(context.Background(), state, func(string, any) error { return nil }); err != nil {
+		t.Fatalf("finalize 失败: %v", err)
+	}
+	if state.Answer != "先引用第四段 [1]，再引用第二段 [2]，重复一次 [1]。" {
+		t.Fatalf("正文引用未按首次出现顺序重编号: %q", state.Answer)
+	}
+	if len(state.Citations) != 2 || state.Citations[0].Ordinal != 1 || state.Citations[1].Ordinal != 2 {
+		t.Fatalf("来源列表编号必须连续: %+v", state.Citations)
+	}
+	if state.Citations[0].Evidence.ChunkID != "c4" || state.Citations[1].Evidence.ChunkID != "c2" {
+		t.Fatalf("编号与证据对应错误: %+v", state.Citations)
+	}
+}
