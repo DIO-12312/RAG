@@ -7,6 +7,7 @@ import math
 import random
 import re
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -29,6 +30,60 @@ _BATCH_LIMIT = re.compile(r"not be larger than\s+(\d+)", re.IGNORECASE)
 _QUOTA_CODES = ("quota", "balance", "arrearage", "insufficient_quota")
 _LOGGER = structlog.get_logger("rag_mvp.model")
 
+# 提供方按时间窗口限制输入量：以字符数近似输入量并按分钟节流，
+# 触发限流后按半数收紧，避免大文档以突发流量反复撞 429。
+_PACING_WINDOW_SECONDS = 60.0
+_MIN_PACING_FRACTION = 16.0
+
+
+class _CharacterPacer:
+    """Limit outgoing input volume per rolling minute, halving it on throttling."""
+
+    def __init__(
+        self,
+        limit_per_minute: int,
+        clock: Callable[[], float],
+        sleep: Callable[[float], Awaitable[None]],
+    ) -> None:
+        self._limit = float(limit_per_minute)
+        self._floor = max(float(limit_per_minute) / _MIN_PACING_FRACTION, 1.0)
+        self._clock = clock
+        self._sleep = sleep
+        self._window: deque[tuple[float, int]] = deque()
+
+    @property
+    def limit(self) -> float:
+        """Return the current per-minute character budget (0 means unlimited)."""
+
+        return self._limit
+
+    # 被限流时按半数收紧，并保证下限，避免退到无法推进的程度。
+    def reduce(self) -> float:
+        """Halve the current budget and return the new one."""
+
+        if self._limit <= 0:
+            return 0.0
+        self._limit = max(self._limit / 2, self._floor)
+        return self._limit
+
+    # 在预算内为本次请求预留额度；超出时等到最早的一次记录滑出窗口。
+    async def reserve(self, chars: int) -> None:
+        """Wait until the rolling window has room for this request."""
+
+        if self._limit <= 0:
+            return
+        while True:
+            now = self._clock()
+            while self._window and now - self._window[0][0] > _PACING_WINDOW_SECONDS:
+                self._window.popleft()
+            used = sum(entry[1] for entry in self._window)
+            # 单次请求本身就超预算时只能放行，否则会永远等待。
+            if used + chars <= self._limit or chars > self._limit:
+                self._window.append((now, chars))
+                return
+            wait = _PACING_WINDOW_SECONDS - (now - self._window[0][0]) + 0.05
+            await self._sleep(min(wait, _PACING_WINDOW_SECONDS))
+
 
 class OpenAICompatibleModelGateway:
     """Call an OpenAI-compatible embedding endpoint without leaking provider details."""
@@ -48,6 +103,7 @@ class OpenAICompatibleModelGateway:
         jitter: Callable[[], float] | None = None,
         sleep: Callable[[float], Awaitable[None]] | None = None,
         monotonic: Callable[[], float] | None = None,
+        max_chars_per_minute: int = 0,
     ) -> None:
         normalized_endpoint = endpoint.strip().rstrip("/")
         if not normalized_endpoint:
@@ -68,6 +124,8 @@ class OpenAICompatibleModelGateway:
             raise ValueError("retry_base_delay_seconds must be positive")
         if retry_max_delay_seconds < retry_base_delay_seconds:
             raise ValueError("retry_max_delay_seconds must not be smaller than the base delay")
+        if max_chars_per_minute < 0:
+            raise ValueError("max_chars_per_minute must not be negative")
 
         self._client = client
         self._endpoint = normalized_endpoint
@@ -86,6 +144,13 @@ class OpenAICompatibleModelGateway:
         self._pause_until = 0.0
         self._pause_lock = asyncio.Lock()
         self._learned_batch_size: int | None = None
+        self._pacer = _CharacterPacer(max_chars_per_minute, self._monotonic, self._sleep)
+
+    @property
+    def pacing_limit(self) -> float:
+        """Return the current per-minute character budget (0 means unlimited)."""
+
+        return self._pacer.limit
 
     # 返回不暴露敏感配置的调试表示。
     def __repr__(self) -> str:
@@ -138,7 +203,9 @@ class OpenAICompatibleModelGateway:
 
     # 内部辅助：完成 embed_batch 所需的局部转换或校验。
     async def _embed_batch(self, texts: list[str]) -> list[tuple[float, ...]]:
+        pending = sum(len(text) for text in texts)
         for attempt in range(self._max_retries + 1):
+            await self._pacer.reserve(pending)
             await self._wait_for_provider_pause()
             try:
                 response = await self._client.post(
@@ -174,6 +241,11 @@ class OpenAICompatibleModelGateway:
                 )
                 if attempt < self._max_retries:
                     if response.status_code == 429:
+                        if self._pacer.limit > 0:
+                            _LOGGER.info(
+                                "embedding_pacing_reduced",
+                                max_chars_per_minute=self._pacer.reduce(),
+                            )
                         await self._pause_all(retry_after)
                     await self._backoff(attempt, retry_after)
                     continue

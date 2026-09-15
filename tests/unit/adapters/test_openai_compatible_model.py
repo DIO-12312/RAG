@@ -33,6 +33,7 @@ def _gateway(
     max_concurrency: int = 2,
     jitter: Callable[[], float] | None = None,
     clock: FakeClock | None = None,
+    max_chars_per_minute: int = 0,
 ) -> OpenAICompatibleModelGateway:
     """构造本测试所需的输入、替身或运行环境。"""
     return OpenAICompatibleModelGateway(
@@ -46,6 +47,7 @@ def _gateway(
         jitter=jitter,
         sleep=clock.sleep if clock else None,
         monotonic=clock.monotonic if clock else None,
+        max_chars_per_minute=max_chars_per_minute,
     )
 
 
@@ -443,6 +445,72 @@ async def test_timeout_exhaustion_maps_to_retryable_unavailable(
     assert error.value.failure.code == "EMBEDDING_UNAVAILABLE"
     assert error.value.failure.retryable is True
     assert SECRET not in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_pacer_reserves_within_window_and_reports_remaining_wait() -> None:
+    """节流按字符数限制每分钟输入量，超预算时等待窗口滑出。"""
+
+    clock = FakeClock()
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
+        nonlocal attempts
+        attempts += 1
+        batch = json.loads(request.read())["input"]
+        return httpx.Response(
+            200,
+            json={
+                "object": "list",
+                "data": [{"index": index, "embedding": [1, 2, 3]} for index in range(len(batch))],
+            },
+        )
+
+    client = _client(handler)
+    gateway = _gateway(
+        client, max_retries=0, jitter=lambda: 1.0, clock=clock, max_chars_per_minute=1000
+    )
+    try:
+        # 两条 500 字符请求刚好占满 1000 字符/分钟的预算，后两条必须等窗口滑出。
+        vectors = await gateway.embed(["a" * 500, "b" * 500, "c" * 500, "d" * 500])
+        assert len(vectors) == 4
+    finally:
+        await gateway.close()
+
+    assert attempts == 2
+    assert clock.sleeps
+
+
+@pytest.mark.asyncio
+async def test_throttling_halves_the_pacing_budget() -> None:
+    """被限流后收紧每分钟字符预算，避免继续以突发流量重试。"""
+
+    clock = FakeClock()
+    statuses = iter((429, 200))
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
+        status = next(statuses)
+        if status == 429:
+            return httpx.Response(
+                429,
+                json={"error": {"code": "Throttling.RateQuota", "message": "too many requests"}},
+            )
+        return httpx.Response(
+            200, json={"object": "list", "data": [{"index": 0, "embedding": [1, 2, 3]}]}
+        )
+
+    client = _client(handler)
+    gateway = _gateway(
+        client, max_retries=1, jitter=lambda: 1.0, clock=clock, max_chars_per_minute=1000
+    )
+    try:
+        assert await gateway.embed(["a"]) == [(1.0, 2.0, 3.0)]
+    finally:
+        await gateway.close()
+
+    assert gateway.pacing_limit == 500.0
 
 
 @pytest.mark.asyncio

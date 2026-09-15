@@ -40,6 +40,7 @@ class EmbeddingProfile:
     timeout_seconds: float
     max_retries: int
     max_concurrency: int
+    max_chars_per_minute: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +141,9 @@ class Settings(BaseSettings):
     )
     embedding_batch_size: int = Field(default=20, ge=1, le=256)
     embedding_max_concurrency: int = Field(default=4, ge=1, le=32)
+    # 提供方按窗口限制输入量：不节流时大文档会以突发流量反复触发 429。
+    # 取值单位为字符/分钟，0 表示不限制；实测该账号窗口容量约 32 万字符/10 秒。
+    embedding_max_chars_per_minute: int = Field(default=1_000_000, ge=0, le=200_000_000)
     embedding_timeout_seconds: float = Field(default=30.0, gt=0)
     embedding_max_retries: int = Field(default=3, ge=0, le=10)
 
@@ -198,6 +202,7 @@ class Settings(BaseSettings):
             timeout_seconds=self.embedding_timeout_seconds,
             max_retries=self.embedding_max_retries,
             max_concurrency=self.embedding_max_concurrency,
+            max_chars_per_minute=self.embedding_max_chars_per_minute,
         )
 
     # 实现 require_elasticsearch_profile 对应的局部职责。

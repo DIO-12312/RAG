@@ -327,6 +327,7 @@ async def _model_resource(settings: Settings) -> ManagedResource[ModelGateway]:
                 batch_size=settings.embedding_batch_size,
                 max_retries=settings.embedding_max_retries,
                 max_concurrency=settings.embedding_max_concurrency,
+                max_chars_per_minute=settings.embedding_max_chars_per_minute,
             )
         )
     profile = settings.require_embedding_profile()
@@ -342,6 +343,7 @@ async def _model_resource(settings: Settings) -> ManagedResource[ModelGateway]:
         profile.batch_size,
         profile.max_retries,
         profile.max_concurrency,
+        max_chars_per_minute=profile.max_chars_per_minute,
     )
     return ManagedResource(model, model.close)
 
