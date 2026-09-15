@@ -376,8 +376,7 @@ class RetrievalService:
         if intent in pdf_intents and top_k >= 3:
             pdf_quota = max(1, (top_k + 2) // 3)
             selected_pdf_count = sum(
-                candidate.chunk.metadata.get("source_type") == "pdf"
-                for candidate in selected
+                candidate.chunk.metadata.get("source_type") == "pdf" for candidate in selected
             )
             selected_ids = {candidate.record_id for candidate in selected}
             missing_pdfs = (
