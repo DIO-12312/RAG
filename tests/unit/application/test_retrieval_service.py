@@ -138,6 +138,7 @@ def _chunk(
         ),
         metadata={
             "team": team,
+            **({"source_type": source_type} if source_type else {}),
             **(
                 {
                     "source_type": source_type or "chm",
@@ -621,7 +622,7 @@ def test_general_query_deduplicates_topics_and_reserves_pdf() -> None:
 
     selected = RetrievalService._select_diverse_anchors(candidates, 3, intent=QueryIntent.GENERAL)
 
-    assert [candidate.record_id for candidate in selected] == ["pdf-overview", "chm-c", "chm-cpp"]
+    assert [candidate.record_id for candidate in selected] == ["chm-c", "pdf-overview", "chm-cpp"]
     assert sum(candidate.chunk.metadata.get("source_type") == "pdf" for candidate in selected) == 1
 
 
@@ -655,3 +656,35 @@ def test_api_query_does_not_force_pdf_ahead_of_chm() -> None:
     selected = RetrievalService._select_diverse_anchors(candidates, 2, intent=QueryIntent.API_USAGE)
 
     assert [candidate.record_id for candidate in selected] == ["api", "pdf"]
+
+
+def test_top_one_general_query_keeps_the_most_relevant_non_pdf() -> None:
+    candidates = (
+        HybridCandidate(
+            "text",
+            "dataset-1",
+            _chunk("text", 1, "txtanchor evidence", chunk_id="text"),
+            1.0,
+            1.0,
+            1.0,
+        ),
+        HybridCandidate(
+            "pdf",
+            "dataset-1",
+            _chunk(
+                "pdf",
+                1,
+                "unrelated pdf",
+                chunk_id="pdf",
+                source_type="pdf",
+                source_name="manual.pdf",
+            ),
+            0.1,
+            0.1,
+            0.1,
+        ),
+    )
+
+    selected = RetrievalService._select_diverse_anchors(candidates, 1, intent=QueryIntent.GENERAL)
+
+    assert [candidate.record_id for candidate in selected] == ["text"]

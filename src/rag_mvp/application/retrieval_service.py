@@ -371,24 +371,36 @@ class RetrievalService:
             QueryIntent.TROUBLESHOOTING,
             QueryIntent.PERFORMANCE_TUNING,
         }
-        selected: list[CandidateT] = []
-        if intent in pdf_intents:
+        pool = [*unique, *deferred_topics]
+        selected = pool[:top_k]
+        if intent in pdf_intents and top_k >= 3:
             pdf_quota = max(1, (top_k + 2) // 3)
-            selected.extend(
-                candidate
-                for candidate in unique
-                if candidate.chunk.metadata.get("source_type") == "pdf"
+            selected_pdf_count = sum(
+                candidate.chunk.metadata.get("source_type") == "pdf"
+                for candidate in selected
             )
-            selected = selected[:pdf_quota]
-
-        selected_ids = {candidate.record_id for candidate in selected}
-        for candidate in (*unique, *deferred_topics):
-            if candidate.record_id in selected_ids:
-                continue
-            selected.append(candidate)
-            selected_ids.add(candidate.record_id)
-            if len(selected) == top_k:
-                break
+            selected_ids = {candidate.record_id for candidate in selected}
+            missing_pdfs = (
+                candidate
+                for candidate in pool[top_k:]
+                if candidate.record_id not in selected_ids
+                and candidate.chunk.metadata.get("source_type") == "pdf"
+            )
+            for pdf_candidate in missing_pdfs:
+                if selected_pdf_count >= pdf_quota:
+                    break
+                replace_at = next(
+                    (
+                        index
+                        for index in range(len(selected) - 1, -1, -1)
+                        if selected[index].chunk.metadata.get("source_type") != "pdf"
+                    ),
+                    None,
+                )
+                if replace_at is None:
+                    break
+                selected[replace_at] = pdf_candidate
+                selected_pdf_count += 1
         return tuple(selected[:top_k])
 
     async def _expand_topic_neighbors(

@@ -347,6 +347,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_vague_dds_query_runs_all_rewrites_through_dense_and_sparse_routes` | 模糊 DDS 问题产生的 2～3 个子查询全部经过 Dense/BM25 召回，并能用规范接口词命中证据。 |
 | 同上 | `test_general_query_deduplicates_topics_and_reserves_pdf` | 概念类查询按内容摘要跨文档去重、限制跨语言重复 Topic，并在存在 PDF 候选时保留叙述型手册证据。 |
 | 同上 | `test_api_query_does_not_force_pdf_ahead_of_chm` | API 查询保持精确 CHM 接口证据优先，不机械套用 PDF 配额。 |
+| 同上 | `test_top_one_general_query_keeps_the_most_relevant_non_pdf` | Top-1 概念查询保持最高相关候选，不因来源覆盖规则被无关 PDF 替换。 |
 | `application/test_source_service.py` | `test_source_service_returns_complete_normalized_topic_as_markdown` | 以 Document、激活版本和安全 Topic 路径从原始 CHM 恢复完整 Topic Markdown。 |
 | 同上 | `test_source_service_rejects_stale_citation_version` | 旧索引版本的引用不得读取当前版本原文，避免来源错配。 |
 | 同上 | `test_source_service_rejects_unsafe_topic_path` | 路径穿越在读取对象前 fail closed。 |
