@@ -97,6 +97,13 @@ Content-Type: application/json
 
 ### 主机重启后恢复
 
+生产 Compose 的 `edge`/`egress`/`backend` 三个网络都必须固定子网（172.19/172.20/172.21）。
+只给 `edge` 固定时，先创建的 `egress`/`backend` 会被自动分配到 `172.19.0.0/16`，随后 `edge`
+因网段重叠创建失败，`boot-start.sh`（容器全停后的唯一恢复入口）会停在「4/5 产品 API 与前端」。
+实测处置：删除残留网络后预建 `rag-production_edge --subnet 172.19.0.0/16`（带
+`com.docker.compose.project=rag-production`、`com.docker.compose.network=edge` 标签）再恢复；
+根治办法是三个网络都固定子网（已由 contract 测试固定）。
+
 非计划重启（OOM、内核升级、云厂商维护）后容器不会自动回到运行态，且 `make production-run` 会重新构建镜像、`make production-deploy` 需要 GitHub 触发。恢复入口是 `deploy/production/boot-start.sh`：它读取 `/var/lib/rag-deploy/active.json` 指向的已渲染 Compose 配置，按「基础设施 → 一次性初始化 → 摄取检索 → API/前端 → Caddy」顺序拉起服务，不构建、不迁移、不删除任何卷，也不修改发布记录。
 
 本仓库提供 `deploy/production/rag-production.service`（`Type=oneshot`、`RemainAfterExit=yes`）在开机时调用同一脚本：

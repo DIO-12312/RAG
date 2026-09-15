@@ -4,6 +4,8 @@
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
 
+| `tests/contract/test_build_entrypoints.py::test_production_compose_pins_every_network_subnet` | 生产 Compose 的 edge/egress/backend 三个网络都必须固定子网且互不重复，backend 保持 internal；同时固定恢复入口 boot-start.sh 的 `--pull never` 与发布记录依赖，避免容器全停后恢复因网段重叠失败。 |
+
 ### 2026-09-16 演示文稿截图文字进入检索
 
 | 文件 / 用例 | 职责与运行边界 |

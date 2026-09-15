@@ -466,3 +466,29 @@ def test_web_restart_only_rebuilds_web_through_earthly(tmp_path: Path) -> None:
             "web",
         ],
     ]
+
+
+def test_production_compose_pins_every_network_subnet() -> None:
+    """生产栈的每个网络都必须固定子网，否则恢复入口会因网段重叠失败。
+
+    只给 `edge` 写固定 IPAM 时，Docker 会按创建顺序把 172.19.0.0/16 先分配给
+    `egress`/`backend`，随后 `edge` 创建失败；`deploy/production/boot-start.sh`
+    正是「容器全停后按发布记录恢复」的唯一入口，因此必须保证恢复可重复。
+    """
+
+    production = yaml.safe_load(_text("compose.production.yml"))
+    networks = production["networks"]
+    assert set(networks) == {"edge", "egress", "backend"}
+    subnets = {}
+    for name, definition in networks.items():
+        config = (definition or {}).get("ipam", {}).get("config", [])
+        assert config, f"{name} 必须固定子网"
+        subnet = config[0].get("subnet")
+        assert re.fullmatch(r"\d+\.\d+\.0\.0/16", str(subnet)), f"{name} 子网格式异常：{subnet}"
+        subnets[name] = subnet
+    assert len(set(subnets.values())) == len(subnets), f"子网重复：{subnets}"
+    assert networks["backend"]["internal"] is True
+    # 恢复入口按固定顺序拉起，不得依赖自动分配
+    boot = _text("deploy/production/boot-start.sh")
+    assert "--pull never" in boot
+    assert "active.json" in boot

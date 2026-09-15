@@ -362,13 +362,22 @@ services:
     restart: unless-stopped
 
 networks:
+  # 三个网络都必须固定子网：只给 edge 固定时，先创建的 egress/backend
+  # 会被自动分配到 172.19.0.0/16，随后 edge 因网段重叠创建失败，
+  # 于是「容器全停后按发布记录恢复」（boot-start.sh）必然失败。
   edge:
     ipam:
       config:
         - subnet: 172.19.0.0/16
-  egress: {}
+  egress:
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
   backend:
     internal: true
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
 
 volumes:
   rag-mysql-data: {}
