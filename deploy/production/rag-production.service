@@ -1,0 +1,18 @@
+[Unit]
+Description=RAG production stack (restore the active release after boot)
+Documentation=file:/data/RAG/docs/deployment-production.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/data/RAG
+ExecStart=/data/RAG/deploy/production/boot-start.sh
+TimeoutStartSec=900
+# 恢复过程只启动既有容器，不需要也不会构建镜像。
+Environment=RAG_DEPLOY_STATE=/var/lib/rag-deploy
+
+[Install]
+WantedBy=multi-user.target

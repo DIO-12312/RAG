@@ -331,7 +331,11 @@ services:
 
   web:
     image: ${WEB_IMAGE:?set WEB_IMAGE in .env.production}
-    build: apps/web
+    build:
+      context: apps/web
+      # 页面侧栏的版本徽标来自该构建参数；缺失会显示 unknown，无法确认线上是哪次提交。
+      args:
+        VITE_GIT_COMMIT: ${VITE_GIT_COMMIT:-unknown}
     depends_on:
       api: {condition: service_healthy}
     networks: [edge]

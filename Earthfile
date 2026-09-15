@@ -187,7 +187,8 @@ production-run:
     RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml config --quiet
     RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml build production-material-check
     RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml run --pull never --rm --no-deps production-material-check
-    RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml up -d --build --scale caddy=0 --remove-orphans --wait --wait-timeout 300
+    # 手工重建也要把提交编入前端产物，否则侧栏版本徽标显示 unknown。
+    RUN VITE_GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)" docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml up -d --build --scale caddy=0 --remove-orphans --wait --wait-timeout 300
     RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml exec -T api wget -q -O - http://127.0.0.1:8080/readyz
     RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml exec -T api wget -q -O - http://web/healthz
     RUN docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml up -d --no-deps --scale caddy=1 --wait --wait-timeout 120 caddy

@@ -95,4 +95,18 @@ Content-Type: application/json
 
 升级前：创建并验证 ES snapshot，记录当前镜像 digest，暂停写入、禁用 shard allocation、停止服务并备份数据卷。用新镜像和外部材料启动一个新的受保护 ES 目标卷或集群，完成 Search Guard bootstrap 后 restore 已确认 snapshot；核对预期索引、文档计数和一次 RAG 检索，才恢复 allocation 和全部业务服务。
 
+### 主机重启后恢复
+
+非计划重启（OOM、内核升级、云厂商维护）后容器不会自动回到运行态，且 `make production-run` 会重新构建镜像、`make production-deploy` 需要 GitHub 触发。恢复入口是 `deploy/production/boot-start.sh`：它读取 `/var/lib/rag-deploy/active.json` 指向的已渲染 Compose 配置，按「基础设施 → 一次性初始化 → 摄取检索 → API/前端 → Caddy」顺序拉起服务，不构建、不迁移、不删除任何卷，也不修改发布记录。
+
+本仓库提供 `deploy/production/rag-production.service`（`Type=oneshot`、`RemainAfterExit=yes`）在开机时调用同一脚本：
+
+```bash
+install -m 0644 deploy/production/rag-production.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now rag-production.service
+systemctl status rag-production.service   # ExecMainStatus=0 表示恢复成功
+```
+
+注意两点：恢复使用的是**发布记录里的镜像 digest**，因此如果线上此前是手工构建的镜像（未走 `release.py publish`），恢复会把服务带回记录版本；出现这种情况应重新执行一次正式发布，而不是继续手工重建。另外前端侧栏的版本徽标由 `VITE_GIT_COMMIT` 构建参数决定，缺失时会显示 `unknown`；手工 `make production-run` 已在 Earthfile 中注入当前提交，正式发布由 `release.py publish` 注入。
+
 回滚仅使用上一个不可变镜像与已验证 snapshot/数据库备份，并继续保持 Caddy 为唯一公网入口。禁止执行 `docker compose down -v`；它会破坏可恢复数据。若怀疑任何私网服务曾暴露公网，立即关闭入口、轮换数据库/ES/产品密钥与证书、审查日志，并从可信备份重建。
