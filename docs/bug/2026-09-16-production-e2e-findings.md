@@ -276,3 +276,33 @@ curl -X POST $B/auth/register -d '{"email":"weak-…","password":"87654321"}' �
 | P13 | 未修 | ⏳ |
 
 已知取舍与代价：口令复杂度仍属产品决策（现仅 8–128 位长度）；CJK 逐字 SSE 保留为后续优化；复验期间为确认"正常大小仍可用"，一个 3 MiB 文本被真实 Embedding 摄取（产生少量费用），该测试知识库随后已删除。手工 `make production-run` 不更新 `/var/lib/rag-deploy/active.json`，因此运行镜像与发布记录仍可能不一致，部署文档已写明该行为与恢复方式。
+
+## 9. 追加修复：41 MB PPTX 上传失败（用户体验优先）
+
+用户实测 `ZRDDS介绍V6.0.pptx`（41.0 MB）上传失败并提示「文件超过服务端大小上限」。生产日志给出两段证据：
+
+```json
+{"msg":"upload_failed","status":413,"code":"UPLOAD_TOO_LARGE","source_name":"ZRDDS介绍V6.0.pptx","reason":"http: request body too large"}
+{"msg":"upload_failed","status":413,"code":"UPLOAD_TOO_LARGE","source_name":"deck.pptx","reason":"RAG UPLOAD_TOO_LARGE: upload exceeds configured byte limit"}
+```
+
+根因是**五处上限互不一致**，而界面承诺最宽：
+
+| 层 | 修复前 | 修复后 |
+|---|---|---|
+| 前端展示与选择前校验 | 写死 64 MB（可选中 41 MB 文件） | 由 `/me` 的 `maxUploadBytes` 驱动（默认 64 MiB） |
+| API 入口请求体 | 硬编码 33 MiB（真凶：文件在到 RAG 之前就被拒） | `PRODUCT_MAX_UPLOAD_BYTES`（默认 64 MiB）+ 1 MiB multipart 余量 |
+| Go 流式上限 | 硬编码 64 MiB | 与 `MaxUploadBytes()` 同源 |
+| RAG `RAG_MAX_UPLOAD_BYTES` | 生产 env 覆盖为 32 MiB | 生产 env 提到 64 MiB（与 compose 默认一致） |
+| PPTX 解析器单条目上限 | 32 MiB（含大图的合法讲稿「上传成功但解析失败」） | 64 MiB（总展开 256 MiB、条目数 4096、压缩比 100 不变） |
+
+修复提交：`71ec595`（上限单一来源 + `/me` 暴露 + 前端展示）、`9fb6252`（PPTX 归档上限）、`a8abf20`（契约测试对齐 v10 与单一来源契约）、`3dc5deb`（换行与格式规范，使 `make lint` 通过）。生产环境变量已调整：`/etc/rag-mvp/.env.production` 的 `RAG_MAX_UPLOAD_BYTES` 32 MiB → 64 MiB，并新增同值的 `PRODUCT_MAX_UPLOAD_BYTES`（备份：`/root/.env.production.bak-*`）。
+
+生产复验（部署 `71ec595`+`9fb6252` 后）：
+
+- `GET /me` → `maxUploadBytes = 67108864`；上传面板显示「单文件最大 64 MB」（无头浏览器实测）
+- 40.0 MiB 合成讲稿 → **202** → 任务 **SUCCEEDED** → 文档 **INDEXED** → 提问命中 `deck.pptx` 第 1 页并生成 `[1]` 引用
+- 66 MiB 文件 → **413 `UPLOAD_TOO_LARGE`**（边界仍然生效）
+- 测试知识库与测试会话已删除，账号回到 2 个知识库
+
+顺带修复的红色门禁（用户 `make test` 失败）：`tests/contract/test_grpc_application_contract.py` 仍期望 `source-router-v9` 摘要，而 `ae73ac0` 已把解析器版本升到 **v10**（实际摘要 `23744eb2…` 正是 v10）；同时 `ruff format --check` 在 `config.py`/`rag_service.py`/`test_job_service.py` 上失败。三者已全部转绿。
