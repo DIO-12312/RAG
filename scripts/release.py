@@ -94,9 +94,15 @@ def read_json(path: Path) -> dict[str, Any]:
 # 改一个 env 默认值不应该要求维护窗口，否则每次调整配置都会被发布门禁拦住。
 # volumes/ports/secrets/command/entrypoint/healthcheck/depends_on 等仍然参与摘要。
 RESTART_ONLY_KEYS = frozenset({"build", "environment", "env_file", "labels"})
-_INDENT = re.compile(r"^([ \t]*)")
 _KEY = re.compile(r"^[ \t]*(?:-[ \t]*)?([A-Za-z0-9_.\-]+)[ \t]*:")
 _ALIAS = re.compile(r"^\*([A-Za-z0-9_.\-]+)$")
+
+
+# 前导空白宽度：用字符串运算而不是正则，避免可选匹配带来的类型分支。
+def _indent_width(line: str) -> int:
+    """Return the width of the leading whitespace of a Compose line."""
+
+    return len(line) - len(line.lstrip(" \t"))
 
 
 # 统计锚点被引用的位置：出现在重启即替换的块里的锚点不参与摘要。
@@ -109,7 +115,7 @@ def _anchor_usage(text: str) -> tuple[set[str], set[str]]:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        indent = len(_INDENT.match(line).group(1))
+        indent = _indent_width(line)
         while stack and stack[-1][0] >= indent:
             stack.pop()
         parent = stack[-1][1] if stack else ""
@@ -142,7 +148,7 @@ def strip_restart_only_blocks(text: str) -> str:
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
         stripped = line.strip()
-        indent = len(_INDENT.match(line).group(1)) if stripped else 0
+        indent = _indent_width(line) if stripped else 0
         if skip_indent is not None:
             if not stripped:
                 continue
