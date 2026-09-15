@@ -127,6 +127,8 @@ production-baseline/production-deploy/production-recover；仍校验 Earthfile �
 | 测试文件 / 函数 | 职责与运行边界 |
 | --- | --- |
 | `contract/test_release_deployment.py::test_release_success_persists_previous_and_never_recreates_infrastructure` | 发布状态持久化、只更新应用、不触发迁移或基础设施重建 |
+| 同上 | `test_network_subnet_drift_is_refused_before_stopping_anything` | 运行中网络子网与目标配置声明不一致时必须先拒绝：不写 pending、不 stop、不 up，生产保持原状 |
+| 同上 | `test_matching_or_missing_networks_pass_the_preflight` | 子网一致、网络尚未创建、或未固定子网的网络都不触发误拦 |
 | `contract/test_release_deployment.py::test_restart_only_projection_ignores_env_and_build_but_keeps_infrastructure` | Compose 兼容性摘要投影：只改 env/build 不改变摘要，volumes/ports 变化必须改变摘要 |
 | `contract/test_release_deployment.py::test_restart_only_projection_keeps_every_infrastructure_key_of_real_compose` | 生产 Compose 投影后仍是合法 YAML，只丢弃 `build`/`environment`/`env_file`/`labels`，服务集合与顶层 volumes/networks/secrets/configs 不变 |
 | `contract/test_release_deployment.py::test_compatibility_digest_moves_only_for_infrastructure_changes` | `compatibility()` 对 env 默认值变化保持摘要不变，对持久基础设施变化必须更换摘要 |

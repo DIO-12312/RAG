@@ -85,6 +85,7 @@ docker pull ghcr.io/dio-12312/rag-rag:<sha>      # 单镜像应在 30s 量级完
 | `persistent schema/infrastructure changed: maintenance deployment required` | 维护敏感文件（compose 的 volumes/ports/secrets、migrations、Go API storage、Caddyfile）相对 `active.json` 记录的版本有变化 | 按维护升级流程备份/验收后归档 `/var/lib/rag-deploy` 的 active/previous 并重建基线 |
 | `running images drifted from deployment state` | 当前运行的容器镜像与 `active.json` 指向的配置不一致，通常是在基线之后手工执行了 `make production-run` | 确认新镜像健康后重建基线：归档 `active.json` 再 `make production-baseline RELEASE_SHA=<要发布的 sha>`，随后重新触发发布 |
 | `production service not healthy` / API/web 探针失败 | 部署前健康检查未通过（服务正在重启、代理或依赖异常） | 先恢复服务健康，再重新触发发布 |
+| `network <name> subnet drift: live=… declared=…` | 运行中的网络子网与目标配置声明的固定子网不一致（例如改了 Compose 的 IPAM 之后没有重建网络） | 这是**需要停机**的维护动作：`docker compose -p rag-production -f <active config> down`（不加 `-v`，保留数据卷）→ 按新声明 `docker network create` 三个网络（带 `com.docker.compose.project=rag-production` 与 `com.docker.compose.network=<名字>` 标签）→ `deploy/production/boot-start.sh` 恢复 → 重新触发发布 |
 
 重建基线只读取当前运行栈并写回状态文件：不重启容器、不执行迁移、不触碰任何数据卷。
 任何手工 `make production-run` 之后都应按上表重建基线，否则下一次自动发布会被漂移检查拒绝。

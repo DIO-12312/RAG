@@ -16,10 +16,12 @@ import re
 import subprocess
 import tempfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 APPS = ("rag-server", "rag-worker", "rag-outbox", "api", "web")
+_PROJECT_NAME = "rag-production"
 INFRA = ("rag-mysql", "product-mysql", "elasticsearch", "nats")
 IMAGES = {
     "rag": ("Dockerfile", ".", "runtime"),
@@ -291,7 +293,7 @@ def publish(root: Path, sha: str, output: Path) -> None:
 
 
 def compose(config: Path, *args: str) -> list[str]:
-    return ["docker", "compose", "--project-name", "rag-production", "-f", str(config), *args]
+    return ["docker", "compose", "--project-name", _PROJECT_NAME, "-f", str(config), *args]
 
 
 def inspect_service(config: Path, service: str) -> dict[str, Any]:
@@ -300,6 +302,60 @@ def inspect_service(config: Path, service: str) -> dict[str, Any]:
         raise ReleaseError(f"expected one existing production container: {service}")
     value: dict[str, Any] = json.loads(run(["docker", "inspect", ids[0]]))[0]
     return value
+
+
+# 网络定义变更必须在停任何容器之前被发现：`up --force-recreate` 会为定义变化的
+# 网络触发重建，而此时 MySQL/Elasticsearch/NATS 仍挂在网络上，重建必然失败——
+# 应用已经被停掉，回滚又会撞上同一堵墙，生产就这样变成 502。
+def _declared_network_subnets(config: Mapping[str, Any]) -> dict[str, list[str]]:
+    """Map docker network name to the subnets the target config pins."""
+
+    declared: dict[str, list[str]] = {}
+    for name, definition in (config.get("networks") or {}).items():
+        subnets = [
+            str(item["subnet"])
+            for item in (((definition or {}).get("ipam") or {}).get("config") or [])
+            if item.get("subnet")
+        ]
+        if not subnets:
+            continue
+        explicit = (definition or {}).get("name")
+        docker_name = str(explicit) if explicit else f"{_PROJECT_NAME}_{name}"
+        declared[docker_name] = subnets
+    return declared
+
+
+# 读取运行中网络的子网；网络不存在或 docker 不可用时返回 None，交由后续步骤报错。
+def _live_network_subnets(docker_name: str) -> list[str] | None:
+    try:
+        output = run(
+            [
+                "docker",
+                "network",
+                "inspect",
+                docker_name,
+                "--format",
+                "{{range .IPAM.Config}}{{.Subnet}} {{end}}",
+            ]
+        )
+    except ReleaseError:
+        return None
+    return output.split()
+
+
+# 目标配置固定了子网、且运行中网络已有不同子网时拒绝发布，避免不可回滚的停机。
+def check_network_compatibility(config: Mapping[str, Any]) -> None:
+    """Refuse a deploy whose pinned network subnets differ from the live ones."""
+
+    for docker_name, declared in _declared_network_subnets(config).items():
+        live = _live_network_subnets(docker_name)
+        if not live or live == declared:
+            continue
+        raise ReleaseError(
+            f"network {docker_name} subnet drift: live={'/'.join(live)} "
+            f"declared={'/'.join(declared)}; recreate networks in a maintenance window "
+            "before deploying"
+        )
 
 
 def health(config: Path) -> None:
@@ -452,8 +508,10 @@ def deploy(root: Path, manifest: Path, state: Path, sha: str, sequence: int) -> 
             "persistent schema/infrastructure changed: maintenance deployment required"
         )
     old_path = Path(active["config"])
-    health(old_path)
     config = read_json(old_path)
+    # 目标配置的网络定义必须与运行中的网络一致，否则拒绝在停机之前。
+    check_network_compatibility(config)
+    health(old_path)
     # Detect manual image changes since baseline/last release before touching services.
     for service in APPS:
         expected = run(

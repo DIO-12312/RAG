@@ -24,6 +24,8 @@ class DockerSimulator:
         self.failures: list[str] = []
         self.old = {name: f"old-{name}" for name in release.APPS}
         self.running = dict(self.old)
+        # 运行中网络的子网；缺失表示网络尚未创建（compose 会按声明创建）。
+        self.live_subnets: dict[str, str] = {}
         self.config = self.state / "baseline.json"
         release.write_json(
             self.config, {"services": {name: {"image": ref} for name, ref in self.old.items()}}
@@ -61,6 +63,11 @@ class DockerSimulator:
         if self.failures and self.failures[0] in args:
             self.failures.pop(0)
             raise release.ReleaseError("injected Docker failure")
+        if args[1:3] == ["network", "inspect"]:
+            name = args[3]
+            if name not in self.live_subnets:
+                raise release.ReleaseError("network not found")
+            return self.live_subnets[name] + " "
         if args[1:3] == ["image", "inspect"]:
             if "revision" in args[-1]:
                 return SHA
@@ -401,3 +408,61 @@ def test_compatibility_digest_moves_only_for_infrastructure_changes(
 
     assert release.compatibility(base) == release.compatibility(env_only)
     assert release.compatibility(base) != release.compatibility(infrastructure)
+
+
+def test_network_subnet_drift_is_refused_before_stopping_anything(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """运行中网络子网与目标配置不一致时，必须在停容器之前拒绝发布。
+
+    否则 `up --force-recreate` 会在应用已停之后尝试重建仍被 MySQL/ES/NATS 占用的
+    网络并失败，回滚又会撞上同一堵墙，最终把生产留在 502（实测事故）。
+    """
+
+    docker = DockerSimulator(monkeypatch, tmp_path)
+    config = release.read_json(docker.config)
+    config["networks"] = {
+        "edge": {"ipam": {"config": [{"subnet": "172.19.0.0/16"}]}},
+        "backend": {"internal": True, "ipam": {"config": [{"subnet": "172.21.0.0/16"}]}},
+    }
+    release.write_json(docker.config, config)
+    docker.live_subnets = {
+        "rag-production_edge": "172.19.0.0/16",
+        # 实际网络是自动分配的旧网段，与声明不一致
+        "rag-production_backend": "172.18.0.0/16",
+    }
+
+    with pytest.raises(release.ReleaseError, match="subnet drift"):
+        docker.deploy()
+
+    assert not (docker.state / "pending.json").exists()
+    assert not any("stop" in command for command in docker.calls)
+    assert not any("up" in command for command in docker.calls)
+    assert docker.running == docker.old
+    assert release.read_json(docker.state / "active.json") == docker.previous
+
+
+def test_matching_or_missing_networks_pass_the_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """子网一致或网络尚未创建时不得误拦发布。"""
+
+    docker = DockerSimulator(monkeypatch, tmp_path)
+    config = release.read_json(docker.config)
+    config["networks"] = {
+        "edge": {"ipam": {"config": [{"subnet": "172.19.0.0/16"}]}},
+        "backend": {"ipam": {"config": [{"subnet": "172.21.0.0/16"}]}},
+        "egress": {},
+    }
+    release.write_json(docker.config, config)
+
+    # 网络尚未创建：compose 会按声明创建，允许继续。
+    release.check_network_compatibility(config)
+    # 只有一个网络存在且与声明一致：同样允许。
+    docker.live_subnets = {"rag-production_edge": "172.19.0.0/16"}
+    release.check_network_compatibility(config)
+    # 声明未固定子网的网络不参与比较。
+    docker.live_subnets = {"rag-production_egress": "172.30.0.0/16"}
+    release.check_network_compatibility(config)
