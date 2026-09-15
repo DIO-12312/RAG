@@ -30,6 +30,7 @@ type Server struct {
 	authSlots          chan struct{}
 	limitOnce          sync.Once
 	logins             *loginLimiter
+	loginsByIP         *loginLimiter
 	mu                 sync.Mutex
 	runs               map[string]bool
 }
@@ -180,8 +181,15 @@ func (s *Server) login(c *gin.Context) {
 	// 失败限流必须先于任何口令校验：否则攻击者可以用无效账号探测，
 	// 且数据库/哈希开销不受限制。
 	key := loginKey(c.ClientIP(), email)
+	ipKey := loginKey(c.ClientIP(), "")
 	limiter := s.limiter()
+	ipLimiter := s.ipLimiter()
 	if wait := limiter.retryAfter(key, time.Now()); wait > 0 {
+		c.Header("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		fail(c, 429, "TOO_MANY_ATTEMPTS", "登录尝试过于频繁，请稍后再试。")
+		return
+	}
+	if wait := ipLimiter.retryAfter(ipKey, time.Now()); wait > 0 {
 		c.Header("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 		fail(c, 429, "TOO_MANY_ATTEMPTS", "登录尝试过于频繁，请稍后再试。")
 		return
@@ -195,11 +203,13 @@ func (s *Server) login(c *gin.Context) {
 	if e != nil {
 		security.Hash(password)
 		limiter.fail(key, time.Now())
+		ipLimiter.fail(ipKey, time.Now())
 		fail(c, 401, "INVALID_CREDENTIALS", "邮箱或密码错误。")
 		return
 	}
 	if !security.Verify(password, u.Hash) {
 		limiter.fail(key, time.Now())
+		ipLimiter.fail(ipKey, time.Now())
 		fail(c, 401, "INVALID_CREDENTIALS", "邮箱或密码错误。")
 		return
 	}

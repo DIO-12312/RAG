@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"log/slog"
 	"path/filepath"
 	"rag-mvp/backend/go-api/internal/ragclient"
 	pb "rag-mvp/backend/go-api/internal/ragpb"
@@ -14,6 +15,18 @@ import (
 	"strings"
 	"time"
 )
+
+// uploadReason 截断上传失败原因，避免把供应商或框架的长响应写入日志。
+func uploadReason(err error) string {
+	if err == nil {
+		return "empty result"
+	}
+	reason := strings.Join(strings.Fields(err.Error()), " ")
+	if len(reason) > 200 {
+		reason = reason[:200] + "…"
+	}
+	return reason
+}
 
 // uploadFailure 把上传失败映射为 HTTP 语义：超过上限（客户端流式上限或 RAG 侧
 // UPLOAD_TOO_LARGE）返回 413，其余返回 502。上限在三处独立存在（Go 客户端流式上限、
@@ -260,6 +273,9 @@ func (s *Server) upload(c *gin.Context) {
 	result, e := s.RAG.Upload(ctx, r.ID, name, uid(c)+"-"+key(c), buffered)
 	if e != nil || result == nil {
 		status, code, message := uploadFailure(e)
+		// 上传失败必须留下可诊断的原因：此前 502 只有一句用户文案，无法判断是
+		// 服务端超限、流中断还是连接失败。只记录截断后的错误文本，不含正文与凭据。
+		slog.Info("upload_failed", "status", status, "code", code, "dataset_id", r.ID, "source_name", name, "reason", uploadReason(e))
 		fail(c, status, code, message)
 		return
 	}

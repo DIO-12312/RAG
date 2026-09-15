@@ -44,3 +44,18 @@ func TestLoginKeyIsolatesAccountAndClient(t *testing.T) {
 		t.Fatal("同一账号的大小写与空白差异必须归一为同一键")
 	}
 }
+
+func TestIPLimiterCatchesRotatingAccounts(t *testing.T) {
+	ipLimiter := newLoginLimiter(30, 5*time.Minute, 15*time.Minute)
+	now := time.Now()
+	// 轮换邮箱时按账号的键互不累计，但同一地址的计数必须累加并被封锁。
+	for i := 0; i < 30; i++ {
+		ipLimiter.fail(loginKey("203.0.113.9", ""), now)
+	}
+	if wait := ipLimiter.retryAfter(loginKey("203.0.113.9", ""), now); wait <= 0 {
+		t.Fatal("同一地址的失败累计必须触发封锁")
+	}
+	if wait := ipLimiter.retryAfter(loginKey("203.0.113.10", ""), now); wait != 0 {
+		t.Fatal("不同地址不得互相影响")
+	}
+}

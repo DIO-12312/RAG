@@ -77,9 +77,18 @@ func loginKey(clientIP, email string) string {
 }
 
 // limiter 惰性构造进程内限流器：Server 可能是测试里的字面量，不要求显式初始化。
+// 两级限流：按「地址 + 账号」10 次失败即封锁，并按「地址」30 次失败封锁，
+// 后者用于拦截轮换邮箱的尝试（只按账号限流会被轻易绕过）。
 func (s *Server) limiter() *loginLimiter {
 	s.limitOnce.Do(func() {
 		s.logins = newLoginLimiter(10, 5*time.Minute, 15*time.Minute)
+		s.loginsByIP = newLoginLimiter(30, 5*time.Minute, 15*time.Minute)
 	})
 	return s.logins
+}
+
+// ipLimiter 返回按客户端地址维度的限流器。
+func (s *Server) ipLimiter() *loginLimiter {
+	s.limiter()
+	return s.loginsByIP
 }
