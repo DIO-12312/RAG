@@ -4,14 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Mapping
+import random
+import time
+from collections.abc import Awaitable, Callable, Mapping
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
+import structlog
 
 from rag_mvp.domain.errors import DomainError, DomainFailure
 
-INITIAL_RETRY_DELAY_SECONDS = 0.1
+# 真实模型网关的限流窗口以秒计，0.1s 级别的退避在 429 面前等于没有退避：
+# 大文档（数千 Chunk、上百批次）必然在同一个窗口内反复超限，
+# 最终把「暂时不可用」放大成整个文档摄取失败。
+INITIAL_RETRY_DELAY_SECONDS = 1.0
+MAX_RETRY_DELAY_SECONDS = 30.0
+_PROVIDER_DETAIL_LIMIT = 200
+
+_LOGGER = structlog.get_logger("rag_mvp.model")
 
 
 class OpenAICompatibleModelGateway:
@@ -27,6 +39,11 @@ class OpenAICompatibleModelGateway:
         batch_size: int,
         max_retries: int,
         max_concurrency: int,
+        retry_base_delay_seconds: float = INITIAL_RETRY_DELAY_SECONDS,
+        retry_max_delay_seconds: float = MAX_RETRY_DELAY_SECONDS,
+        jitter: Callable[[], float] | None = None,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
+        monotonic: Callable[[], float] | None = None,
     ) -> None:
         normalized_endpoint = endpoint.strip().rstrip("/")
         if not normalized_endpoint:
@@ -43,6 +60,10 @@ class OpenAICompatibleModelGateway:
             raise ValueError("max_retries must not be negative")
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least 1")
+        if retry_base_delay_seconds <= 0:
+            raise ValueError("retry_base_delay_seconds must be positive")
+        if retry_max_delay_seconds < retry_base_delay_seconds:
+            raise ValueError("retry_max_delay_seconds must not be smaller than the base delay")
 
         self._client = client
         self._endpoint = normalized_endpoint
@@ -51,6 +72,15 @@ class OpenAICompatibleModelGateway:
         self._batch_size = batch_size
         self._max_retries = max_retries
         self._max_concurrency = max_concurrency
+        self._retry_base_delay_seconds = retry_base_delay_seconds
+        self._retry_max_delay_seconds = retry_max_delay_seconds
+        self._jitter = jitter or (lambda: random.uniform(0.75, 1.25))
+        self._sleep = sleep or asyncio.sleep
+        self._monotonic = monotonic or time.monotonic
+        # 提供方返回 429 时，整个文档的批次都要一起停下来，
+        # 否则并发中的其他批次会在同一限流窗口里继续触发 429。
+        self._pause_until = 0.0
+        self._pause_lock = asyncio.Lock()
 
     # 返回不暴露敏感配置的调试表示。
     def __repr__(self) -> str:
@@ -100,6 +130,7 @@ class OpenAICompatibleModelGateway:
     # 内部辅助：完成 embed_batch 所需的局部转换或校验。
     async def _embed_batch(self, texts: list[str]) -> list[tuple[float, ...]]:
         for attempt in range(self._max_retries + 1):
+            await self._wait_for_provider_pause()
             try:
                 response = await self._client.post(
                     self._endpoint,
@@ -107,9 +138,9 @@ class OpenAICompatibleModelGateway:
                 )
             except httpx.RequestError as exc:
                 if attempt < self._max_retries:
-                    await self._backoff(attempt)
+                    await self._backoff(attempt, None)
                     continue
-                raise self._unavailable() from exc
+                raise self._unavailable(f"transport_error={type(exc).__name__}") from exc
 
             if response.status_code in {401, 403}:
                 raise DomainError(
@@ -120,10 +151,26 @@ class OpenAICompatibleModelGateway:
                     )
                 )
             if response.status_code == 429 or response.status_code >= 500:
+                retry_after = _retry_after_seconds(response)
+                detail = _provider_detail(response)
+                log = _LOGGER.warning if attempt >= self._max_retries else _LOGGER.info
+                log(
+                    "embedding_request_retry",
+                    status=response.status_code,
+                    attempt=attempt + 1,
+                    max_attempts=self._max_retries + 1,
+                    provider_detail=detail,
+                    retry_after_seconds=retry_after,
+                )
                 if attempt < self._max_retries:
-                    await self._backoff(attempt)
+                    if response.status_code == 429:
+                        await self._pause_all(retry_after)
+                    await self._backoff(attempt, retry_after)
                     continue
-                raise self._unavailable()
+                raise self._unavailable(
+                    f"status={response.status_code}",
+                    detail=detail,
+                )
             if response.status_code == 400 and len(texts) > 1:
                 midpoint = len(texts) // 2
                 left = await self._embed_batch(texts[:midpoint])
@@ -142,8 +189,31 @@ class OpenAICompatibleModelGateway:
         raise RuntimeError("embedding retry loop terminated unexpectedly")
 
     # 内部辅助：完成 backoff 所需的局部转换或校验。
-    async def _backoff(self, attempt: int) -> None:
-        await asyncio.sleep(INITIAL_RETRY_DELAY_SECONDS * (2**attempt))
+    async def _backoff(self, attempt: int, retry_after: float | None) -> None:
+        if retry_after is None:
+            delay = min(
+                self._retry_base_delay_seconds * (2**attempt),
+                self._retry_max_delay_seconds,
+            )
+        else:
+            delay = min(retry_after, self._retry_max_delay_seconds)
+        await self._sleep(delay * self._jitter())
+
+    # 让同一文档内所有并发批次共享提供方给出的节流窗口。
+    async def _pause_all(self, retry_after: float | None) -> None:
+        delay = min(
+            retry_after if retry_after is not None else self._retry_base_delay_seconds,
+            self._retry_max_delay_seconds,
+        )
+        async with self._pause_lock:
+            deadline = self._monotonic() + delay
+            self._pause_until = max(self._pause_until, deadline)
+
+    # 在提供方节流窗口内等待，避免继续加压触发更多 429。
+    async def _wait_for_provider_pause(self) -> None:
+        remaining = self._pause_until - self._monotonic()
+        if remaining > 0:
+            await self._sleep(min(remaining, self._retry_max_delay_seconds))
 
     # 内部辅助：完成 parse_response 所需的局部转换或校验。
     def _parse_response(
@@ -218,11 +288,54 @@ class OpenAICompatibleModelGateway:
 
     @staticmethod
     # 内部辅助：完成 unavailable 所需的局部转换或校验。
-    def _unavailable() -> DomainError:
+    def _unavailable(*facts: str, detail: str = "") -> DomainError:
+        # 失败信息必须带上提供方的状态与错误码，否则运维只能看到
+        # 「服务暂时不可用」，无法区分限流、超时还是配额耗尽。
+        message = " ".join(
+            part for part in ("embedding provider is temporarily unavailable", *facts) if part
+        )
+        if detail:
+            message = f"{message} ({detail})"
         return DomainError(
             DomainFailure(
                 "EMBEDDING_UNAVAILABLE",
-                "embedding provider is temporarily unavailable",
+                message,
                 retryable=True,
             )
         )
+
+
+# 解析提供方给出的 Retry-After（秒数或 HTTP 日期），无法识别时返回 None。
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    raw = response.headers.get("Retry-After")
+    if not raw or not raw.strip():
+        return None
+    candidate = raw.strip()
+    try:
+        seconds = float(candidate)
+    except ValueError:
+        try:
+            moment = parsedate_to_datetime(candidate)
+        except (TypeError, ValueError):
+            return None
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=UTC)
+        seconds = (moment - datetime.now(UTC)).total_seconds()
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return seconds
+
+
+# 只提取提供方的错误码，避免把请求正文、输入文本或凭据回显到日志与失败信息。
+def _provider_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    if not isinstance(payload, Mapping):
+        return ""
+    error = payload.get("error")
+    code = error.get("code") if isinstance(error, Mapping) else payload.get("code")
+    if isinstance(code, str) and code.strip():
+        return code.strip()[:_PROVIDER_DETAIL_LIMIT]
+    return ""
