@@ -86,18 +86,19 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 	messages = append(messages, history...)
 	messages = append(messages, Message{Role: "user", Content: question})
 
-	budget := h.ContextBudget()
+	var budget *ContextBudget
 	if h.Budget != nil {
-		budget = *h.Budget
+		b := *h.Budget
+		budget = &b
+		messages = budget.TrimMessages(messages)
 	}
-	messages = budget.TrimMessages(messages)
 
 	intent := RouteIntent(question, history)
 	allowDirectAnswer := intent.Action == "reply" || intent.Action == "reuse"
 
 	if intent.Action == "clarify" {
 		if intent.ClarificationQuestion == "" {
-			return "", nil, errors.New("clarification question is empty")
+			return "", nil, NewAgentError(ErrorClassInternal, errors.New("clarification question is empty"))
 		}
 		if e := emit("token", map[string]any{"text": intent.ClarificationQuestion}); e != nil {
 			return "", nil, e
@@ -110,12 +111,14 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 	seen := map[string]int{}
 	for round := 0; round < rounds; round++ {
 		if e := ctx.Err(); e != nil {
-			return "", nil, e
+			return "", nil, NewAgentError(ErrorClassCancelled, e)
 		}
 
-		messages = budget.TrimMessages(messages)
-		if !budget.Fits(messages) {
-			return "", nil, errors.New("context budget exceeded")
+		if budget != nil {
+			messages = budget.TrimMessages(messages)
+			if !budget.Fits(messages) {
+				return "", nil, NewAgentError(ErrorClassContext, errors.New("context budget exceeded"))
+			}
 		}
 
 		var msg Message
@@ -124,7 +127,7 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 		if h.Streaming {
 			sm, ok := h.Model.(StreamingModel)
 			if !ok {
-				return "", nil, errors.New("model does not support streaming")
+				return "", nil, NewAgentError(ErrorClassModel, errors.New("model does not support streaming"))
 			}
 			streaming = true
 			var content strings.Builder
@@ -155,19 +158,22 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 		}
 
 		if e != nil {
-			return "", nil, e
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return "", nil, NewAgentError(ErrorClassCancelled, ctxErr)
+			}
+			return "", nil, NewAgentError(ErrorClassModel, e)
 		}
 		msg.Role = "assistant"
 		if len(msg.ToolCalls) == 0 {
 			if len(citations) == 0 && round == 0 && !allowDirectAnswer {
-				return "", nil, errors.New("model did not call retrieval tool")
+				return "", nil, NewAgentError(ErrorClassModel, errors.New("model did not call retrieval tool"))
 			}
 			valid := []Citation{}
 			used := map[int]bool{}
 			for _, match := range reference.FindAllStringSubmatch(msg.Content, -1) {
 				n, _ := strconv.Atoi(match[1])
 				if n < 1 || n > len(citations) {
-					return "", nil, errors.New("model returned unsupported citation")
+					return "", nil, NewAgentError(ErrorClassCitation, errors.New("model returned unsupported citation"))
 				}
 				if !used[n] {
 					valid = append(valid, citations[n-1])
@@ -175,7 +181,7 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 				}
 			}
 			if msg.Content == "" {
-				return "", nil, errors.New("model returned empty answer")
+				return "", nil, NewAgentError(ErrorClassModel, errors.New("model returned empty answer"))
 			}
 			if !streaming {
 				if e = emit("token", map[string]any{"text": msg.Content}); e != nil {
@@ -185,18 +191,18 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 			return msg.Content, valid, nil
 		}
 		if len(msg.ToolCalls) > 4 {
-			return "", nil, errors.New("too many tool calls")
+			return "", nil, NewAgentError(ErrorClassTool, errors.New("too many tool calls"))
 		}
 		messages = append(messages, msg)
 		registry := h.ToolRegistry()
 		for _, call := range msg.ToolCalls {
 			if intent.Action == "reuse" {
-				return "", nil, errors.New("transformation must not call retrieval tool")
+				return "", nil, NewAgentError(ErrorClassTool, errors.New("transformation must not call retrieval tool"))
 			}
 
 			query, e := registry.ValidateCall(call)
 			if e != nil {
-				return "", nil, e
+				return "", nil, NewAgentError(ErrorClassTool, e)
 			}
 
 			if intent.Action == "retrieve" && intent.StandaloneQuery != "" {
@@ -205,7 +211,10 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 
 			hits, e := h.Tool.Retrieve(ctx, dataset, query, top)
 			if e != nil {
-				return "", nil, e
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return "", nil, NewAgentError(ErrorClassCancelled, ctxErr)
+				}
+				return "", nil, NewAgentError(ErrorClassRetrieval, e)
 			}
 			result := []Citation{}
 			for _, hit := range hits {
@@ -213,7 +222,7 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 				n, ok := seen[key]
 				if !ok {
 					if len(citations) >= 40 {
-						return "", nil, errors.New("evidence budget exceeded")
+						return "", nil, NewAgentError(ErrorClassCitation, errors.New("evidence budget exceeded"))
 					}
 					n = len(citations) + 1
 					seen[key] = n
@@ -226,10 +235,13 @@ func (h Harness) Run(ctx context.Context, dataset, question string, history []Me
 			}
 			body, _ := json.Marshal(result)
 			if len(body) > 128*1024 {
-				return "", nil, errors.New("tool output budget exceeded")
+				return "", nil, NewAgentError(ErrorClassTool, errors.New("tool output budget exceeded"))
 			}
 			messages = append(messages, Message{Role: "tool", ToolCallID: call.ID, Content: string(body)})
 		}
 	}
-	return "", nil, fmt.Errorf("agent exceeded %d rounds", rounds)
+	return "", nil, NewAgentError(
+		ErrorClassConvergence,
+		fmt.Errorf("agent exceeded %d rounds", rounds),
+	)
 }

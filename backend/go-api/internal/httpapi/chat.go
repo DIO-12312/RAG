@@ -11,6 +11,27 @@ import (
 	"time"
 )
 
+func chatErrorResponse(err error) (string, string) {
+	switch agent.ErrorClassOf(err) {
+	case agent.ErrorClassModel:
+		return "MODEL_FAILED", "对话模型调用失败，请检查模型配置和连通性。"
+	case agent.ErrorClassTool:
+		return "TOOL_FAILED", "工具调用失败，请检查工具参数和知识库配置。"
+	case agent.ErrorClassRetrieval:
+		return "RETRIEVAL_FAILED", "知识库检索失败，请检查知识库状态。"
+	case agent.ErrorClassContext:
+		return "CONTEXT_LIMIT", "当前对话上下文过长，请开始新的对话。"
+	case agent.ErrorClassCitation:
+		return "CITATION_FAILED", "回答引用处理失败，请重试。"
+	case agent.ErrorClassCancelled:
+		return "CHAT_CANCELLED", "回答生成已取消。"
+	case agent.ErrorClassConvergence:
+		return "AGENT_CONVERGENCE", "智能体未能在规定轮次内完成回答，请重试。"
+	default:
+		return "CHAT_FAILED", "问答未完成，请检查模型连通性、工具调用支持及知识库状态。"
+	}
+}
+
 func (s *Server) chat(c *gin.Context) {
 	var p struct {
 		DatasetID      string `json:"datasetId"`
@@ -135,10 +156,11 @@ func (s *Server) chat(c *gin.Context) {
 	}
 	modelClient := agent.ModelClient(s.AllowLocalModels)
 	defer modelClient.CloseIdleConnections()
-        h := agent.Harness{Model: agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}, Tool: retriever, MaxRounds: 6, TopK: int(top), Streaming: true}
+	h := agent.Harness{Model: agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}, Tool: retriever, MaxRounds: 6, TopK: int(top), Streaming: true}
 	answer, citations, e := h.Run(ctx, p.DatasetID, p.Question, history, emit)
 	if e != nil {
-		_ = emit("error", gin.H{"code": "CHAT_FAILED", "message": "问答未完成，请检查模型连通性、工具调用支持及知识库状态。"})
+		code, message := chatErrorResponse(e)
+		_ = emit("error", gin.H{"code": code, "message": message})
 		return
 	}
 	b, _ := json.Marshal(citations)
