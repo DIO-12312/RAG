@@ -89,7 +89,9 @@ make production-recover
 也会优先恢复 pending。保留所有 release 配置及镜像，不自动 prune；磁盘回收需先确认不涉及
 active/previous/pending 引用。不执行 down -v，不恢复/覆盖用户数据库。
 
-兼容性摘要变化（schema、migration、RPC、生产拓扑、Search Guard 等）会提前阻断自动发布。
+兼容性摘要变化（schema、migration、RPC、生产拓扑、Search Guard 等）会提前阻断自动发布。Compose 参与摘要时只保留持久基础设施部分（`volumes`/`ports`/`secrets`/`networks`/`configs`/`command`/`entrypoint`/`healthcheck` 等），
+`build`、`environment`、`env_file`、`labels` 属于「重建容器即替换」的启动参数，改动它们不需要维护窗口；
+schema、migration、Go API 内置初始化与 Caddyfile 变化仍然整体参与摘要。
 维护升级需按生产 runbook 备份/验收，确认新版本健康后将旧状态目录归档，再建立新基线。
 Go API 内置初始化不会因为自动发布而被关闭，因此 storage/启动代码变化也列入阻断范围。
 基线记录的 Compose 配置固定，主机 env/Secret 路径修改需维护验收后重建基线。

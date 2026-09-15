@@ -310,3 +310,94 @@ def test_publish_injects_release_sha_into_web_image(
         "ghcr.io/dio-12312/rag-web@sha256:" + "e" * 64
     )
     assert release.read_json(manifest)["compatible_base_shas"] == [SHA]
+
+
+COMPOSE_TEMPLATE = """name: rag-production
+
+x-rag-environment: &rag-environment
+  RAG_ENVIRONMENT: production
+  RAG_MAX_UPLOAD_BYTES: ${{RAG_MAX_UPLOAD_BYTES:-33554432}}
+
+services:
+  api:
+    image: ghcr.io/dio-12312/rag-api@sha256:{digest}
+    environment: *rag-environment
+    volumes:
+      - {volume}
+    ports:
+      - "8080:8080"
+    secrets: *rag-secrets
+
+x-rag-secrets: &rag-secrets
+  - source: product_mysql_dsn
+    target: /run/secrets/product_mysql_dsn
+"""
+
+
+def _compose_text(*, upload_limit: str = "33554432", volume: str = "obj:/app/data/objects") -> str:
+    """构造一份最小 Compose 输入，用于验证摘要投影。"""
+
+    return COMPOSE_TEMPLATE.format(digest="a" * 64, volume=volume).replace(
+        ":-33554432", f":-{upload_limit}"
+    )
+
+
+def test_restart_only_projection_ignores_env_and_build_but_keeps_infrastructure() -> None:
+    """只改 env 默认值或 build 参数的 Compose 变更不应改变维护敏感摘要。"""
+
+    base = _compose_text()
+    env_only = _compose_text(upload_limit="67108864")
+    assert release.strip_restart_only_blocks(base) == release.strip_restart_only_blocks(env_only)
+
+    build_added = base.replace(
+        "    environment: *rag-environment\n",
+        "    environment: *rag-environment\n    build:\n      args:\n        VITE: 1\n",
+    )
+    assert release.strip_restart_only_blocks(base) == release.strip_restart_only_blocks(build_added)
+
+    volume_changed = _compose_text(volume="other:/app/data/objects")
+    assert release.strip_restart_only_blocks(base) != release.strip_restart_only_blocks(
+        volume_changed
+    )
+    port_changed = base.replace('"8080:8080"', '"9090:8080"')
+    assert release.strip_restart_only_blocks(base) != release.strip_restart_only_blocks(
+        port_changed
+    )
+
+
+def test_restart_only_projection_keeps_every_infrastructure_key_of_real_compose() -> None:
+    """生产 Compose 投影后必须仍是合法 YAML，且只丢弃重启即替换的键。"""
+
+    original = (ROOT / "compose.production.yml").read_text()
+    projected_text = release.strip_restart_only_blocks(original)
+    original_config = yaml.safe_load(original)
+    projected_config = yaml.safe_load(projected_text)
+
+    assert set(projected_config["services"]) == set(original_config["services"])
+    for name, service in original_config["services"].items():
+        expected = set(service) - release.RESTART_ONLY_KEYS
+        assert set(projected_config["services"][name]) == expected, name
+    for key in ("volumes", "networks", "secrets", "configs"):
+        assert projected_config.get(key) == original_config.get(key)
+
+
+def test_compatibility_digest_moves_only_for_infrastructure_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """compatibility() 只对持久基础设施变化换摘要，env 默认值变化保持不变。"""
+
+    monkeypatch.setattr(release, "MAINTENANCE_PATHS", ("compose.production.yml",))
+
+    def tree(name: str, text: str) -> Path:
+        root = tmp_path / name
+        root.mkdir()
+        (root / "compose.production.yml").write_text(text)
+        return root
+
+    base = tree("base", _compose_text())
+    env_only = tree("env", _compose_text(upload_limit="67108864"))
+    infrastructure = tree("infra", _compose_text(volume="other:/app/data/objects"))
+
+    assert release.compatibility(base) == release.compatibility(env_only)
+    assert release.compatibility(base) != release.compatibility(infrastructure)

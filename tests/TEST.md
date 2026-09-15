@@ -104,6 +104,9 @@ production-baseline/production-deploy/production-recover；仍校验 Earthfile �
 | 测试文件 / 函数 | 职责与运行边界 |
 | --- | --- |
 | `contract/test_release_deployment.py::test_release_success_persists_previous_and_never_recreates_infrastructure` | 发布状态持久化、只更新应用、不触发迁移或基础设施重建 |
+| `contract/test_release_deployment.py::test_restart_only_projection_ignores_env_and_build_but_keeps_infrastructure` | Compose 兼容性摘要投影：只改 env/build 不改变摘要，volumes/ports 变化必须改变摘要 |
+| `contract/test_release_deployment.py::test_restart_only_projection_keeps_every_infrastructure_key_of_real_compose` | 生产 Compose 投影后仍是合法 YAML，只丢弃 `build`/`environment`/`env_file`/`labels`，服务集合与顶层 volumes/networks/secrets/configs 不变 |
+| `contract/test_release_deployment.py::test_compatibility_digest_moves_only_for_infrastructure_changes` | `compatibility()` 对 env 默认值变化保持摘要不变，对持久基础设施变化必须更换摘要 |
 | `contract/test_release_deployment.py::test_legacy_fingerprint_allows_safe_application_only_transition` | 旧摘要仅在生产 SHA 属于清单列出的同维护敏感文件树祖先时迁移到新版摘要；不得跨越数据库或基础设施变化 |
 | `test_release_failure_restores_images_and_preserves_active_state` | 拉取、部分更新、代理 reload 失败的回退，拉取失败不停止应用 |
 | `test_failed_rollback_keeps_journal_for_next_recovery` | 回退再次失败保留 journal，下次恢复旧镜像 |

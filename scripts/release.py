@@ -89,6 +89,93 @@ def read_json(path: Path) -> dict[str, Any]:
     return value
 
 
+# 只有持久 schema 与生产基础设施变化才需要维护窗口。Service 的
+# environment/env_file/build/labels 只是「重建容器即替换」的启动参数：
+# 改一个 env 默认值不应该要求维护窗口，否则每次调整配置都会被发布门禁拦住。
+# volumes/ports/secrets/command/entrypoint/healthcheck/depends_on 等仍然参与摘要。
+RESTART_ONLY_KEYS = frozenset({"build", "environment", "env_file", "labels"})
+_INDENT = re.compile(r"^([ \t]*)")
+_KEY = re.compile(r"^[ \t]*(?:-[ \t]*)?([A-Za-z0-9_.\-]+)[ \t]*:")
+_ALIAS = re.compile(r"^\*([A-Za-z0-9_.\-]+)$")
+
+
+# 统计锚点被引用的位置：出现在重启即替换的块里的锚点不参与摘要。
+def _anchor_usage(text: str) -> tuple[set[str], set[str]]:
+    restart_only: set[str] = set()
+    elsewhere: set[str] = set()
+    stack: list[tuple[int, str]] = []
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(_INDENT.match(line).group(1))
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        parent = stack[-1][1] if stack else ""
+        key_match = _KEY.match(line)
+        if key_match is None or ":" not in line:
+            continue
+        key = key_match.group(1)
+        value = line.split(":", 1)[1].strip()
+        alias = _ALIAS.match(value)
+        if alias is not None:
+            # `environment: *x` 与 `<<: *x` 由自身/父键决定；
+            # 更深层的 `FOO: *x` 则由它所在的块决定。
+            owner = parent if key == "<<" else key
+            in_restart_block = any(item[1] in RESTART_ONLY_KEYS for item in stack)
+            target = restart_only if owner in RESTART_ONLY_KEYS or in_restart_block else elsewhere
+            target.add(alias.group(1))
+        if not value:
+            stack.append((indent, key))
+    return restart_only, elsewhere
+
+
+def strip_restart_only_blocks(text: str) -> str:
+    """Drop restart-only service blocks before hashing a rendered Compose input."""
+
+    restart_only, elsewhere = _anchor_usage(text)
+    dropped_anchors = restart_only - elsewhere
+    kept: list[str] = []
+    skip_indent: int | None = None
+    drop_definition = False
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        indent = len(_INDENT.match(line).group(1)) if stripped else 0
+        if skip_indent is not None:
+            if not stripped:
+                continue
+            if indent > skip_indent or (indent == skip_indent and stripped.startswith("-")):
+                continue
+            skip_indent = None
+        if drop_definition:
+            if not stripped:
+                continue
+            if indent > 0:
+                continue
+            drop_definition = False
+        if not stripped:
+            kept.append(line)
+            continue
+        key_match = _KEY.match(line)
+        key = key_match.group(1) if key_match is not None else ""
+        if key in RESTART_ONLY_KEYS:
+            skip_indent = indent
+            continue
+        if indent == 0 and key.startswith("x-") and "&" in line:
+            anchor = line.split("&", 1)[1].strip()
+            if anchor in dropped_anchors:
+                drop_definition = True
+                continue
+        kept.append(line)
+    return "\n".join(kept) + "\n"
+
+
+# 只有 Compose 需要投影：其余维护敏感输入（schema、Caddyfile、migrations）整体参与摘要。
+PROJECTED_INPUTS = {"compose.production.yml": strip_restart_only_blocks}
+
+
 def compatibility(root: Path) -> str:
     digest = hashlib.sha256()
     for name in MAINTENANCE_PATHS:
@@ -99,7 +186,11 @@ def compatibility(root: Path) -> str:
         for item in files:
             if item.is_file() and "__pycache__" not in item.parts and item.suffix != ".pyc":
                 digest.update(str(item.relative_to(root)).encode() + b"\0")
-                digest.update(item.read_bytes() + b"\0")
+                payload = item.read_bytes()
+                projector = PROJECTED_INPUTS.get(name)
+                if projector is not None:
+                    payload = projector(payload.decode("utf-8")).encode("utf-8")
+                digest.update(payload + b"\0")
     return digest.hexdigest()
 
 
