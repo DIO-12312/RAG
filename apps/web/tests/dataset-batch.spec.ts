@@ -20,8 +20,15 @@ const dataset = {
   ],
 };
 
-async function mountDetail(counters: { deleted: string[]; retried: string[]; reindexed: string[] }, documents: Array<{ id: string; name: string; status: string; jobId: string; stale?: boolean }> = dataset.documents) {
+type JobRow = { id: string; datasetId: string; sourceName: string; status: string; progress: number; retryable: boolean; errorMessage?: string };
+
+async function mountDetail(
+  counters: { deleted: string[]; retried: string[]; reindexed: string[] },
+  documents: Array<{ id: string; name: string; status: string; jobId: string; stale?: boolean }> = dataset.documents,
+  jobs: JobRow[] = [{ id: "job-c", datasetId: dataset.id, sourceName: "c.pdf", status: "FAILED", progress: 1, retryable: true }],
+) {
   server.use(
+    http.get("*/datasets/:id/jobs", () => HttpResponse.json(jobs)),
     http.get("*/datasets/:id", () => HttpResponse.json({ ...dataset, documents, documentCount: documents.length })),
     http.delete("*/documents/:id", ({ params }) => {
       counters.deleted.push(String(params.id));
@@ -110,5 +117,22 @@ it("索引元数据已丢失的文档提示重新上传，且不纳入重新索�
   expect(retryButton.attributes("disabled")).toBeDefined();
   const reindexButton = wrapper.get(".document-toolbar").findAll("button")[2]!;
   expect(reindexButton.attributes("disabled")).toBeDefined();
+  wrapper.unmount();
+});
+
+it("不可重试的失败任务不纳入「重新索引失败项」", async () => {
+  const counters = { deleted: [] as string[], retried: [] as string[], reindexed: [] as string[] };
+  const wrapper = await mountDetail(
+    counters,
+    [
+      { id: "doc-ok", name: "ok.pdf", status: "INDEXED", jobId: "job-ok" },
+      { id: "doc-bad", name: "bad.pdf", status: "FAILED", jobId: "job-bad" },
+    ],
+    [{ id: "job-bad", datasetId: dataset.id, sourceName: "bad.pdf", status: "FAILED", progress: 1, retryable: false }],
+  );
+  await wrapper.findAll('article input[type="checkbox"]')[1]!.setValue(true);
+  const retryButton = wrapper.get(".document-toolbar").findAll("button")[1]!;
+  expect(retryButton.text()).toContain("重新索引失败项（0）");
+  expect(retryButton.attributes("disabled")).toBeDefined();
   wrapper.unmount();
 });

@@ -14,7 +14,10 @@ const deleteDialogOpen=ref(false); const deleting=ref(false); let deleteRequestK
 const selected=ref<string[]>([]); const busyBatch=ref(false); const batchNotice=ref("");
 const documents=computed(()=>dataset.value?.documents??[]);
 const allSelected=computed(()=>documents.value.length>0&&documents.value.every(d=>selected.value.includes(d.id)));
-const retryable=computed(()=>documents.value.filter(d=>selected.value.includes(d.id)&&d.status==="FAILED"&&d.jobId&&!d.stale));
+// 只有 RAG 标记为可重试的失败任务才能重试；不可重试的失败必须删除后重新上传，
+// 否则用户点到的按钮必然返回 409「此任务不可重试」。
+const retryableJobs=computed(()=>new Set(jobs.value.filter(j=>j.retryable).map(j=>j.id)));
+const retryable=computed(()=>documents.value.filter(d=>selected.value.includes(d.id)&&d.status==="FAILED"&&d.jobId&&!d.stale&&retryableJobs.value.has(d.jobId)));
 const reindexable=computed(()=>documents.value.filter(d=>selected.value.includes(d.id)&&d.status==="INDEXED"&&!d.stale));
 const deleteMessage=computed(()=>`知识库“${dataset.value?.name ?? ""}”及其中的 ${dataset.value?.documentCount ?? 0} 个文档将被永久删除，且无法恢复。`);
 let timer: ReturnType<typeof setTimeout> | undefined; let disposed=false;

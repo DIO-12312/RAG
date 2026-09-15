@@ -106,3 +106,16 @@ it("同一会话切换知识库后保留历史并带新知识库继续提问", a
   expect(wrapper.text()).toContain("迁移窗口截至 2026 年 12 月 31 日。");
   wrapper.unmount();
 });
+
+it("超过服务端 UTF-8 字节上限的问题不会发出请求", async () => {
+  const counter = { calls: 0 };
+  const wrapper = await mountChat(counter);
+  const textarea = wrapper.get("textarea");
+  // 3000 个汉字 = 9000 字节，超过服务端 8000 字节上限但仍在 textarea 的 4000 字符以内。
+  await textarea.setValue("问".repeat(3000));
+  await textarea.trigger("keydown", { key: "Enter" });
+  await flushPromises();
+  expect(counter.calls).toBe(0);
+  expect(wrapper.text()).toContain("问题过长");
+  wrapper.unmount();
+});
