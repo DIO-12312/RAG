@@ -55,7 +55,10 @@ nav a.router-link-active::after { content: ""; width: 5px; height: 5px; backgrou
 .eyebrow { color: var(--text-muted); font-size: 10px; letter-spacing: .18em; font-weight: 600; }
 .heading-dot { color: var(--accent); margin-left: 3px; }
 article { padding: 24px; margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
-article p { color: var(--text-muted); }
+/* 弱化色只用于卡片描述。聊天记录同样是 article，若不排除就会把 Markdown 段落一起染浅，
+   使同一段回答出现「段落浅、列表与标题深」，并与流式输出的正文色不一致。 */
+article:not(.chat-message) p { color: var(--text-muted); }
+.chat-message .markdown-content { color: var(--text); }
 .icon-tile { display: inline-grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--accent-soft); color: var(--accent-strong); }
 .icon-tile .app-icon { width: 24px; height: 24px; }
 .icon-tile--peach { color: #946344; background: #f8eae1; }.icon-tile--mint { color: #397667; background: #e4f1eb; }

@@ -4,6 +4,17 @@
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
 
+### 2026-09-16 会话正文文字颜色一致性
+
+```text
+apps/web/tests/
+└─ text-color.spec.ts  # 弱化色不得命中会话正文的样式契约
+```
+
+| 文件 | 用例 / 职责 | 运行边界 |
+|---|---|---|
+| `apps/web/tests/text-color.spec.ts` | `does not dim prose paragraphs inside chat messages`：禁止裸 `article p` 弱化规则，要求弱化色只作用于 `article:not(.chat-message) p`；`pins chat Markdown prose to the body text color`：要求 `.chat-message .markdown-content` 显式使用正文色 | Vitest/jsdom 读取 `src/styles/global.css` 断言样式契约；jsdom 不计算层叠，不替代浏览器验收 |
+
 ### 2026-09-15 已索引文档主动重新索引与 Agent 运行限制
 
 | 文件 / 用例 | 职责与运行边界 |
