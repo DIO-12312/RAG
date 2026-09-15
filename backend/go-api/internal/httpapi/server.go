@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/mail"
+	"os"
 	"rag-mvp/backend/go-api/internal/ragclient"
 	"rag-mvp/backend/go-api/internal/security"
 	"rag-mvp/backend/go-api/internal/storage"
@@ -38,6 +39,20 @@ type Server struct {
 func fail(c *gin.Context, status int, code, message string) {
 	c.AbortWithStatusJSON(status, gin.H{"code": code, "message": message})
 }
+
+// bodyLimitBytes 返回请求体上限。默认 33 MiB：略高于 RAG 侧默认上限，为 multipart
+// 边界与字段留出余量；生产环境应以 PRODUCT_MAX_UPLOAD_BYTES 与 RAG_MAX_UPLOAD_BYTES
+// 成对配置，避免出现「入口比服务端更严」或反之的隐性不一致。
+func bodyLimitBytes() int64 {
+	if raw := os.Getenv("PRODUCT_MAX_UPLOAD_BYTES"); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return 33 << 20
+}
+
+// uid 返回认证中间件写入的用户标识。
 func uid(c *gin.Context) string { return c.GetString("user") }
 func (s *Server) Router() *gin.Engine {
 	s.authSlots = make(chan struct{}, 4)
@@ -47,7 +62,7 @@ func (s *Server) Router() *gin.Engine {
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
 		c.Writer.Header().Set("Cache-Control", "no-store")
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 33<<20)
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, bodyLimitBytes())
 		if c.Request.Method != "GET" && c.Request.Method != "HEAD" {
 			origin := c.GetHeader("Origin")
 			if origin != "" && origin != s.Origin {

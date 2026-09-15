@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"log/slog"
+	"net/http"
 	"path/filepath"
 	"rag-mvp/backend/go-api/internal/ragclient"
 	pb "rag-mvp/backend/go-api/internal/ragpb"
@@ -35,9 +36,14 @@ func uploadFailure(err error) (int, string, string) {
 	var business *ragclient.BusinessError
 	// 服务端在流中途拒绝超限上传时，客户端看到的是流中断的 gRPC 错误，
 	// 因此除了类型化错误与业务错误码，再按错误文本兜底识别稳定码。
+	// 入口中间件的 MaxBytesReader 在读取 multipart 时就会失败（生产实测
+	// 「http: request body too large」被映射成 502），同样属于超限。
+	var tooLarge *http.MaxBytesError
 	if errors.Is(err, ragclient.ErrUploadTooLarge) ||
+		errors.As(err, &tooLarge) ||
 		(errors.As(err, &business) && business.Code == "UPLOAD_TOO_LARGE") ||
-		(err != nil && strings.Contains(err.Error(), "UPLOAD_TOO_LARGE")) {
+		(err != nil && strings.Contains(err.Error(), "UPLOAD_TOO_LARGE")) ||
+		(err != nil && strings.Contains(err.Error(), "request body too large")) {
 		return 413, "UPLOAD_TOO_LARGE", "文件超过服务端大小上限，请压缩或拆分后重试。"
 	}
 	return 502, "UPLOAD_FAILED", "上传失败，请保留请求键重试。"
