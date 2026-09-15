@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -204,4 +206,39 @@ func indexOf(values []string, want string) int {
 		}
 	}
 	return -1
+}
+
+// TestJSONLogObserverEmitsParseableJSON 验证观测事件是单行 JSON 且字段可机读：
+// SPEC 要求 slog 输出 JSON，文本 handler 无法按 stop_reason/error_code 聚合告警。
+func TestJSONLogObserverEmitsParseableJSON(t *testing.T) {
+	var buffer bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buffer, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	JSONLogObserver{Logger: logger}.Observe(context.Background(), RunEvent{
+		RunID:          "run-1",
+		Stage:          RunStageComplete,
+		Round:          2,
+		Action:         "auto",
+		QueryHash:      "abcdef0123456789",
+		EvidenceCount:  6,
+		ModelCalls:     4,
+		RetrievalCalls: 1,
+		RewriteCalls:   0,
+		DurationMS:     123,
+		StopReason:     "evidence_sufficient",
+	})
+
+	line := strings.TrimSpace(buffer.String())
+	if strings.ContainsAny(line, "\n") {
+		t.Fatalf("事件必须是单行: %q", line)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(line), &payload); err != nil {
+		t.Fatalf("事件不是合法 JSON: %v (%q)", err, line)
+	}
+	if payload["stage"] != "complete" || payload["stop_reason"] != "evidence_sufficient" {
+		t.Fatalf("关键字段缺失或错误: %+v", payload)
+	}
+	if payload["run_id"] != "run-1" {
+		t.Fatalf("run_id 缺失: %+v", payload)
+	}
 }

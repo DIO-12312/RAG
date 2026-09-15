@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,6 +22,9 @@ func env(k, d string) string {
 	return d
 }
 func main() {
+	// Agent 观测事件（agent_run）必须可按字段采集：SPEC 要求单行 JSON，
+	// 而 slog 默认是文本 handler，因此进程启动即安装 JSON handler。
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	encoded, e := loadKey("PRODUCT_ENCRYPTION_KEY", "encryption.key")
 	if e != nil {
 		log.Fatal(e)
