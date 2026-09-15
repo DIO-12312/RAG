@@ -100,13 +100,12 @@ class FakeMetadataRepository:
             dataset = self.datasets.get(dataset_id)
             if dataset is None or dataset.status is not DatasetStatus.ACTIVE:
                 raise DomainError(DomainFailure("DATASET_NOT_FOUND", "dataset unavailable"))
-            if not dataset.encrypted_embedding_profile:
-                if dataset.embedding_model != model or dataset.embedding_dimension != dimension:
-                    raise DomainError(
-                        DomainFailure("EMBEDDING_CONFIG_MISMATCH", "original model required")
-                    )
-                dataset = replace(dataset, encrypted_embedding_profile=encrypted_profile)
-                self.datasets[dataset_id] = dataset
+            if dataset.embedding_model != model or dataset.embedding_dimension != dimension:
+                raise DomainError(
+                    DomainFailure("EMBEDDING_CONFIG_MISMATCH", "original model required")
+                )
+            dataset = replace(dataset, encrypted_embedding_profile=encrypted_profile)
+            self.datasets[dataset_id] = dataset
             return dataset
 
     async def submit_ingestion(self, command: SubmitIngestion) -> SubmitResult:

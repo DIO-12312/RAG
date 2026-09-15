@@ -23,12 +23,18 @@ describe("batch upload", () => {
     await input.trigger('change');expect(wrapper.text()).toContain('folder/note.md');
     await wrapper.get('.upload-actions button').trigger('click');await flushPromises();expect(names).toEqual(['note.md']);expect(wrapper.text()).toContain('已跳过');
   });
-  it("accepts CHM and CHI knowledge files",async()=>{
+  it("accepts PowerPoint, CHM, and CHI knowledge files",async()=>{
     const names:string[]=[];const wrapper=mount(UploadPanel,{props:{uploadFile:async(file)=>{names.push(file.name);}}});
     const input=wrapper.get('input[type="file"]');
-    expect(input.attributes('accept')).toContain('.chm');expect(input.attributes('accept')).toContain('.chi');
-    Object.defineProperty(input.element,'files',{value:[new File(['chm'],'manual.chm'),new File(['chi'],'manual.chi')],configurable:true});
+    expect(input.attributes('accept')).toContain('.pptx');expect(input.attributes('accept')).toContain('.chm');expect(input.attributes('accept')).toContain('.chi');
+    Object.defineProperty(input.element,'files',{value:[new File(['pptx'],'slides.pptx'),new File(['chm'],'manual.chm'),new File(['chi'],'manual.chi')],configurable:true});
     await input.trigger('change');await wrapper.get('.upload-actions button').trigger('click');await flushPromises();
-    expect(names).toEqual(['manual.chm','manual.chi']);expect(wrapper.text()).toContain('已提交 2 个');
+    expect(names).toEqual(['slides.pptx','manual.chm','manual.chi']);expect(wrapper.text()).toContain('已提交 3 个');
+  });
+  it("marks the folder picker with both directory attributes",()=>{
+    const wrapper=mount(UploadPanel,{props:{uploadFile:async()=>{}}});
+    const input=wrapper.get('input[webkitdirectory]');
+    expect(input.attributes('webkitdirectory')).toBeDefined();
+    expect(input.attributes('directory')).toBeDefined();
   });
 });

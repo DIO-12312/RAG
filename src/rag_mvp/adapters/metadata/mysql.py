@@ -157,15 +157,16 @@ class MySQLMetadataRepository:
             )
             if row is None or row.status != "ACTIVE":
                 raise DomainError(DomainFailure("DATASET_NOT_FOUND", "dataset unavailable"))
-            if not row.encrypted_embedding_profile:
-                if row.embedding_model != model or row.embedding_dimension != dimension:
-                    raise DomainError(
-                        DomainFailure(
-                            "EMBEDDING_CONFIG_MISMATCH",
-                            "legacy dataset requires its original model and dimension",
-                        )
+            if row.embedding_model != model or row.embedding_dimension != dimension:
+                raise DomainError(
+                    DomainFailure(
+                        "EMBEDDING_CONFIG_MISMATCH",
+                        "dataset requires its original model and dimension",
                     )
-                row.encrypted_embedding_profile = encrypted_profile
+                )
+            # 配置中心更新 API Key 后，已有知识库的重建也必须使用新快照。模型和
+            # 维度仍不可变，因此不会把不同向量空间混入既有索引。
+            row.encrypted_embedding_profile = encrypted_profile
             return dataset_from_table(row)
 
     # 提交该方法负责的领域数据或基础设施状态。

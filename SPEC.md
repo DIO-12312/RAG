@@ -73,7 +73,7 @@ Python MVP 的唯一入口是 gRPC；本地调试也调用同一 gRPC 服务。P
   → 返回带来源、分数和上下文预算建议的 evidence
 ```
 
-必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java`、PDF、`.chm` 与 `.chi`。PDF 默认使用 `auto` 路由：优先读取原生文字和坐标，原生文字不足的页面才经 Poppler 渲染并使用 Tesseract OCR；输出标题路径、阅读顺序、段落/列表/表格型文本、页码与矩形坐标。OCR 只识别文字，不负责图片语义和公式结构理解。
+必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java`、PDF、`.pptx`、`.chm` 与 `.chi`。PDF 默认使用 `auto` 路由：优先读取原生文字和坐标，原生文字不足的页面才经 Poppler 渲染并使用 Tesseract OCR；输出标题路径、阅读顺序、段落/列表/表格型文本、页码与矩形坐标。OCR 只识别文字，不负责图片语义和公式结构理解。PPTX 按演示文稿中的幻灯片顺序提取 OOXML 文本，每张幻灯片作为带物理 `page_number` 的独立来源段进入同一切块/检索链路，提供与 PDF 相同的页码引用体验；不执行宏、嵌入对象或外部链接，也不识别图片语义。
 
 自 `source-router-v9` 起，PDF `auto/deepdoc` 恢复经 CHM3 实际知识库验证的 pdfplumber 词级坐标路径：先按页面提取词块，再按纵向容差恢复物理行和横向间距；连续多列行可形成 Markdown 表格，段落、列表、表格、标题与明显纵向间距共同构成 segment 边界，长段仍由既有 `chunk_size/overlap` 切块。原生文本不足时继续按页降级到 Poppler + Tesseract OCR；重复页眉页脚仍按跨页统计移除。页脚印刷页码作为 `printed_page_number` 来源元数据保留并从正文剔除，物理页码继续保存在 locator，前端可同时展示两者。该回退仅改变 PDF 解析和索引正文，不改变 CHM/CHI、Embedding、ES schema 或查询流程；已有 PDF 必须通过新版本重建后才生效。
 
@@ -499,7 +499,7 @@ flowchart LR
 
 Go 是唯一公网入口和 Agent 决策者；Python 是私网 RAG 服务。Go 通过 RPC 调用 Python，并维护用户侧资源映射；Python 始终是 RAG Document/Job/Task/索引状态的唯一写入方。
 
-Web 文件选择器与 Go 上传入口必须共同放行 Python RAG 已支持的 `.pdf`、`.md`、`.txt`、`.py`、`.go`、`.js`、`.ts`、`.java`、`.chm` 和 `.chi`，避免产品入口与计算服务能力不一致。反向代理的请求体上限必须略高于 Python 的 `RAG_MAX_UPLOAD_BYTES`，为 multipart framing 预留开销；文件大小的权威业务上限仍由产品前端与 Python RAG 服务共同执行。
+Web 文件选择器与 Go 上传入口必须共同放行 Python RAG 已支持的 `.pdf`、`.pptx`、`.md`、`.txt`、`.py`、`.go`、`.js`、`.ts`、`.java`、`.chm` 和 `.chi`，避免产品入口与计算服务能力不一致。文件夹选择器必须同时绑定 `webkitdirectory` 与 `directory` 属性，不能退化为普通文件选择。反向代理的请求体上限必须略高于 Python 的 `RAG_MAX_UPLOAD_BYTES`，为 multipart framing 预留开销；文件大小的权威业务上限仍由产品前端与 Python RAG 服务共同执行。
 
 ### 5.2 建议目录树
 
@@ -734,7 +734,7 @@ sequenceDiagram
 
 ### 5.6 目标态：Go 后端 / Agent Harness 的问答执行流程
 
-2026-09-06 后续迭代：Embedding URL/模型/API Key/超时/Top-K 由个人设置写入 Go MySQL，API Key 加密存储，不再要求运行环境提供模型凭据。创建 Dataset 时 Go 将配置加密快照经 gRPC 传给 Python，Python MySQL 随 Dataset 持久化，Worker 与 Retrieve 使用同一快照。仅基础设施加密密钥通过只读 secret 提供给 Python，不将 API Key 放入 NATS/日志或返回前端。已有 Dataset 的模型与维度不变；空快照可经 BindEmbeddingProfile 在行锁下首次绑定匹配配置，已绑定快照不可被该 RPC 覆盖。当前 ES 索引为 1024 维，前端清楚标明并校验维度。修改个人配置影响之后创建的知识库，避免不同模型的向量混用。批量上传按单文件调用已有上传 RPC、每文件独立幂等键；目录仅展开文件，不改变 Python Task/Outbox 语义。Go 历史会话返回创建/最近消息时间并稳定倒序；前端右侧模态抽屉展示。回答 Markdown 禁止原始 HTML并清洗输出，引用证据保留原文。
+2026-09-06 后续迭代：Embedding URL/模型/API Key/超时/Top-K 由个人设置写入 Go MySQL，API Key 加密存储，不再要求运行环境提供模型凭据。创建 Dataset 时 Go 将配置加密快照经 gRPC 传给 Python，Python MySQL 随 Dataset 持久化，Worker 与 Retrieve 使用同一快照。仅基础设施加密密钥通过只读 secret 提供给 Python，不将 API Key 放入 NATS/日志或返回前端。已有 Dataset 的模型与维度不变；`BindEmbeddingProfile` 在 Dataset 行锁内校验二者匹配后，允许以当前个人设置覆盖加密快照，使保存新 Key 后的上传、重建和检索不会继续使用旧 Key。当前 ES 索引为 1024 维，前端清楚标明并校验维度。修改个人配置影响之后创建的知识库，并会更新模型与维度相同的既有知识库密钥快照，避免不同模型的向量混用。批量上传按单文件调用已有上传 RPC、每文件独立幂等键；目录仅展开文件，不改变 Python Task/Outbox 语义。Go 历史会话返回创建/最近消息时间并稳定倒序；会话的 `dataset_id` 仅记录最近一次选择，发送时可切换为任一当前归属且可用的知识库，因此已删除知识库的历史会话可继续使用其他知识库。回答 Markdown 禁止原始 HTML并清洗输出，引用证据保留原文。
 
 2026-09-06 产品控制面迭代开始实施：`backend/go-api` 使用独立 MySQL 保存个人用户、模型配置、资源所有权索引和会话，单用户拥有多个 Dataset，无租户角色。网络 API 使用根路径与 24 小时 JWT cookie。Go Agent 通过现有 `Retrieve` RPC 执行只读工具调用，绑定已鉴权 Dataset，限制轮数/时间并支持取消。知识库创建、文档管理和知识库删除均经 Python RPC；Go 不读写 Python 表。Embedding 已改为用户配置及 Dataset 加密快照。实施与验收记录见 `docs/development/live-product-plane.md`。
 

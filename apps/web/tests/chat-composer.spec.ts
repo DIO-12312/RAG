@@ -53,3 +53,40 @@ it("发送 Enter 提交问题，Ctrl+Enter 与输入法组合期间只换行", a
   expect(wrapper.get("textarea").element.value).toBe("");
   wrapper.unmount();
 });
+
+it("同一会话切换知识库后保留历史并带新知识库继续提问", async () => {
+  const requests: Array<{ datasetId: string; conversationId?: string }> = [];
+  server.use(
+    http.get("*/datasets", () => HttpResponse.json([
+      { id: "dataset-ready", name: "发布资料", status: "READY", documentCount: 1, updatedAt: "2026-09-05T09:30:00Z" },
+      { id: "dataset-second", name: "运行手册", status: "READY", documentCount: 1, updatedAt: "2026-09-05T09:31:00Z" },
+    ])),
+    http.post("*/chat/stream", async ({ request }) => {
+      requests.push(await request.json() as { datasetId: string; conversationId?: string });
+      return sseResponse();
+    }),
+  );
+  await login({ email: "demo@example.test", password: "password" });
+  const router = createAppRouter({ isAuthenticated: true, restore: async () => {} });
+  await router.push("/");
+  const wrapper = mount(ChatView, { global: { plugins: [createPinia(), router] } });
+  await flushPromises();
+  await wrapper.get("textarea").setValue("第一问");
+  await wrapper.get("form").trigger("submit");
+  await flushPromises();
+  await flushPromises();
+  await wrapper.get("select").setValue("dataset-second");
+  await flushPromises();
+
+  expect(wrapper.text()).toContain("迁移窗口截至 2026 年 12 月 31 日。");
+  await wrapper.get("textarea").setValue("第二问");
+  await wrapper.get("form").trigger("submit");
+  await flushPromises();
+  await flushPromises();
+
+  expect(requests).toEqual([
+    expect.objectContaining({ datasetId: "dataset-ready" }),
+    expect.objectContaining({ datasetId: "dataset-second", conversationId: "c" }),
+  ]);
+  wrapper.unmount();
+});

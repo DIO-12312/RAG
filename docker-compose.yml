@@ -9,7 +9,7 @@ x-rag-environment: &rag-environment
   RAG_ELASTICSEARCH_CA_CERT: /run/secrets/ca.pem
   RAG_NATS_URL: nats://nats:4222
   RAG_OBJECT_ROOT: /app/data/objects
-  RAG_PARSER_VERSION: "${RAG_PARSER_VERSION:-source-router-v9}"
+  RAG_PARSER_VERSION: "${RAG_PARSER_VERSION:-source-router-v10}"
   RAG_PDF_PARSER_MODE: "${RAG_PDF_PARSER_MODE:-auto}"
   RAG_PDF_NATIVE_TEXT_MIN_CHARS_PER_PAGE: "${RAG_PDF_NATIVE_TEXT_MIN_CHARS_PER_PAGE:-40}"
   RAG_PDF_OCR_LANGUAGE: "${RAG_PDF_OCR_LANGUAGE:-chi_sim+eng}"

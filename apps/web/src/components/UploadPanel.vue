@@ -21,7 +21,7 @@ function selected(event: Event): void {
     if (known.has(fingerprint)) continue;
     known.add(fingerprint);
     if (entries.value.length >= 1000) { notice.value = "单批最多选择 1000 个文件，请分批上传。"; break; }
-    const error = !/\.(pdf|md|txt|py|go|js|ts|java|chm|chi)$/i.test(file.name) ? "不支持的文件格式" : file.size > 32*1024*1024 ? "文件超过 32 MB" : file.size === 0 ? "空文件" : "";
+    const error = !/\.(pdf|pptx|md|txt|py|go|js|ts|java|chm|chi)$/i.test(file.name) ? "不支持的文件格式" : file.size > 32*1024*1024 ? "文件超过 32 MB" : file.size === 0 ? "空文件" : "";
     entries.value.push({ id: randomUUID(), file, status: error ? "已跳过" : "等待上传", error });
   }
   input.value = "";
@@ -59,13 +59,14 @@ function fileIcon(name: string): string {
       <label>选择文件<input
         type="file"
         multiple
-        accept=".pdf,.md,.txt,.py,.go,.js,.ts,.java,.chm,.chi"
+        accept=".pdf,.pptx,.md,.txt,.py,.go,.js,.ts,.java,.chm,.chi"
         :disabled="running"
         @change="selected"
       ></label><label>选择文件夹<input
         type="file"
         multiple
-        webkitdirectory
+        :webkitdirectory="true"
+        :directory="true"
         :disabled="running"
         @change="selected"
       ></label>
@@ -112,7 +113,7 @@ function fileIcon(name: string): string {
       </div>
     </template>
     <p v-else>
-      支持 PDF、CHM/CHI、Markdown、文本与代码。不支持的文件将跳过。
+      支持 PDF、PowerPoint、CHM/CHI、Markdown、文本与代码。不支持的文件将跳过。
     </p>
   </section>
 </template>

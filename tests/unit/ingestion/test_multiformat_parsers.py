@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # 验证多格式解析器将不同文件统一为带定位信息的标准分段。
 from io import BytesIO
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
 from reportlab.pdfgen.canvas import Canvas
@@ -9,6 +10,7 @@ from reportlab.pdfgen.canvas import Canvas
 from rag_mvp.adapters.parsers.code import CodeParser
 from rag_mvp.adapters.parsers.markdown import MarkdownParser
 from rag_mvp.adapters.parsers.pdf import PdfParser
+from rag_mvp.adapters.parsers.pptx import PptxParser
 from rag_mvp.adapters.parsers.router import SourceParserRouter
 from rag_mvp.adapters.parsers.text import TextParser
 from rag_mvp.domain.errors import DomainError
@@ -70,6 +72,36 @@ def _text_pdf() -> bytes:
     return buffer.getvalue()
 
 
+def _text_pptx() -> bytes:
+    """构造含两张有序文字幻灯片的最小 OOXML 演示文稿。"""
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "ppt/presentation.xml",
+            '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            '<p:sldIdLst><p:sldId id="256" r:id="rId2"/><p:sldId id="257" r:id="rId1"/>'
+            "</p:sldIdLst></p:presentation>",
+        )
+        archive.writestr(
+            "ppt/_rels/presentation.xml.rels",
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/'
+            '2006/relationships/slide" Target="slides/slide1.xml"/>'
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/'
+            '2006/relationships/slide" Target="slides/slide2.xml"/>'
+            "</Relationships>",
+        )
+        for number, text in ((1, "Second declared slide"), (2, "First declared slide")):
+            archive.writestr(
+                f"ppt/slides/slide{number}.xml",
+                '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+                'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+                f"<a:t>{text}</a:t></p:sld>",
+            )
+    return buffer.getvalue()
+
+
 @pytest.mark.asyncio
 async def test_pdf_parser_returns_one_traceable_segment_per_text_page() -> None:
     """验证本测试场景的预期行为与边界条件。"""
@@ -83,6 +115,20 @@ async def test_pdf_parser_returns_one_traceable_segment_per_text_page() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pptx_parser_preserves_slide_order_and_pdf_like_page_provenance() -> None:
+    segments = await PptxParser().parse("guide.pptx", _text_pptx())
+
+    assert [segment.text for segment in segments] == [
+        "First declared slide",
+        "Second declared slide",
+    ]
+    assert [segment.locator.page_number for segment in segments] == [1, 2]
+    assert all(
+        segment.metadata == {"source_type": "pptx", "parser_mode": "slides"} for segment in segments
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("source_name", "source_type"),
     [
@@ -90,11 +136,18 @@ async def test_pdf_parser_returns_one_traceable_segment_per_text_page() -> None:
         ("guide.md", "markdown"),
         ("main.go", "code"),
         ("guide.pdf", "pdf"),
+        ("guide.pptx", "pptx"),
     ],
 )
 async def test_router_selects_supported_parser(source_name: str, source_type: str) -> None:
     """验证本测试场景的预期行为与边界条件。"""
-    content = _text_pdf() if source_name.casefold().endswith(".pdf") else b"plain content"
+    content = (
+        _text_pdf()
+        if source_name.casefold().endswith(".pdf")
+        else _text_pptx()
+        if source_name.casefold().endswith(".pptx")
+        else b"plain content"
+    )
 
     segments = await SourceParserRouter().parse(source_name, content)
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {onMounted,onActivated,onBeforeUnmount,computed,ref,watch,nextTick} from "vue";import {streamChat,type ChatStream} from "@/api/chat";import {useDatasetStore} from "@/stores/datasets";import type {Citation} from "@/api/contracts";import {request} from "@/api/http";
+import {onMounted,onActivated,onBeforeUnmount,computed,ref,watch} from "vue";import {streamChat,type ChatStream} from "@/api/chat";import {useDatasetStore} from "@/stores/datasets";import type {Citation} from "@/api/contracts";import {request} from "@/api/http";
 import AppIcon from "@/components/AppIcon.vue";
 import KnowledgeOrb from "@/components/KnowledgeOrb.vue";
 import MarkdownContent from "@/components/MarkdownContent.vue";
@@ -14,11 +14,12 @@ const contextWarning=computed(()=>{const usage=contextUsage.value;if(!usage||!us
 async function refreshHistory():Promise<void>{try{conversations.value=await request('/conversations');}catch(e){error.value=e instanceof Error?e.message:'历史会话加载失败';}}
 function newChat():void{if(busy.value)return;conversationId.value='';transcript.value=[];answer.value='';citations.value=[];question.value='';error.value='';contextUsage.value=undefined;if(route.query.c)router.replace({query:{}});}
 function sendOnEnter(event:KeyboardEvent):void{if(event.isComposing||event.keyCode===229)return;if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();void ask();}
-let active:ChatStream|undefined;let resuming=false;
-onMounted(async()=>{await datasets.load();selectedId.value=datasets.readyDatasets[0]?.id??"";try{conversations.value=await request("/conversations");}catch{error.value="会话列表加载失败";}const c=route.query.c;if(typeof c==="string"&&c)await resume(c);});
+let active:ChatStream|undefined;
+function selectAvailableDataset(preferred=""):void{const available=datasets.readyDatasets;if(available.some(dataset=>dataset.id===preferred)){selectedId.value=preferred;return;}if(!available.some(dataset=>dataset.id===selectedId.value))selectedId.value=available[0]?.id??"";}
+onMounted(async()=>{await datasets.load();selectAvailableDataset();try{conversations.value=await request("/conversations");}catch{error.value="会话列表加载失败";}const c=route.query.c;if(typeof c==="string"&&c)await resume(c);});
 onActivated(async()=>{try{conversations.value=await request("/conversations");}catch{/* keep stale list */}});
-onBeforeUnmount(()=>active?.cancel());watch(selectedId,()=>{if(resuming)return;active?.cancel();conversationId.value="";transcript.value=[];answer.value="";citations.value=[];contextUsage.value=undefined;});
-async function resume(id:string):Promise<void>{const row=conversations.value.find(c=>c.id===id);if(!row||busy.value)return;resuming=true;selectedId.value=row.datasetId;await nextTick();resuming=false;conversationId.value=id;try{transcript.value=await request("/conversations/"+id+"/messages");}catch(e){error.value=e instanceof Error?e.message:"会话加载失败";}}
+onBeforeUnmount(()=>active?.cancel());watch(()=>datasets.readyDatasets.map(dataset=>dataset.id).join(","),()=>selectAvailableDataset());
+async function resume(id:string):Promise<void>{const row=conversations.value.find(c=>c.id===id);if(!row||busy.value)return;selectAvailableDataset(row.datasetId);conversationId.value=id;try{transcript.value=await request("/conversations/"+id+"/messages");}catch(e){error.value=e instanceof Error?e.message:"会话加载失败";}}
 async function ask():Promise<void>{if(!selectedId.value||!question.value.trim()||busy.value)return;if(!conversationId.value){conversationId.value=randomUUID();router.replace({query:{c:conversationId.value}});}busy.value=true;error.value="";answer.value="";citations.value=[];contextUsage.value=undefined;phase.value="正在思考并检索…";const q=question.value;active=streamChat({datasetId:selectedId.value,question:q,conversationId:conversationId.value});let final=false;try{for await(const event of active.events){if(event.type==="context")contextUsage.value={estimatedTokens:event.estimatedTokens,usableTokens:event.usableTokens,evidenceCount:event.evidenceCount,evidenceLimit:event.evidenceLimit};if(event.type==="retrieval")phase.value="已检索到 "+event.hits.length+" 条证据，正在生成回答…";if(event.type==="token")answer.value+=event.text;if(event.type==="error")throw new Error(event.message);if(event.type==="final"){answer.value=event.answer;citations.value=event.citations;conversationId.value=event.conversationId??"";transcript.value.push({role:"user",content:q,citations:[]},{role:"assistant",content:answer.value,citations:citations.value});question.value="";answer.value="";citations.value=[];final=true;}}if(final)conversations.value=await request("/conversations");}catch(e){error.value=e instanceof Error&&e.name==="AbortError"?"已停止生成":e instanceof Error?e.message:"问答失败";}finally{busy.value=false;phase.value="";active=undefined;}}
 </script>
 <template>
@@ -121,7 +122,7 @@ async function ask():Promise<void>{if(!selectedId.value||!question.value.trim()|
         <label><span class="sr-only">问题</span><textarea
           v-model="question"
           maxlength="4000"
-          placeholder="基于这个知识库提问"
+          placeholder="基于当前知识库提问；可随时切换知识库"
           rows="2"
           :disabled="busy"
           required

@@ -204,7 +204,7 @@ func (s *Server) upload(c *gin.Context) {
 	defer part.Close()
 	name := filepath.Base(part.FileName())
 	ext := strings.ToLower(filepath.Ext(name))
-	if !strings.Contains("|.pdf|.md|.txt|.py|.go|.js|.ts|.java|.chm|.chi|", "|"+ext+"|") {
+	if !strings.Contains("|.pdf|.pptx|.md|.txt|.py|.go|.js|.ts|.java|.chm|.chi|", "|"+ext+"|") {
 		fail(c, 400, "UNSUPPORTED_FILE", "暂不支持此文件格式。")
 		return
 	}
@@ -299,6 +299,11 @@ func (s *Server) jobAction(c *gin.Context) {
 func (s *Server) reindexDocument(c *gin.Context) {
 	r, ok := s.owned(c, c.Param("id"), "document")
 	if !ok {
+		return
+	}
+	// Reindex 会复用 Dataset 的加密 embedding profile。先同步当前个人设置，确保
+	// 用户刚替换的 API Key 不会被旧快照继续使用。
+	if !s.bindEmbedding(c, r.DatasetID) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)

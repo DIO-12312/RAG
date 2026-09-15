@@ -9,6 +9,7 @@ from rag_mvp.adapters.parsers.chm import ChmLibExtractor, ChmParser
 from rag_mvp.adapters.parsers.code import CodeParser
 from rag_mvp.adapters.parsers.markdown import MarkdownParser
 from rag_mvp.adapters.parsers.pdf import PdfParser
+from rag_mvp.adapters.parsers.pptx import PptxParser
 from rag_mvp.adapters.parsers.text import TextParser
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.ports.parser import ParsedSegment, Parser, PdfParserMode
@@ -35,6 +36,7 @@ class SourceParserRouter:
         chm_parser: Parser | None = None,
         chi_parser: Parser | None = None,
         pdf_parser: Parser | None = None,
+        pptx_parser: Parser | None = None,
     ) -> None:
         text = TextParser()
         markdown = MarkdownParser()
@@ -60,6 +62,7 @@ class SourceParserRouter:
             max_topics=chm_max_topics,
         )
         chi = chi_parser or ChiParser(extractor)
+        pptx = pptx_parser or PptxParser(max_slides=pdf_max_pages)
         self._parsers: dict[str, Parser] = {
             ".txt": text,
             ".md": markdown,
@@ -69,6 +72,7 @@ class SourceParserRouter:
             ".ts": code,
             ".java": code,
             ".pdf": pdf,
+            ".pptx": pptx,
             ".chm": chm,
             ".chi": chi,
         }

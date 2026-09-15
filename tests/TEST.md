@@ -15,7 +15,7 @@
 | `backend/go-api/internal/ragclient/client_test.go::TestReindexDocumentForwardsIdempotentCommand`、`TestReindexDocumentRejectsBusinessErrorAndMissingResult` | 验证 Go 控制面正确转发主动重建命令，并对业务错误和缺失结果 fail closed。 |
 | `apps/web/tests/dataset-batch.spec.ts` | 验证单个及批量已索引文档可发起重新索引，并展示已受理数量。 |
 | `apps/web/tests/api-contracts.spec.ts` | 验证前端重新索引路由与 Go API 路径一致。 |
-| `backend/go-api/internal/agent/*_test.go` | 验证模型调用次数仅用于观测而不再硬性终止；检索轮次、工具、Evidence 与上下文容量仍有界，但容量耗尽通过截断/压缩收敛而不是把正常问答判为失败；重复查询会收敛到最终回答。 |
+| `backend/go-api/internal/agent/*_test.go` | 验证模型调用次数仅用于观测而不再硬性终止；检索轮次、工具、Evidence 与上下文容量仍有界，但容量耗尽通过截断/压缩收敛而不是把正常问答判为失败；重复查询会收敛到最终回答。`TestRouteIntentBoundaries` 覆盖当前知识库概览不得误判为指代不清，`TestSystemPromptGuidesEvidenceBoundariesWithoutConfidenceScores` 固定主提示词的证据与置信度边界。 |
 
 ### 2026-09-13 开发环境 Make 入口
 
@@ -144,10 +144,10 @@ apps/web/tests/
 | `contract/test_build_entrypoints.py` | `test_web_restart_only_rebuilds_web_through_earthly`：执行 Make recipe 与 Earthfile RUN 的命令替身，验证仅重新构建/重建 web、静默校验 Compose、不启动依赖或删除卷 | 离线 sh；GNU Make 转发另用 make -n 检查；不实际重启 Docker，不替代真实容器验收 |
 | `contract/test_container_artifacts.py` | Runtime 不再注入 Embedding 凭据，只读共享基础设施密钥；旧模型环境变量只用于显式模型测试 | `make ci` |
 | `integration/test_mysql_migrations.py` | 升级至 0003，加密快照列可空以兼容旧 Dataset | 必须隔离测试库，fixture 会清空业务表 |
-| `integration/test_mysql_submission.py` | `test_embedding_binding_is_first_write_only`：原模型不匹配拒绝、并发首次绑定收敛、后续配置不能覆盖快照 | 真实隔离 MySQL |
+ | `integration/test_mysql_submission.py` | `test_embedding_binding_refreshes_key_snapshot_but_keeps_vector_space`：同模型同维度可刷新加密 Key 快照，不匹配的模型或维度拒绝 | 真实隔离 MySQL |
 | `embedding_profile.py`、`e2e/conftest.py`、`resilience/docker/conftest.py` | `encrypted_test_profile` 使用测试专用凭据和共享加密密钥组装创建请求；无密钥路径则保持独立旧模式 | 显式真实模型测试；不打印密钥 |
 
-前端测试位于 `apps/web/tests/`：原 `upload-panel.spec.ts` 替换为 `batch-upload.spec.ts`（三项：独立失败重试/固定幂等键、文件夹展开与过滤、CHM/CHI 文件接纳）；新增 `markdown-content.spec.ts`（结构化渲染/流式更新、XSS与远程图片防护）。它们经 `npm test -- --run` 执行，不包含在 Python 门禁中。Go `TestLiveProductFlow` 通过真实 MySQL/gRPC/Worker/Embedding 验证保存配置、摄取、检索、会话时间与用户隔离；Chat 使用确定性测试供应商，除非显式启用真实 Chat。
+前端测试位于 `apps/web/tests/`：原 `upload-panel.spec.ts` 替换为 `batch-upload.spec.ts`（独立失败重试/固定幂等键、文件夹展开与过滤、PPTX/CHM/CHI 文件接纳、`webkitdirectory` 与 `directory` 属性）；新增 `markdown-content.spec.ts`（结构化渲染/流式更新、XSS与远程图片防护）。`chat-composer.spec.ts` 的“同一会话切换知识库后保留历史并带新知识库继续提问”覆盖会话不再不可变绑定知识库，删除旧库后可选择其他 READY 知识库继续提问。它们经 `npm test -- --run` 执行，不包含在 Python 门禁中。Go `TestLiveProductFlow` 通过真实 MySQL/gRPC/Worker/Embedding 验证保存配置、摄取、检索、会话时间与用户隔离；Chat 使用确定性测试供应商，除非显式启用真实 Chat。
 
 ```text
 tests/
@@ -517,6 +517,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_submit_document_rejects_data_before_header` | 上传流首帧必须为 header。 |
 | 同上 | `test_open_methods_work_through_generated_grpc_transport` | 已开放方法可经生成的 gRPC transport 调用。 |
 | `test_metadata_repository_contract.py` | `test_submit_atomically_creates_task_and_waiting_outbox_and_deduplicates` | 提交原子创建 Task/WAITING Outbox，并分别验证同 key 与同 fingerprint 去重。 |
+| 同上 | `test_embedding_key_refresh_keeps_existing_model_and_dimension` | 同一模型与维度下刷新加密 Key 快照；模型或维度变化保持拒绝。 |
 | 同上 | `test_metadata_port_exposes_dataset_deletion_lifecycle` | Metadata Port 声明 Dataset 删除、对象快照和最终 purge 契约。 |
 | 同上 | `test_submit_failure_does_not_leave_partial_metadata` | 提交失败不留下部分元数据。 |
 | 同上 | `test_finalizer_transition_and_task_claim_are_conditional` | Finalizer/Relay 转换为条件更新；Task 按 delivery sequence 去重并允许更高序号重投。 |
@@ -577,6 +578,7 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | 同上 | `test_deleted_generation_fence_prevents_object_ready_and_task_claim` | Document 删除/generation 失配时禁止对象就绪和 Task 认领。 |
 | 同上 | `test_fail_task_persists_retryability_and_terminal_state_once` | Worker 失败只落一次终态，并按正式对象是否存在设置 Fingerprint 可重试状态。 |
 | `test_mysql_submission.py` | `test_concurrent_same_fingerprint_creates_one_canonical_task_and_outbox` | 并发同内容上传只保留一个 canonical Document/Job/Task/Outbox，并记录两个幂等结果。 |
+| 同上 | `test_embedding_binding_refreshes_key_snapshot_but_keeps_vector_space` | 真实 MySQL 行锁下验证旧 Key 快照可更新，向量空间参数不可变。 |
 | 同上 | `test_exception_before_commit_rolls_back_all_submission_rows` | Outbox INSERT 前异常使 Document/Fingerprint/Job/Task/Outbox/IndexBuild/幂等记录全部回滚。 |
 | 同上 | `test_same_idempotency_key_replays_result_and_rejects_changed_command` | 同 key 同命令回放首次结果，同 key 不同命令返回稳定冲突且不产生额外状态。 |
 | `test_real_embedding_model.py` | `test_real_embedding_returns_finite_declared_dimension_and_stable_duplicates` | 真实 API 分批返回声明维度的有限向量，相同中文文本向量保持高度一致。 |

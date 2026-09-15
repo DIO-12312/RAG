@@ -59,8 +59,9 @@ func (s *Server) chat(c *gin.Context) {
 	if e != nil {
 		_, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversations(id,user_id,dataset_id,title) VALUES(?,?,?,?)", p.ConversationID, uid(c), p.DatasetID, string(title))
 	} else if dataset != p.DatasetID {
-		fail(c, 404, "NOT_FOUND", "会话不存在或知识库不匹配。")
-		return
+		// 会话只保存最近一次选择，不能把知识库当作不可变外键。这样已删除知识库
+		// 的历史会话仍可切换到一个可用知识库继续进行。
+		_, e = s.Store.DB.ExecContext(ctx, "UPDATE conversations SET dataset_id=? WHERE id=? AND user_id=?", p.DatasetID, p.ConversationID, uid(c))
 	}
 	if e != nil {
 		fail(c, 503, "SAVE_FAILED", "会话创建失败。")
