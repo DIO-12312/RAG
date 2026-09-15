@@ -378,3 +378,69 @@ Embedding 服务不可用，请检查模型地址与网络
 1. **进度不可见**：大文档摄取期间 Job 进度长期停在 1%，用户无法判断是否卡住（本次实测一次摄取 10 分钟以上）。
 2. **失败重试预算用尽后没有界面出口**：FAILED 文档既不能 Retry（预算用尽）也不能 Reindex（未建立索引），只能删除后重新上传；本次已把 Reindex 的错误文案改为可执行提示，但界面仍缺少「删除后重新上传」的引导。
 3. 账号级 Embedding 窗口配额没有在界面上体现，用户只能在任务失败后才看到额度提示。
+
+## 11. 自动发布被兼容性门禁拦住（2026-09-16，发布链路）
+
+### 11.1 现象
+
+GitHub 流水线的质量门禁通过，`make production-deploy` 在切换前失败：
+
+```
++production-deploy | persistent schema/infrastructure changed: maintenance deployment required
+```
+
+### 11.2 根因
+
+`scripts/release.py` 的兼容性摘要把 `MAINTENANCE_PATHS` 整体纳入哈希，其中包含**整个** `compose.production.yml`。
+`active.json`（seq 20 / `536dbe6`）到 `f0540fa` 的差异里同时存在两类完全不同的改动：
+
+| 文件 | 改动性质 | 是否真的需要维护窗口 |
+|---|---|---|
+| `backend/go-api/internal/storage/schema.sql` | `conversation_messages` 增加 `dataset_id` 列与索引 | **需要**（启动时 ALTER TABLE） |
+| `backend/go-api/internal/storage/storage.go` | 启动幂等迁移 + 回填 `dataset_id` | **需要** |
+| `deploy/production/Caddyfile` | 安全响应头移入 API 处理块 | 按现有策略视为需要 |
+| `compose.production.yml` | 只改了 `RAG_MAX_UPLOAD_BYTES` 默认值、新增 `PRODUCT_MAX_UPLOAD_BYTES`、给 web 加 build args | **不需要**（重建容器即替换的启动参数） |
+
+门禁的判断是**正确的**：确实存在 schema/启动迁移变化。但同时暴露两个问题：
+
+1. **摘要粒度过粗**：改一个 env 默认值也会要求维护窗口，后续每次调整配置都会被拦。
+2. **DDL 已经绕过门禁执行了**：手工 `make production-run` 不经过 `release.py`，Go API 一启动就把
+   `conversation_messages` 加上了 `dataset_id`（已核对生产库：列与 `conversation_dataset` 索引都在）。
+   也就是说「Go API 内置初始化列入阻断范围」只挡住了自动发布，挡不住手工部署路径。
+
+### 11.3 修复
+
+- `scripts/release.py` 新增 `strip_restart_only_blocks`：哈希 Compose 前只丢弃 service 级
+  `build`/`environment`/`env_file`/`labels`，以及仅被这些位置引用的顶层 `x-` 锚点
+  （例如 `environment: *rag-environment`）；`volumes`/`ports`/`secrets`/`networks`/`configs`/
+  `command`/`entrypoint`/`healthcheck`/`depends_on` 与 schema、migrations、Caddyfile 仍整体参与摘要
+- 实测：`536dbe6` 与 `f0540fa` 的 Compose 投影后完全一致（env + build args 差异被消除），
+  改 volume/port 仍会改变摘要；投影后仍是合法 YAML，服务集合与顶层 `volumes`/`secrets` 不变
+- contract 测试固定该行为（`tests/contract/test_release_deployment.py` 三个用例）
+
+### 11.4 主机侧一次性重建基线（已执行）
+
+摘要算法本身变化后，历史基线必然失配，因此按 `docs/deployment-release.md` 的维护升级流程重建：
+
+```bash
+# 1. 备份发布状态（保留全部历史 compose 配置与回滚 tag）
+cp -a /var/lib/rag-deploy/. /var/lib/rag-deploy-archive/<ts>/
+# 2. baseline 要求 active.json 不存在：把 active/previous 移入归档
+mv /var/lib/rag-deploy/{active,previous}.json /var/lib/rag-deploy-archive/<ts>/state-originals/
+# 3. 用当前健康运行栈重建基线（不重启容器、不跑迁移、不触碰任何卷）
+make production-baseline RELEASE_SHA=<sha>
+```
+
+重建后逐项复验发布门禁的三道检查：
+
+| 检查 | 结果 |
+|---|---|
+| 兼容性摘要（release 树 vs 记录值） | 一致 `58faff102f3260c2…` |
+| 序号可推进 | `active.sequence=0`，新发布序号可写入 |
+| 镜像漂移（运行容器镜像 ID vs 基线配置） | rag-server/rag-worker/rag-outbox/api/web 五项全部一致 |
+
+### 11.5 遗留风险（未修复）
+
+- **手工 `make production-run` 会绕过发布门禁执行迁移**：本次生产库的 `dataset_id` 就是这么落地的。
+  要么把手工入口限制为「不得使用比基线更新的 schema」，要么让 Go API 的启动迁移改为显式命令。
+- 任何一次摘要算法调整都会要求重建基线；本次已把该代价体现在文档中。
