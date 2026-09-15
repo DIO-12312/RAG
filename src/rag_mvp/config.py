@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     nats_subject: str = "rag.tasks"
     nats_ack_wait_seconds: float = Field(default=60.0, gt=0)
     nats_max_deliver: int = Field(default=3, ge=1)
+    # 失败重投不再立即回队：限流窗口内的连续重试只会把可恢复失败放大成终态失败。
+    nats_retry_backoff_seconds: float = Field(default=15.0, ge=0.0, le=600.0)
+    # 单文档摄取可能跑满数分钟，必须在 ack_wait 到期前续约投递。
+    worker_keepalive_seconds: float = Field(default=15.0, gt=0.0, le=300.0)
     object_root: Path = Path("data/objects")
 
     max_upload_bytes: int = Field(default=64 * 1024 * 1024, ge=1)

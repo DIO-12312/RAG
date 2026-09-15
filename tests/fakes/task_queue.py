@@ -19,6 +19,8 @@ class FakeTaskQueue:
         self._next_sequence = 1
         self.acked_task_ids: list[str] = []
         self.nak_failures: list[DomainFailure] = []
+        self.nak_delays: list[float] = []
+        self.in_progress_deliveries: list[str] = []
 
     def _delivery(self, task_id: str, redelivery_count: int) -> Delivery:
         """构造包含消费序号与重投次数的测试投递。"""
@@ -54,14 +56,20 @@ class FakeTaskQueue:
 
     async def nak(self, delivery: Delivery, delay_seconds: float, error: DomainFailure) -> None:
         """记录否认确认动作，以便测试重试路径。"""
-        del delay_seconds
         async with self._lock:
             current = self._in_flight.pop(delivery.id, None)
             if current is None:
                 return
             self.nak_failures.append(error)
+            self.nak_delays.append(delay_seconds)
             # NAK 不丢弃任务，而是以更高重投次数再次排队。
             self._available.append(self._delivery(current.task_id, current.redelivery_count + 1))
+
+    async def in_progress(self, delivery: Delivery) -> None:
+        """记录续约动作，模拟 JetStream 的 ack_wait 延长。"""
+        async with self._lock:
+            if delivery.id in self._in_flight:
+                self.in_progress_deliveries.append(delivery.id)
 
     async def redeliver_unacked(self) -> None:
         """将未确认投递重新放回队列，模拟至少一次语义。"""

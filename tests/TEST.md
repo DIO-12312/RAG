@@ -324,6 +324,8 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_auth_failure_is_non_retryable_and_redacts_provider_body` | 401/403 不重试，映射稳定鉴权错误且不泄漏供应商正文或密钥。 |
 | 同上 | `test_embed_does_not_duplicate_existing_embeddings_suffix` | 已带 `/embeddings` 的 endpoint 不被重复拼接。 |
 | 同上 | `test_transient_statuses_retry_with_a_bound_and_recover` | 429/5xx 按有上限的指数退避重试，并在后续成功时恢复。 |
+| 同上 | `test_throttling_honours_retry_after_and_pauses_every_batch` | 429 按 `Retry-After` 退避，并让同一文档的其他并发批次一起放慢。 |
+| 同上 | `test_exhausted_throttling_reports_provider_status_and_code` | 限流耗尽后的失败信息包含提供方状态码与错误码，且不泄漏凭据或输入文本。 |
 | 同上 | `test_timeout_exhaustion_maps_to_retryable_unavailable` | 网络超时耗尽重试后映射为可重试 `EMBEDDING_UNAVAILABLE`。 |
 | `application/test_document_service.py` | `test_create_dataset_rejects_runtime_embedding_mismatch` | Dataset 声明的 Embedding 模型或维度与运行配置不一致时返回稳定错误。 |
 | `application/test_cleanup_service.py` | `test_dataset_cleanup_deletes_search_then_objects_then_purges_metadata` | Dataset cleanup 按 ES、对象、MySQL 顺序执行并最终移除完整聚合。 |
@@ -410,6 +412,9 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | `ingestion/test_worker.py` | `test_worker_claims_executes_completes_then_acks` | Worker 的认领、执行、完成、ACK 顺序正确。 |
 | 同上 | `test_worker_returns_false_when_queue_is_empty` | 空队列时 Worker 不执行任务并返回空结果。 |
 | 同上 | `test_worker_naks_retryable_failure_then_fails_at_delivery_limit` | 可重试失败 NAK，达到投递上限后写入失败终态。 |
+| 同上 | `test_retryable_failure_naks_with_growing_backoff_delay` | 可恢复失败按递增延迟重投，不再立即回队冲击限流中的提供方。 |
+| 同上 | `test_worker_events_carry_job_document_and_dataset_ids` | 投递事件携带 Job/Document/Dataset 关联字段与失败原因，日志可定位到具体文档。 |
+| 同上 | `test_slow_ingestion_keeps_the_delivery_alive` | 长耗时摄取期间周期性续约投递，避免 `ack_wait` 到期后重复投递。 |
 | 同上 | `test_dataset_cleanup_failure_naks_even_at_delivery_limit_without_terminalizing` | Dataset cleanup 以专用可重试错误码 NAK，且不写失败终态。 |
 | 同上 | `test_late_dataset_cleanup_delivery_after_purge_is_ack_only` | Dataset 已 purge 后迟到的清理 delivery 只 ACK，不执行任何清理。 |
 | `outbox/test_finalizer.py` | `test_finalizer_promotes_object_before_outbox_becomes_ready` | 仅正式对象提升成功后，Outbox 才能 READY。 |
@@ -457,6 +462,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_production_source_never_imports_test_fakes` | 生产源码不得导入 `tests/fakes`。 |
 | 同上 | `test_all_declared_ports_are_protocols` | 所有 Port 均以 Protocol 声明。 |
 | `test_observability.py` | `test_rag_event_always_contains_correlation_and_stage_fields` | 结构化事件包含关联 ID 与阶段字段。 |
+| 同上 | `test_rag_event_records_absent_optional_fields_explicitly` | 可选字段缺省时仍以同一 schema 输出，便于按字段查询日志。 |
 | `test_process_lifecycle.py` | `test_empty_background_process_stops_without_external_connections` | Worker/Outbox 即使处于长轮询等待，也可由 stop event 立即退出且不连接外部服务。 |
 | 同上 | `test_grpc_server_starts_and_stops_cleanly` | gRPC Server 可启动并优雅停止。 |
 | 同上 | `test_all_unopened_rpc_methods_return_feature_not_available` | 未开放 RPC 返回 `FEATURE_NOT_AVAILABLE`。 |

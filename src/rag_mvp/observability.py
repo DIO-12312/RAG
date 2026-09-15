@@ -19,6 +19,8 @@ def emit_event(
     duration_ms: float = 0.0,
     index_version: int | None = None,
     error_code: str | None = None,
+    failure_message: str | None = None,
+    retry_in_seconds: float | None = None,
 ) -> None:
     """Emit one event with the complete correlation schema, including absent values."""
 
@@ -32,4 +34,6 @@ def emit_event(
         duration_ms=duration_ms,
         index_version=index_version,
         error_code=error_code,
+        failure_message=failure_message,
+        retry_in_seconds=retry_in_seconds,
     )
