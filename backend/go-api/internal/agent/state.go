@@ -45,7 +45,6 @@ var (
 
 // RunLimits 集中定义一次 Run 的全部预算。
 type RunLimits struct {
-	MaxModelCalls        int
 	MaxRetrievalRounds   int
 	MaxRewriteRounds     int
 	MaxToolCallsPerRound int
@@ -56,7 +55,6 @@ type RunLimits struct {
 // DefaultRunLimits 保留既有对外行为并补齐检索/改写轮次上限。
 func DefaultRunLimits() RunLimits {
 	return RunLimits{
-		MaxModelCalls:        6,
 		MaxRetrievalRounds:   3,
 		MaxRewriteRounds:     2,
 		MaxToolCallsPerRound: 4,
@@ -157,18 +155,7 @@ func (s *RunState) TransitionTo(next RunPhase) error {
 	return nil
 }
 
-// CheckModelCall 在调用模型前校验预算，成功后由 RecordModelCall 递增。
-func (s *RunState) CheckModelCall() error {
-	if err := s.ensureActive(); err != nil {
-		return err
-	}
-	if s.ModelCalls >= s.Limits.MaxModelCalls {
-		return fmt.Errorf("%w: model calls reached %d", ErrBudgetExceeded, s.Limits.MaxModelCalls)
-	}
-	return nil
-}
-
-// RecordModelCall 记录一次成功的模型调用。
+// RecordModelCall 记录一次成功的模型调用，仅用于策略选择与可观测性，不作为硬上限。
 func (s *RunState) RecordModelCall() { s.ModelCalls++ }
 
 // CheckRetrievalRound 在开始新一轮检索前校验预算。

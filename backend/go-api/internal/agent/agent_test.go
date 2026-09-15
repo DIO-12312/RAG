@@ -96,15 +96,15 @@ func TestUnknownToolBudgetAndCancellation(t *testing.T) {
 	call.Function.Arguments = `{"query":"q"}`
 	m := &fixedModel{msg: Message{ToolCalls: []ToolCall{call}}}
 	tool := &retriever{}
-	h := Harness{Model: m, Tool: tool, MaxRounds: 2}
+	h := Harness{Model: m, Tool: tool}
 	emit := func(string, any) error { return nil }
 	if _, _, e := h.Run(context.Background(), "owned", "q", nil, emit); e == nil || tool.calls != 0 {
 		t.Fatal("unknown tool accepted")
 	}
 	m.msg.ToolCalls[0].Function.Name = "rag_retrieve"
 	m.calls = 0
-	if _, _, e := h.Run(context.Background(), "owned", "q", nil, emit); e == nil || m.calls != 2 {
-		t.Fatal("budget not enforced")
+	if _, _, e := h.Run(context.Background(), "owned", "q", nil, emit); e == nil || m.calls != 3 {
+		t.Fatal("duplicate query did not converge")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -419,21 +419,15 @@ func TestHarnessClarificationSkipsModelAndRetrieval(t *testing.T) {
 }
 
 func TestHarnessUsesStandaloneQueryForFollowUp(t *testing.T) {
-	m := &fixedModel{
-		msg: Message{
-			ToolCalls: []ToolCall{{
-				ID: "follow-up-call",
-			}},
-		},
-	}
-	m.msg.ToolCalls[0].Function.Name = "rag_retrieve"
-	m.msg.ToolCalls[0].Function.Arguments = `{"query":"模型自己生成的错误查询"}`
+	first := Message{ToolCalls: []ToolCall{{ID: "follow-up-call"}}}
+	first.ToolCalls[0].Function.Name = "rag_retrieve"
+	first.ToolCalls[0].Function.Arguments = `{"query":"模型自己生成的错误查询"}`
+	m := &scriptedModel{responses: []Message{first, {Content: "答案 [1]"}}}
 
 	tool := &retriever{}
 	h := Harness{
-		Model:     m,
-		Tool:      tool,
-		MaxRounds: 1,
+		Model: m,
+		Tool:  tool,
 	}
 
 	_, _, err := h.Run(
@@ -450,8 +444,8 @@ func TestHarnessUsesStandaloneQueryForFollowUp(t *testing.T) {
 			return nil
 		},
 	)
-	if err == nil {
-		t.Fatal("run succeeded, want round limit error")
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
 	}
 
 	want := "文档里怎么配置超时？那它有什么限制？"

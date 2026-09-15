@@ -73,7 +73,7 @@ protoc --proto_path=../../proto --go_out=. --go_opt=module=rag-mvp/backend/go-ap
 
 ## Agentic RAG Loop（2026-09-13）
 
-Go Agent 现在是显式状态机：`route → model → tool → assess → finalize`，证据不足时按缺口有界地 `rewrite → tool → assess`（最多 2 轮改写、3 轮检索、6 次模型调用）。路由结果直接决定 provider 请求的工具策略：`reply`/`reuse` 使用 `ToolNone`（payload 完全不带 `tools`/`tool_choice`），`retrieve` 首轮 `ToolRequired`、后续 `ToolAuto`。`rag_retrieve` 仍只读并绑定服务端授权的 dataset；Python 依旧只提供 gRPC `Retrieve`。
+Go Agent 现在是显式状态机：`route → model → tool → assess → finalize`，证据不足时按缺口有界地 `rewrite → tool → assess`（最多 2 轮改写、3 轮检索；模型调用次数仅记录，不设硬上限）。路由结果直接决定 provider 请求的工具策略：`reply`/`reuse` 使用 `ToolNone`（payload 完全不带 `tools`/`tool_choice`），`retrieve` 首轮 `ToolRequired`、后续 `ToolAuto`。`rag_retrieve` 仍只读并绑定服务端授权的 dataset；Python 依旧只提供 gRPC `Retrieve`。
 
 验证入口（本地离线，一条命令）：
 

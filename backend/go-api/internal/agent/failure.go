@@ -21,7 +21,7 @@ func FailureHint(err error) (string, string) {
 	if errors.As(err, &runErr) {
 		switch runErr.Reason {
 		case StopReasonBudgetExceeded:
-			return "RUN_BUDGET_EXCEEDED", "本次提问超出检索或模型预算，请重试或换一种问法。"
+			return "RUN_BUDGET_EXCEEDED", "本次提问超出检索、工具或上下文预算，请重试或换一种问法。"
 		case StopReasonInvalidToolCall:
 			return "TOOL_CALL_INVALID", "模型返回了不受支持的工具调用或引用，请重试或更换模型。"
 		case StopReasonProviderError:

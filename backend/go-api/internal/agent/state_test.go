@@ -58,23 +58,17 @@ func TestRunStateRejectsIllegalTransitions(t *testing.T) {
 		t.Fatalf("terminal run must not be reopened, got %v", err)
 	}
 
-	if err := done.CheckModelCall(); !errors.Is(err, ErrRunTerminal) {
-		t.Fatalf("terminal run must reject further work, got %v", err)
-	}
 }
 
 func TestRunStateBudgetsAreEnforcedBeforeActions(t *testing.T) {
 	state := newRetrieveRun()
 	limits := state.Limits
 
-	for i := 0; i < limits.MaxModelCalls; i++ {
-		if err := state.CheckModelCall(); err != nil {
-			t.Fatalf("model call %d rejected early: %v", i, err)
-		}
+	for range 20 {
 		state.RecordModelCall()
 	}
-	if err := state.CheckModelCall(); !errors.Is(err, ErrBudgetExceeded) {
-		t.Fatalf("model call over budget accepted: %v", err)
+	if state.ModelCalls != 20 {
+		t.Fatalf("model calls must remain observable without a hard limit: %d", state.ModelCalls)
 	}
 
 	for i := 0; i < limits.MaxRetrievalRounds; i++ {
@@ -139,8 +133,7 @@ func TestRunStateStopReasonIsTerminal(t *testing.T) {
 
 func TestDefaultRunLimitsMatchPlan(t *testing.T) {
 	limits := DefaultRunLimits()
-	if limits.MaxModelCalls != 6 ||
-		limits.MaxRetrievalRounds != 3 ||
+	if limits.MaxRetrievalRounds != 3 ||
 		limits.MaxRewriteRounds != 2 ||
 		limits.MaxToolCallsPerRound != 4 ||
 		limits.MaxEvidence != 40 ||

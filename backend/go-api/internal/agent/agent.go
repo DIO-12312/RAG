@@ -49,7 +49,6 @@ type Emit func(string, any) error
 type Harness struct {
 	Model     Model
 	Tool      Retriever
-	MaxRounds int
 	TopK      int
 	Budget    *ContextBudget
 	Streaming bool
@@ -62,14 +61,11 @@ type Harness struct {
 
 var reference = regexp.MustCompile(`\[(\d+)\]`)
 
-// runLimits 合并 Harness 覆盖值与默认预算；MaxRounds 继续作为模型调用上限的兼容入口。
+// runLimits 合并 Harness 覆盖值与默认预算。模型调用次数只观测，不设硬上限。
 func (h Harness) runLimits() RunLimits {
 	limits := h.Limits
-	if limits.MaxModelCalls <= 0 {
+	if limits == (RunLimits{}) {
 		limits = DefaultRunLimits()
-	}
-	if h.MaxRounds > 0 {
-		limits.MaxModelCalls = h.MaxRounds
 	}
 	return limits
 }

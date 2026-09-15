@@ -140,23 +140,22 @@ func TestRuntimeUnknownToolAndInvalidArgumentsFailClosed(t *testing.T) {
 }
 
 func TestRuntimeBudgetAndCancellationAreTerminal(t *testing.T) {
-	t.Run("model budget", func(t *testing.T) {
+	t.Run("model calls have no count budget", func(t *testing.T) {
 		model := &scriptedModel{responses: []Message{
 			toolCallMessage("call-1", "q1"),
 			toolCallMessage("call-2", "q2"),
 			toolCallMessage("call-3", "q3"),
+			{Content: "answer [1]"},
 		}}
 		tool := &retriever{}
-		limits := DefaultRunLimits()
-		limits.MaxModelCalls = 2
-		h := Harness{Model: model, Tool: tool, Limits: limits}
+		h := Harness{Model: model, Tool: tool}
 
 		state, err := runScripted(t, h, "question")
-		if err == nil || !errors.Is(err, ErrBudgetExceeded) {
-			t.Fatalf("expected budget error, got %v", err)
+		if err != nil {
+			t.Fatalf("model call count must not stop the run: %v", err)
 		}
-		if state.StopReason != StopReasonBudgetExceeded || model.calls != 2 {
-			t.Fatalf("budget must stop before the third call: %+v model=%d", state, model.calls)
+		if state.StopReason != StopReasonCompleted || model.calls != 4 || state.ModelCalls != 4 {
+			t.Fatalf("unexpected completed run: %+v model=%d", state, model.calls)
 		}
 	})
 
@@ -456,24 +455,21 @@ func TestRuntimeOrdinaryConversationNeverAssesses(t *testing.T) {
 	}
 }
 
-func TestRuntimeAssessorCountsTowardModelBudget(t *testing.T) {
+func TestRuntimeAssessorCallsAreObservedWithoutCountLimit(t *testing.T) {
 	model := &scriptedModel{responses: []Message{
 		toolCallMessage("call-1", "migration"),
 		{Content: "unused answer"},
 	}}
 	tool := &retriever{}
 	assessor := &fakeAssessor{decision: SufficiencyDecision{Sufficient: true, ReasonCode: "covered"}}
-	limits := DefaultRunLimits()
-	limits.MaxModelCalls = 2
-	h := Harness{Model: model, Tool: tool, Assessor: assessor, Limits: limits}
+	h := Harness{Model: model, Tool: tool, Assessor: assessor}
 
 	state, err := runScripted(t, h, "question")
-	if err == nil || !errors.Is(err, ErrBudgetExceeded) {
-		t.Fatalf("assessor must consume the model budget, got %v", err)
+	if err != nil {
+		t.Fatalf("assessor and final answer must not be blocked by a call count: %v", err)
 	}
-	// Assess 计入 MaxModelCalls：工具决策 1 次 + Assess 1 次已用满预算，
-	// 因此 Finalize 的受限回答必须在调用前被拒绝。
-	if state.StopReason != StopReasonBudgetExceeded || state.ModelCalls != 2 || model.calls != 1 {
+	// 工具决策、Assess 与 Finalize 都保留在 ModelCalls 中，供策略和观测使用。
+	if state.StopReason != StopReasonEvidenceSufficient || state.ModelCalls != 3 || model.calls != 2 {
 		t.Fatalf("unexpected stop state: %+v model=%d", state, model.calls)
 	}
 }

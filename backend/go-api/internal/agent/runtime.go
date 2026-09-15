@@ -104,13 +104,8 @@ func (h Harness) routePhase(ctx context.Context, state *RunState, emit Emit) err
 	return state.TransitionTo(RunPhaseModel)
 }
 
-// modelPhase 在预算内调用模型；没有工具调用时进入 Finalize，否则进入 Tool。
+// modelPhase 调用模型；没有工具调用时进入 Finalize，否则进入 Tool。
 func (h Harness) modelPhase(ctx context.Context, state *RunState, emit Emit) error {
-	if err := state.CheckModelCall(); err != nil {
-		state.MarkFailed(StopReasonBudgetExceeded)
-		return err
-	}
-
 	state.Messages = state.Budget.TrimMessages(state.Messages)
 	if !state.Budget.Fits(state.Messages) {
 		state.MarkFailed(StopReasonBudgetExceeded)
@@ -180,9 +175,11 @@ func (h Harness) toolPhase(ctx context.Context, state *RunState, emit Emit) erro
 		}
 
 		if state.queryAttempted(args.Query) {
-			// 重复查询既不调用 Retriever 也不消耗检索轮次，但必须补齐 tool 结果保持配对。
-			state.Messages = append(state.Messages, Message{Role: "tool", ToolCallID: call.ID, Content: `{"note":"duplicate query skipped"}`})
-			continue
+			// 重复查询既不调用 Retriever 也不消耗检索轮次。补齐 tool result 后立即
+			// 收敛到受限回答，避免取消模型调用次数上限后模型反复提交同一查询。
+			exhaustRetrievalBudget(state, state.ToolCalls[index:])
+			h.observe(ctx, state, RunEvent{Stage: RunStageTool, Action: "duplicate_query"})
+			return state.TransitionTo(RunPhaseFinalize)
 		}
 
 		if state.RetrievalRounds >= state.Limits.MaxRetrievalRounds {
@@ -243,11 +240,6 @@ func (h Harness) assessPhase(ctx context.Context, state *RunState, emit Emit) er
 		return state.TransitionTo(RunPhaseModel)
 	}
 
-	if err := state.CheckModelCall(); err != nil {
-		state.MarkFailed(StopReasonBudgetExceeded)
-		return err
-	}
-
 	decision, err := h.Assessor.Assess(ctx, state.Question, state.Pool.Citations())
 	h.observe(ctx, state, RunEvent{Stage: RunStageAssess, Round: state.RetrievalRounds, Action: assessAction(decision, err)})
 	if err != nil {
@@ -285,11 +277,6 @@ func (h Harness) assessPhase(ctx context.Context, state *RunState, emit Emit) er
 // rewritePhase 依据缺口生成新查询，并把它们表达为合成的 rag_retrieve 工具调用，
 // 使 tool call/result 始终成对、检索事件顺序稳定。
 func (h Harness) rewritePhase(ctx context.Context, state *RunState, emit Emit) error {
-	if err := state.CheckModelCall(); err != nil {
-		state.MarkFailed(StopReasonBudgetExceeded)
-		return err
-	}
-
 	standalone := state.Intent.StandaloneQuery
 	if len(state.AttemptedQueries) > 0 {
 		standalone = state.AttemptedQueries[0]
@@ -393,10 +380,6 @@ func (h Harness) finalizePhase(ctx context.Context, state *RunState, emit Emit) 
 	allowDirectAnswer := state.Intent.Action == "reply" || state.Intent.Action == "reuse"
 
 	if state.AnswerNeeded {
-		if err := state.CheckModelCall(); err != nil {
-			state.MarkFailed(StopReasonBudgetExceeded)
-			return err
-		}
 		messages := state.Messages
 		if state.SufficiencyChecked && !state.Sufficiency.Sufficient {
 			messages = withSystemDirective(messages, insufficientEvidenceDirective)
