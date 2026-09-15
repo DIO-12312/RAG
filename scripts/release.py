@@ -351,7 +351,9 @@ def deploy(root: Path, manifest: Path, state: Path, sha: str, sequence: int) -> 
         active["compatibility"] != release["compatibility"]
         and active["sha"] not in release["compatible_base_shas"]
     ):
-        raise ReleaseError("schema/RPC/infrastructure changed: maintenance deployment required")
+        raise ReleaseError(
+            "persistent schema/infrastructure changed: maintenance deployment required"
+        )
     old_path = Path(active["config"])
     health(old_path)
     config = read_json(old_path)

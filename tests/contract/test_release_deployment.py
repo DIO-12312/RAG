@@ -187,6 +187,8 @@ def test_deploy_workflow_requires_checks_and_uses_existing_secret_names() -> Non
     # --ci 隐含 --strict，Earthly 会拒绝 LOCALLY；发布工作区不得在 job 级继承它。
     assert "EARTHLY_FLAGS" not in job["env"]
     steps = job["steps"]
+    checkout = next(step for step in steps if "actions/checkout" in step.get("uses", ""))
+    assert checkout["with"]["fetch-depth"] == 0
     checks = next(step for step in steps if step.get("run") == "make release-check")
     assert checks["env"] == {"EARTHLY_FLAGS": "--ci"}
     publish = next(step for step in steps if "make release-publish" in step.get("run", ""))

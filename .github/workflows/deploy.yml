@@ -29,6 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          # release.json records compatible ancestor SHAs; a shallow checkout
+          # would only contain GITHUB_SHA and incorrectly block every upgrade.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Install verified Earthly
