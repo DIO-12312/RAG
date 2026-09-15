@@ -20,7 +20,7 @@ const dataset = {
   ],
 };
 
-async function mountDetail(counters: { deleted: string[]; retried: string[] }, documents: Array<{ id: string; name: string; status: string; jobId: string; stale?: boolean }> = dataset.documents) {
+async function mountDetail(counters: { deleted: string[]; retried: string[]; reindexed: string[] }, documents: Array<{ id: string; name: string; status: string; jobId: string; stale?: boolean }> = dataset.documents) {
   server.use(
     http.get("*/datasets/:id", () => HttpResponse.json({ ...dataset, documents, documentCount: documents.length })),
     http.delete("*/documents/:id", ({ params }) => {
@@ -30,6 +30,10 @@ async function mountDetail(counters: { deleted: string[]; retried: string[] }, d
     http.post("*/jobs/:id/retry", ({ params }) => {
       counters.retried.push(String(params.id));
       return HttpResponse.json({ id: String(params.id), datasetId: dataset.id, sourceName: "c.pdf", status: "RUNNING", progress: 0, retryable: false });
+    }),
+    http.post("*/documents/:id/reindex", ({ params }) => {
+      counters.reindexed.push(String(params.id));
+      return HttpResponse.json({ id: `reindex-${String(params.id)}`, datasetId: dataset.id, sourceName: "a.pdf", status: "PENDING", progress: 0, retryable: false }, { status: 202 });
     }),
   );
   await login({ email: "demo@example.test", password: "password" });
@@ -44,7 +48,7 @@ async function mountDetail(counters: { deleted: string[]; retried: string[] }, d
 }
 
 it("批量删除只处理选中的文档并汇总结果", async () => {
-  const counters = { deleted: [] as string[], retried: [] as string[] };
+  const counters = { deleted: [] as string[], retried: [] as string[], reindexed: [] as string[] };
   const wrapper = await mountDetail(counters);
   vi.spyOn(window, "confirm").mockReturnValue(true);
   const toolbar = wrapper.get(".document-toolbar");
@@ -64,7 +68,7 @@ it("批量删除只处理选中的文档并汇总结果", async () => {
 });
 
 it("重新索引失败项只提交 FAILED 文档的任务", async () => {
-  const counters = { deleted: [] as string[], retried: [] as string[] };
+  const counters = { deleted: [] as string[], retried: [] as string[], reindexed: [] as string[] };
   const wrapper = await mountDetail(counters);
   const toolbar = wrapper.get(".document-toolbar");
   const buttons = toolbar.findAll("button");
@@ -76,12 +80,25 @@ it("重新索引失败项只提交 FAILED 文档的任务", async () => {
   await retryButton.trigger("click");
   await flushPromises();
   expect(counters.retried).toEqual(["job-c"]);
-  expect(wrapper.get('[role="status"]').text()).toContain("已重新提交 1 个文档的索引任务。");
+  expect(wrapper.get('[role="status"]').text()).toContain("已提交 1 个文档的索引任务。");
+  wrapper.unmount();
+});
+
+it("已成功索引的文档可以从原文件重新构建新索引", async () => {
+  const counters = { deleted: [] as string[], retried: [] as string[], reindexed: [] as string[] };
+  const wrapper = await mountDetail(counters);
+  await wrapper.findAll('article input[type="checkbox"]')[0]!.setValue(true);
+  const reindexButton = wrapper.get(".document-toolbar").findAll("button")[2]!;
+  expect(reindexButton.text()).toContain("重新索引已选（1）");
+  await reindexButton.trigger("click");
+  await flushPromises();
+  expect(counters.reindexed).toEqual(["doc-a"]);
+  expect(wrapper.get('[role="status"]').text()).toContain("已提交 1 个文档的索引任务。");
   wrapper.unmount();
 });
 
 it("索引元数据已丢失的文档提示重新上传，且不纳入重新索引", async () => {
-  const counters = { deleted: [] as string[], retried: [] as string[] };
+  const counters = { deleted: [] as string[], retried: [] as string[], reindexed: [] as string[] };
   const wrapper = await mountDetail(counters, [
     { id: "doc-ok", name: "ok.pdf", status: "INDEXED", jobId: "job-ok" },
     { id: "doc-stale", name: "ghost.pdf", status: "FAILED", jobId: "job-stale", stale: true },
@@ -91,5 +108,7 @@ it("索引元数据已丢失的文档提示重新上传，且不纳入重新索�
   const retryButton = wrapper.get(".document-toolbar").findAll("button")[1]!;
   expect(retryButton.text()).toContain("重新索引失败项（0）");
   expect(retryButton.attributes("disabled")).toBeDefined();
+  const reindexButton = wrapper.get(".document-toolbar").findAll("button")[2]!;
+  expect(reindexButton.attributes("disabled")).toBeDefined();
   wrapper.unmount();
 });

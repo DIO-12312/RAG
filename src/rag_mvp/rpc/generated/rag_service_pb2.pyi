@@ -281,6 +281,22 @@ class RetryJobResponse(_message.Message):
     error: BusinessError
     def __init__(self, result: _Optional[_Union[JobResult, _Mapping]] = ..., error: _Optional[_Union[BusinessError, _Mapping]] = ...) -> None: ...
 
+class ReindexDocumentRequest(_message.Message):
+    __slots__ = ("context", "document_id")
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    DOCUMENT_ID_FIELD_NUMBER: _ClassVar[int]
+    context: RequestContext
+    document_id: str
+    def __init__(self, context: _Optional[_Union[RequestContext, _Mapping]] = ..., document_id: _Optional[str] = ...) -> None: ...
+
+class ReindexDocumentResponse(_message.Message):
+    __slots__ = ("result", "error")
+    RESULT_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    result: JobResult
+    error: BusinessError
+    def __init__(self, result: _Optional[_Union[JobResult, _Mapping]] = ..., error: _Optional[_Union[BusinessError, _Mapping]] = ...) -> None: ...
+
 class CancelJobRequest(_message.Message):
     __slots__ = ("context", "job_id")
     CONTEXT_FIELD_NUMBER: _ClassVar[int]

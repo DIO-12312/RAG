@@ -64,6 +64,11 @@ class RagServiceStub:
                 request_serializer=rag__service__pb2.RetryJobRequest.SerializeToString,
                 response_deserializer=rag__service__pb2.RetryJobResponse.FromString,
                 _registered_method=True)
+        self.ReindexDocument = channel.unary_unary(
+                '/rag.v1.RagService/ReindexDocument',
+                request_serializer=rag__service__pb2.ReindexDocumentRequest.SerializeToString,
+                response_deserializer=rag__service__pb2.ReindexDocumentResponse.FromString,
+                _registered_method=True)
         self.CancelJob = channel.unary_unary(
                 '/rag.v1.RagService/CancelJob',
                 request_serializer=rag__service__pb2.CancelJobRequest.SerializeToString,
@@ -125,6 +130,12 @@ class RagServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReindexDocument(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def CancelJob(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -181,6 +192,11 @@ def add_RagServiceServicer_to_server(servicer, server):
                     servicer.RetryJob,
                     request_deserializer=rag__service__pb2.RetryJobRequest.FromString,
                     response_serializer=rag__service__pb2.RetryJobResponse.SerializeToString,
+            ),
+            'ReindexDocument': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReindexDocument,
+                    request_deserializer=rag__service__pb2.ReindexDocumentRequest.FromString,
+                    response_serializer=rag__service__pb2.ReindexDocumentResponse.SerializeToString,
             ),
             'CancelJob': grpc.unary_unary_rpc_method_handler(
                     servicer.CancelJob,
@@ -365,6 +381,33 @@ class RagService:
             '/rag.v1.RagService/RetryJob',
             rag__service__pb2.RetryJobRequest.SerializeToString,
             rag__service__pb2.RetryJobResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReindexDocument(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/rag.v1.RagService/ReindexDocument',
+            rag__service__pb2.ReindexDocumentRequest.SerializeToString,
+            rag__service__pb2.ReindexDocumentResponse.FromString,
             options,
             channel_credentials,
             insecure,

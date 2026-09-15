@@ -80,6 +80,25 @@ func (c *Client) DeleteDataset(ctx context.Context, dataset, key string) (*pb.De
 	return r.GetResult(), nil
 }
 
+func (c *Client) ReindexDocument(ctx context.Context, document, key string) (*pb.JobResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	r, e := c.RPC.ReindexDocument(ctx, &pb.ReindexDocumentRequest{
+		Context:    Context(key),
+		DocumentId: document,
+	})
+	if e != nil {
+		return nil, e
+	}
+	if e = Error(r.GetError()); e != nil {
+		return nil, e
+	}
+	if r.GetResult() == nil {
+		return nil, fmt.Errorf("missing reindex document result")
+	}
+	return r.GetResult(), nil
+}
+
 func (c *Client) Upload(ctx context.Context, dataset, name, key string, file io.Reader) (*pb.SubmitDocumentResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()

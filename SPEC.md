@@ -143,6 +143,7 @@ service RagService {
   rpc SubmitDocument(stream UploadDocumentRequest) returns (SubmitDocumentResponse);
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
   rpc RetryJob(RetryJobRequest) returns (RetryJobResponse);
+  rpc ReindexDocument(ReindexDocumentRequest) returns (ReindexDocumentResponse);
   rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
   rpc Retrieve(RetrieveRequest) returns (RetrieveResponse);
   rpc GetSourceTopic(GetSourceTopicRequest) returns (GetSourceTopicResponse);
@@ -157,6 +158,7 @@ service RagService {
 | `SubmitDocument` | 客户端流式 | 接收文件、创建 Document、投递异步摄取任务；立即返回 `document_id` 和 `job_id`，不等待解析/向量化完成。 | Document API / TaskService |
 | `GetJob` | Unary | 查询任务状态、进度、失败原因和是否可重试。 | Go 状态查询 API |
 | `RetryJob` | Unary | 仅对 `FAILED` 且 `retryable=true` 的 Job 创建同类型的 retry Job、待执行 Task 和 OutboxEvent；旧 Job 保持终态，不修改已成功的索引版本。 | Go Dataset/Document 服务 |
+| `ReindexDocument` | Unary | 对已有 `READY` 文档复用正式对象，并用当前服务端 Parser/Chunker 配置及 Dataset 的 Embedding 快照分配新 `index_version`，创建完整摄取 Job/Task/READY Outbox；新版本成功前旧版本持续可检索。 | Go Dataset/Document 服务 / dev CLI |
 | `CancelJob` | Unary | 取消尚未开始的摄取，或向运行中摄取写入 `cancel_requested_at`；Worker 在 checkpoint 收敛到 `CANCELLED`。删除 Job 不可取消。 | Go Dataset/Document 服务 |
 | `Retrieve` | Unary | 仅检索，返回带分数、位置、元数据的 evidence chunks，不生成回答。 | Go Agent 的 RAG Tool |
 | `GetSourceTopic` | Unary | 按当前激活版本和 Topic 路径从原始 CHM 恢复完整、已清洗的 Topic Markdown；仅用于用户查看引用原文，不参与检索上下文。 | Go 引用来源 API |
@@ -168,7 +170,7 @@ Object Finalizer 将 staging object 幂等提升为正式 `object_key` 后，必
 
 Outbox Relay 必须同时支持两种触发方式：一是按固定间隔轮询 MySQL 中的 `READY_TO_PUBLISH` 事件，作为进程重启、唤醒丢失和临时故障后的最终兜底；二是由 Finalizer 成功、RetryJob/Delete/Cleanup Task 创建或运维调试发起一次手动/即时唤醒，降低正常路径延迟。两种触发都只能唤醒同一个 Relay 扫描逻辑，随后仍须查询 MySQL 决定发布哪些 `task_id`，禁止应用服务因手动触发而直接发布 NATS。手动唤醒是 best-effort，丢失时由下一轮定时轮询补偿；并发扫描允许产生重复发布，但必须由条件状态更新和 Worker 幂等收敛。
 
-未给 `target_document_id` 是新文档模式：按前述 `IngestionFingerprint` 状态复用 canonical Job 或在 RELEASED 后创建新 Document。给出 `target_document_id` 是重建模式：必须属于该 Dataset，系统在 `SELECT ... FOR UPDATE` 的 Document 行锁内分配唯一的新 `index_version`，并创建对应 Job；新版本完整后才切换 `active_version`。多个重建乱序完成时，`active_version` 只能单调前进；低版本迟到成功不得覆盖已激活的高版本，其 IndexBuild 必须置为 `ABANDONED` 并创建 `CLEANUP_INDEX_VERSION` Task。相同 `idempotency_key` 的完整提交必须返回第一次的 `document_id/job_id`，不得新建 Document、Job 或 Task。`CreateDataset`、`DeleteDocument`、`RetryJob` 与 `CancelJob` 也必须携带 `idempotency_key`；`request_id` 用于日志与 trace，不承担去重语义。Worker 的内部状态迁移记录 `operation_id`，不伪装为客户端请求。
+未给 `target_document_id` 是新文档模式：按前述 `IngestionFingerprint` 状态复用 canonical Job 或在 RELEASED 后创建新 Document。给出 `target_document_id` 是上传新字节重建模式；`ReindexDocument` 是不重复上传、直接复用现有正式 `object_key` 的主动重建模式，仅接受已有 `active_version` 的 `READY` 文档，并以当前服务端 Parser/Chunker 配置和 Dataset 的 Embedding 模型快照计算新 `config_digest`。两种重建都必须在 `SELECT ... FOR UPDATE` 的 Document 行锁内分配唯一的新 `index_version` 并创建对应 Job；前者的 Outbox 等待新对象提升，后者因正式对象已存在而直接为 `READY_TO_PUBLISH`。新版本完整后才切换 `active_version`。多个重建乱序完成时，`active_version` 只能单调前进；低版本迟到成功不得覆盖已激活的高版本，其 IndexBuild 必须置为 `ABANDONED` 并创建 `CLEANUP_INDEX_VERSION` Task。相同 `idempotency_key` 的完整命令必须返回第一次的 `document_id/job_id`，不得新建 Document、Job 或 Task。`CreateDataset`、`DeleteDocument`、`RetryJob`、`ReindexDocument` 与 `CancelJob` 也必须携带 `idempotency_key`；`request_id` 用于日志与 trace，不承担去重语义。Worker 的内部状态迁移记录 `operation_id`，不伪装为客户端请求。
 
 `Job.status` 与 `Task.status` 统一为 `PENDING → RUNNING → SUCCEEDED | FAILED | CANCELLED`。Job 是用户可查询的聚合状态：首个 Task 投递后仍为 `PENDING`，任一必要 Task 运行时为 `RUNNING`，全部必要 Task 成功后才为 `SUCCEEDED`。`FAILED` 必须返回稳定的业务错误码、可读错误信息和 `retryable`；`RetryJob` 是唯一的 Job 重试命令，且总是生成新 Job，重复上传不会产生未定义的 `SKIPPED` 状态。摄取、文档删除和索引版本清理 Job 必须关联 Document；`DELETE_DATASET` Job 必须关联 Dataset 且 `document_id` 为空。MVP 的 `tenant_id` 固定为服务端注入的 `default_tenant`，不接受客户端任意指定。
 
@@ -192,7 +194,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 
 每个 RPC 均需设定 deadline；检索为秒级，摄取由客户端流上传后异步执行。每个正常响应都使用 `oneof { result, BusinessError error }`（`BusinessError` 至少有 `code`、`message`、`retryable`、`request_id`）；不支持格式、重复删除、不可重试 Job 等可预期领域结果返回该结构。gRPC status code 仅用于 RPC 本身不能完成的情况，如 `INVALID_ARGUMENT`（畸形流或超限）、`DEADLINE_EXCEEDED`、`UNAVAILABLE` 和服务端未处理异常；调用方不得解析 Python 异常字符串。
 
-正式 `.proto` 至少定义以下字段级契约：`RequestContext(request_id, idempotency_key)`；`UploadDocumentRequest` 使用 `oneof { UploadHeader header; bytes data }`，且 header 只能是首帧；`UploadHeader` 包含 `RequestContext`、`dataset_id`、`source_name`、`expected_sha256`、`target_document_id`。`CreateDatasetRequest` 包含 Context、name、embedding_model、embedding_dimension、检索配置；`DeleteDatasetRequest`、`RetryJobRequest`、`CancelJobRequest`、`DeleteDocumentRequest` 包含 Context 与目标 ID；`DeleteDatasetResult` 返回 `dataset_id` 和 `job_id`，不承诺 Job 历史永久保留；`GetJobRequest` 包含 request_id/job_id；`RetrieveRequest` 包含 request_id、dataset_id、query、受限 filters 和 top_k。`JobResult` 新增 `dataset_id`，而 `document_id` 对 dataset 作用域 Job 为空字符串。每个 `*Response` 都是 `oneof { <Result> result; BusinessError error }`，`CancelJobResponse.result` 返回实际 Job/Task 状态，避免调用方猜测取消是否已收敛。
+正式 `.proto` 至少定义以下字段级契约：`RequestContext(request_id, idempotency_key)`；`UploadDocumentRequest` 使用 `oneof { UploadHeader header; bytes data }`，且 header 只能是首帧；`UploadHeader` 包含 `RequestContext`、`dataset_id`、`source_name`、`expected_sha256`、`target_document_id`。`CreateDatasetRequest` 包含 Context、name、embedding_model、embedding_dimension、检索配置；`DeleteDatasetRequest`、`RetryJobRequest`、`ReindexDocumentRequest`、`CancelJobRequest`、`DeleteDocumentRequest` 包含 Context 与目标 ID；`ReindexDocumentRequest` 的目标是 `document_id`，响应复用 `JobResult`。`DeleteDatasetResult` 返回 `dataset_id` 和 `job_id`，不承诺 Job 历史永久保留；`GetJobRequest` 包含 request_id/job_id；`RetrieveRequest` 包含 request_id、dataset_id、query、受限 filters 和 top_k。`JobResult` 新增 `dataset_id`，而 `document_id` 对 dataset 作用域 Job 为空字符串。每个 `*Response` 都是 `oneof { <Result> result; BusinessError error }`，`CancelJobResponse.result` 返回实际 Job/Task 状态，避免调用方猜测取消是否已收敛。
 
 `Dataset.embedding_model` 与 `embedding_dimension` 在 Dataset 首次出现 `READY` Document 后冻结。MVP 不支持只重建一个 Document 就更换 embedding 模型或维度；该需求必须新建 Dataset（或在后续版本以整个 Dataset 的 `search_schema_version` 迁移实现），从而避免同一 ES dense field 混入不兼容向量。
 

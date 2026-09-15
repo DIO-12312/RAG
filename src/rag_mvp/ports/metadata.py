@@ -56,6 +56,22 @@ class RetryJobResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ReindexDocumentRequest:
+    idempotency_key: str
+    document_id: str
+    config_digest: str
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ReindexDocumentResult:
+    document_id: str
+    job_id: str
+    task_id: str
+    reused: bool
+
+
+@dataclass(frozen=True, slots=True)
 class DeleteDocumentRequest:
     idempotency_key: str
     document_id: str
@@ -161,6 +177,9 @@ class MetadataRepository(Protocol):
 
     # 重试该方法负责的领域数据或基础设施状态。
     async def retry_job(self, request: RetryJobRequest) -> RetryJobResult: ...
+
+    # 为已有正式对象创建一个新的完整索引版本；旧 active_version 在成功前保持可见。
+    async def reindex_document(self, request: ReindexDocumentRequest) -> ReindexDocumentResult: ...
 
     # 删除该方法负责的领域数据或基础设施状态。
     async def delete_document(self, request: DeleteDocumentRequest) -> DeleteDocumentResult: ...

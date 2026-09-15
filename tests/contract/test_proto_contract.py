@@ -23,6 +23,7 @@ def test_rag_service_defines_the_complete_rpc_surface() -> None:
         "SubmitDocument",
         "GetJob",
         "RetryJob",
+        "ReindexDocument",
         "CancelJob",
         "Retrieve",
         "GetSourceTopic",
@@ -44,6 +45,7 @@ def test_every_response_has_result_and_business_error_outcome() -> None:
         "SubmitDocumentResponse",
         "GetJobResponse",
         "RetryJobResponse",
+        "ReindexDocumentResponse",
         "CancelJobResponse",
         "RetrieveResponse",
         "GetSourceTopicResponse",
@@ -76,6 +78,7 @@ def test_idempotency_context_is_only_used_by_commands() -> None:
         "DeleteDatasetRequest",
         "UploadHeader",
         "RetryJobRequest",
+        "ReindexDocumentRequest",
         "CancelJobRequest",
         "DeleteDocumentRequest",
     )
@@ -91,6 +94,12 @@ def test_idempotency_context_is_only_used_by_commands() -> None:
     assert "idempotency_key" not in retrieve_fields
     assert retrieve_fields["encrypted_rerank_profile"].number == 8
     assert retrieve_fields["encrypted_rerank_profile"].type == FieldDescriptor.TYPE_STRING
+
+    reindex = _message("ReindexDocumentRequest")
+    assert [(field.name, field.number) for field in reindex.fields] == [
+        ("context", 1),
+        ("document_id", 2),
+    ]
 
 
 def test_delete_dataset_contract_keeps_job_history_scoped_to_dataset() -> None:

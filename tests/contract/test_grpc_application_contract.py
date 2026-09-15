@@ -180,10 +180,18 @@ async def test_rpc_maps_domain_failures_and_keeps_future_methods_closed() -> Non
         ),
         None,
     )
+    reindex = await service.ReindexDocument(
+        rag_service_pb2.ReindexDocumentRequest(
+            context=rag_service_pb2.RequestContext(request_id="request-reindex"),
+            document_id="missing",
+        ),
+        None,
+    )
 
     assert missing.error.code == "JOB_NOT_FOUND"
     assert missing.error.request_id == "request-job"
     assert retry.error.code == "IDEMPOTENCY_KEY_REQUIRED"
+    assert reindex.error.code == "IDEMPOTENCY_KEY_REQUIRED"
 
 
 @pytest.mark.asyncio

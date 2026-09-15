@@ -295,6 +295,43 @@ func (s *Server) jobAction(c *gin.Context) {
 	}
 	c.JSON(200, jobDTO(j, r.Name))
 }
+
+func (s *Server) reindexDocument(c *gin.Context) {
+	r, ok := s.owned(c, c.Param("id"), "document")
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+	j, e := s.RAG.ReindexDocument(ctx, r.ID, uid(c)+"-"+key(c))
+	if e != nil || j == nil {
+		fail(c, 409, "REINDEX_FAILED", "此文档暂时无法重新索引。")
+		return
+	}
+	job := storage.Resource{
+		ID:        j.JobId,
+		UserID:    uid(c),
+		DatasetID: r.DatasetID,
+		Kind:      "job",
+		Name:      r.Name,
+		JobID:     j.JobId,
+	}
+	if e = s.Store.Put(ctx, job); e == nil {
+		_, e = s.Store.DB.ExecContext(
+			ctx,
+			"UPDATE resource_index SET job_id=? WHERE id=? AND user_id=? AND kind='document'",
+			j.JobId,
+			r.ID,
+			uid(c),
+		)
+	}
+	if e != nil {
+		fail(c, 503, "SAVE_FAILED", "重新索引任务已受理，请刷新知识库列表。")
+		return
+	}
+	c.JSON(202, jobDTO(j, r.Name))
+}
+
 func (s *Server) deleteDocument(c *gin.Context) {
 	r, ok := s.owned(c, c.Param("id"), "document")
 	if !ok {

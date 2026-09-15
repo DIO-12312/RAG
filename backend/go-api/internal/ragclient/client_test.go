@@ -19,6 +19,17 @@ type retrieveRPC struct {
 	result *pb.RetrieveResponse
 }
 
+type reindexDocumentRPC struct {
+	pb.RagServiceClient
+	request *pb.ReindexDocumentRequest
+	result  *pb.ReindexDocumentResponse
+}
+
+func (f *reindexDocumentRPC) ReindexDocument(_ context.Context, request *pb.ReindexDocumentRequest, _ ...grpc.CallOption) (*pb.ReindexDocumentResponse, error) {
+	f.request = request
+	return f.result, nil
+}
+
 func (f *retrieveRPC) Retrieve(_ context.Context, _ *pb.RetrieveRequest, _ ...grpc.CallOption) (*pb.RetrieveResponse, error) {
 	return f.result, nil
 }
@@ -53,6 +64,41 @@ func TestDeleteDatasetRejectsBusinessErrorAndMissingResult(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			client := &Client{RPC: &deleteDatasetRPC{result: response}}
 			if _, err := client.DeleteDataset(context.Background(), "dataset-1", "delete-key"); err == nil {
+				t.Fatal("invalid response accepted")
+			}
+		})
+	}
+}
+
+func TestReindexDocumentForwardsIdempotentCommand(t *testing.T) {
+	rpc := &reindexDocumentRPC{result: &pb.ReindexDocumentResponse{
+		Outcome: &pb.ReindexDocumentResponse_Result{Result: &pb.JobResult{
+			JobId: "job-2", DocumentId: "document-1", Status: pb.JobStatus_JOB_STATUS_PENDING,
+		}},
+	}}
+	client := &Client{RPC: rpc}
+
+	result, err := client.ReindexDocument(context.Background(), "document-1", "user-reindex-key")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.GetJobId() != "job-2" || rpc.request.GetDocumentId() != "document-1" {
+		t.Fatal("reindex result or document scope was not forwarded")
+	}
+	if rpc.request.GetContext().GetIdempotencyKey() != "user-reindex-key" || rpc.request.GetContext().GetRequestId() == "" {
+		t.Fatal("request context was not forwarded")
+	}
+}
+
+func TestReindexDocumentRejectsBusinessErrorAndMissingResult(t *testing.T) {
+	for name, response := range map[string]*pb.ReindexDocumentResponse{
+		"business error": {Outcome: &pb.ReindexDocumentResponse_Error{Error: &pb.BusinessError{Code: "DOCUMENT_NOT_INDEXED", Message: "not ready"}}},
+		"missing result": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := &Client{RPC: &reindexDocumentRPC{result: response}}
+			if _, err := client.ReindexDocument(context.Background(), "document-1", "reindex-key"); err == nil {
 				t.Fatal("invalid response accepted")
 			}
 		})

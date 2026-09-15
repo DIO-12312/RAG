@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
-from rag_mvp.application.dto import CancelJobCommand, GetJobQuery, JobView, RetryJobCommand
+from rag_mvp.application.dto import (
+    CancelJobCommand,
+    GetJobQuery,
+    JobView,
+    ReindexDocumentCommand,
+    RetryJobCommand,
+)
 from rag_mvp.domain.errors import DomainError, DomainFailure
+from rag_mvp.domain.ids import config_digest
 from rag_mvp.domain.models import Job, Task
-from rag_mvp.ports.metadata import CancelJobRequest, MetadataRepository, RetryJobRequest
+from rag_mvp.ports.metadata import (
+    CancelJobRequest,
+    MetadataRepository,
+    ReindexDocumentRequest,
+    RetryJobRequest,
+)
 
 
 class JobService:
@@ -51,6 +63,49 @@ class JobService:
         if job is None or task is None:
             raise DomainError(
                 DomainFailure("RETRY_STATE_NOT_FOUND", "retry state is unavailable", retryable=True)
+            )
+        return self._view(job, task)
+
+    async def reindex_document(self, command: ReindexDocumentCommand) -> JobView:
+        """从已保存的正式对象创建新索引版本，不覆盖当前可检索版本。"""
+
+        if not command.idempotency_key:
+            raise DomainError(
+                DomainFailure("IDEMPOTENCY_KEY_REQUIRED", "idempotency key is required")
+            )
+        document = await self._metadata.get_document(command.document_id)
+        if document is None:
+            raise DomainError(DomainFailure("DOCUMENT_NOT_FOUND", "document does not exist"))
+        dataset = await self._metadata.get_dataset(document.dataset_id)
+        if dataset is None:
+            raise DomainError(DomainFailure("DATASET_NOT_FOUND", "dataset does not exist"))
+        digest = config_digest(
+            {
+                "parser_version": command.parser_version,
+                "chunker_config": {
+                    "chunk_size": command.chunk_size,
+                    "overlap": command.chunk_overlap,
+                },
+                "embedding_model": dataset.embedding_model,
+            }
+        )
+        rebuilt = await self._metadata.reindex_document(
+            ReindexDocumentRequest(
+                idempotency_key=command.idempotency_key,
+                document_id=command.document_id,
+                config_digest=digest,
+                now=command.now,
+            )
+        )
+        job = await self._metadata.get_job(rebuilt.job_id)
+        task = await self._metadata.get_task(rebuilt.task_id)
+        if job is None or task is None:
+            raise DomainError(
+                DomainFailure(
+                    "REINDEX_STATE_NOT_FOUND",
+                    "reindex state is unavailable",
+                    retryable=True,
+                )
             )
         return self._view(job, task)
 

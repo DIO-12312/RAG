@@ -55,6 +55,8 @@ from rag_mvp.ports.metadata import (
     DeleteDatasetResult,
     DeleteDocumentRequest,
     DeleteDocumentResult,
+    ReindexDocumentRequest,
+    ReindexDocumentResult,
     RetryJobRequest,
     RetryJobResult,
     SubmitIngestion,
@@ -64,6 +66,7 @@ from rag_mvp.ports.metadata import (
 
 SUBMIT_OPERATION = "SUBMIT_INGESTION"
 RETRY_OPERATION = "RETRY_JOB"
+REINDEX_OPERATION = "REINDEX_DOCUMENT"
 CANCEL_OPERATION = "CANCEL_JOB"
 DELETE_OPERATION = "DELETE_DOCUMENT"
 DELETE_DATASET_OPERATION = "DELETE_DATASET"
@@ -1117,6 +1120,118 @@ class MySQLMetadataRepository:
             )
             return result
 
+    async def reindex_document(self, request: ReindexDocumentRequest) -> ReindexDocumentResult:
+        """复用正式对象创建新索引版本，直到新版本成功前保留旧版本可见。"""
+
+        request_digest = self._configured_command_digest(
+            REINDEX_OPERATION,
+            request.document_id,
+            request.config_digest,
+        )
+        async with self._session_factory() as session, session.begin():
+            idempotent = await self._locked_operation_idempotency(
+                session,
+                REINDEX_OPERATION,
+                request.idempotency_key,
+            )
+            if idempotent is not None:
+                self._validate_operation_record(idempotent, request_digest)
+                return ReindexDocumentResult(
+                    document_id=str(idempotent.result_json["document_id"]),
+                    job_id=str(idempotent.result_json["job_id"]),
+                    task_id=str(idempotent.result_json["task_id"]),
+                    reused=True,
+                )
+
+            document = await self._lock_document(session, request.document_id)
+            if document is None or document.status == DocumentStatus.DELETED:
+                raise DomainError(DomainFailure("DOCUMENT_NOT_FOUND", "document does not exist"))
+            if document.active_version is None or document.status != DocumentStatus.READY:
+                raise DomainError(
+                    DomainFailure(
+                        "DOCUMENT_NOT_INDEXED",
+                        "document must have an active index before it can be reindexed",
+                    )
+                )
+            if document.object_key is None:
+                raise DomainError(
+                    DomainFailure(
+                        "REINDEX_OBJECT_MISSING",
+                        "reindex requires a finalized source object",
+                    )
+                )
+
+            dataset = await session.scalar(
+                select(DatasetTable).where(
+                    DatasetTable.id == document.dataset_id,
+                    DatasetTable.tenant_id == self._default_tenant_id,
+                )
+            )
+            if dataset is None or dataset.status != DatasetStatus.ACTIVE:
+                raise DomainError(DomainFailure("DATASET_DELETING", "dataset is being deleted"))
+
+            index_version = document.next_index_version
+            document.next_index_version = index_version + 1
+            document.updated_at = request.now
+            job = JobTable(
+                id=new_id(),
+                type=JobType.INGEST_DOCUMENT,
+                dataset_id=document.dataset_id,
+                document_id=document.id,
+                config_digest=request.config_digest,
+                index_version=index_version,
+                document_generation=document.lifecycle_generation,
+                status=JobStatus.PENDING,
+                progress=Decimal("0"),
+                error=None,
+                retryable=False,
+                retry_count=0,
+                cancel_requested_at=None,
+                retry_of_job_id=None,
+                active_retry_parent_id=None,
+                is_system=False,
+                created_at=request.now,
+                updated_at=request.now,
+            )
+            task = await self._add_job_task_outbox(
+                session,
+                job,
+                TaskType.INGEST_DOCUMENT,
+                OutboxStatus.READY_TO_PUBLISH,
+                request.now,
+            )
+            session.add(
+                IndexBuildTable(
+                    document_id=document.id,
+                    index_version=index_version,
+                    job_id=job.id,
+                    status=IndexBuildStatus.BUILDING,
+                    created_at=request.now,
+                    updated_at=request.now,
+                )
+            )
+            result = ReindexDocumentResult(
+                document_id=document.id,
+                job_id=job.id,
+                task_id=task.id,
+                reused=False,
+            )
+            session.add(
+                self._new_operation_idempotency_record(
+                    REINDEX_OPERATION,
+                    request.idempotency_key,
+                    document.dataset_id,
+                    request_digest,
+                    {
+                        "document_id": result.document_id,
+                        "job_id": result.job_id,
+                        "task_id": result.task_id,
+                    },
+                    request.now,
+                )
+            )
+            return result
+
     # 取消该方法负责的领域数据或基础设施状态。
     async def cancel_job(self, request: CancelJobRequest) -> CancelJobResult:
         request_digest = self._command_digest(CANCEL_OPERATION, request.job_id)
@@ -1841,6 +1956,17 @@ class MySQLMetadataRepository:
     def _command_digest(operation: str, target_id: str) -> str:
         payload = json.dumps(
             {"operation": operation, "target_id": target_id},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _configured_command_digest(operation: str, target_id: str, config: str) -> str:
+        """Digest a command whose idempotency also depends on an immutable configuration."""
+
+        payload = json.dumps(
+            {"operation": operation, "target_id": target_id, "config_digest": config},
             sort_keys=True,
             separators=(",", ":"),
         )

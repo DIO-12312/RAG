@@ -65,6 +65,10 @@ def _parser() -> argparse.ArgumentParser:
     _add_context_arguments(retry_job)
     retry_job.add_argument("--job-id", required=True)
 
+    reindex_document = subparsers.add_parser("reindex-document")
+    _add_context_arguments(reindex_document)
+    reindex_document.add_argument("--document-id", required=True)
+
     cancel_job = subparsers.add_parser("cancel-job")
     _add_context_arguments(cancel_job)
     cancel_job.add_argument("--job-id", required=True)
@@ -163,6 +167,14 @@ async def _run(arguments: argparse.Namespace) -> int:
                 rag_service_pb2.RetryJobRequest(
                     context=_context(arguments),
                     job_id=arguments.job_id,
+                ),
+                timeout=arguments.timeout,
+            )
+        elif arguments.command == "reindex-document":
+            response = await stub.ReindexDocument(
+                rag_service_pb2.ReindexDocumentRequest(
+                    context=_context(arguments),
+                    document_id=arguments.document_id,
                 ),
                 timeout=arguments.timeout,
             )

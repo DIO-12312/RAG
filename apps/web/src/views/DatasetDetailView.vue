@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { cancelJob, retryJob, deleteDataset, deleteDocument, getDataset, listDatasetJobs, uploadDocument } from "@/api/datasets";
+import { cancelJob, retryJob, reindexDocument, deleteDataset, deleteDocument, getDataset, listDatasetJobs, uploadDocument } from "@/api/datasets";
 import type { DatasetDetail, Job } from "@/api/contracts";
 import AppIcon from "@/components/AppIcon.vue";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
@@ -15,22 +15,23 @@ const selected=ref<string[]>([]); const busyBatch=ref(false); const batchNotice=
 const documents=computed(()=>dataset.value?.documents??[]);
 const allSelected=computed(()=>documents.value.length>0&&documents.value.every(d=>selected.value.includes(d.id)));
 const retryable=computed(()=>documents.value.filter(d=>selected.value.includes(d.id)&&d.status==="FAILED"&&d.jobId&&!d.stale));
+const reindexable=computed(()=>documents.value.filter(d=>selected.value.includes(d.id)&&d.status==="INDEXED"&&!d.stale));
 const deleteMessage=computed(()=>`知识库“${dataset.value?.name ?? ""}”及其中的 ${dataset.value?.documentCount ?? 0} 个文档将被永久删除，且无法恢复。`);
 let timer: ReturnType<typeof setTimeout> | undefined; let disposed=false;
 function toggle(id:string,checked:boolean):void{selected.value=checked?[...new Set([...selected.value,id])]:selected.value.filter(item=>item!==id);}
 function toggleAll(checked:boolean):void{selected.value=checked?documents.value.map(d=>d.id):[];}
-async function batch(kind:"delete"|"retry"):Promise<void>{
+async function batch(kind:"delete"|"retry"|"reindex"):Promise<void>{
   if(busyBatch.value||!selected.value.length)return;
-  const targets=kind==="delete"?documents.value.filter(d=>selected.value.includes(d.id)):retryable.value;
+  const targets=kind==="delete"?documents.value.filter(d=>selected.value.includes(d.id)):kind==="retry"?retryable.value:reindexable.value;
   if(!targets.length)return;
   if(kind==="delete"&&!window.confirm(`确认删除选中的 ${targets.length} 个文档？删除后将无法用于检索。`))return;
   busyBatch.value=true;error.value="";batchNotice.value="";
   const failed:string[]=[];
-  for(const doc of targets){try{if(kind==="delete")await deleteDocument(doc.id);else await retryJob(doc.jobId!);}catch{failed.push(doc.id);}}
+  for(const doc of targets){try{if(kind==="delete")await deleteDocument(doc.id);else if(kind==="retry")await retryJob(doc.jobId!);else await reindexDocument(doc.id);}catch{failed.push(doc.id);}}
   selected.value=failed;busyBatch.value=false;
   await load();
   const done=targets.length-failed.length;
-  batchNotice.value=kind==="delete"?(failed.length?`已删除 ${done} 个，${failed.length} 个失败（仍选中，可重试）。`:`已删除 ${done} 个文档。`):(failed.length?`已重新提交 ${done} 个，${failed.length} 个失败。`:`已重新提交 ${done} 个文档的索引任务。`);
+  batchNotice.value=kind==="delete"?(failed.length?`已删除 ${done} 个，${failed.length} 个失败（仍选中，可重试）。`:`已删除 ${done} 个文档。`):(failed.length?`已提交 ${done} 个，${failed.length} 个失败。`:`已提交 ${done} 个文档的索引任务。`);
 }
 async function load(): Promise<void> {
   if(timer)clearTimeout(timer);
@@ -44,6 +45,9 @@ async function upload(file:File,key:string):Promise<void>{
 async function action(id:string,kind:"cancel"|"retry"|"delete"):Promise<void>{
   if(kind==="delete"&&!window.confirm("确认删除此文档？删除后将无法用于检索。"))return;
   try{if(kind==="cancel")await cancelJob(id);else if(kind==="retry")await retryJob(id);else await deleteDocument(id);await load();}catch(e){error.value=e instanceof Error?e.message:"操作失败";}
+}
+async function reindex(id:string):Promise<void>{
+  try{await reindexDocument(id);await load();}catch(e){error.value=e instanceof Error?e.message:"重新索引失败";}
 }
 async function removeDataset():Promise<void>{
   if(deleting.value)return;
@@ -102,6 +106,12 @@ onMounted(()=>void load());onBeforeUnmount(()=>{disposed=true;if(timer)clearTime
         @click="batch('retry')"
       >
         重新索引失败项（{{ retryable.length }}）
+      </button><button
+        class="button-quiet"
+        :disabled="busyBatch||!reindexable.length"
+        @click="batch('reindex')"
+      >
+        重新索引已选（{{ reindexable.length }}）
       </button>
     </div><p
       v-if="batchNotice"
@@ -121,6 +131,13 @@ onMounted(()=>void load());onBeforeUnmount(()=>{disposed=true;if(timer)clearTime
         v-if="doc.stale"
         class="stale-hint"
       >索引元数据已丢失，请删除后重新上传</small><button
+        v-if="doc.status==='INDEXED'&&!doc.stale"
+        class="button-quiet"
+        :disabled="busyBatch"
+        @click="reindex(doc.id)"
+      >
+        重新索引
+      </button><button
         class="button-quiet"
         :disabled="busyBatch"
         @click="action(doc.id,'delete')"

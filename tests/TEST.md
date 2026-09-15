@@ -4,6 +4,19 @@
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
 
+### 2026-09-15 已索引文档主动重新索引与 Agent 运行限制
+
+| 文件 / 用例 | 职责与运行边界 |
+|---|---|
+| `tests/unit/application/test_job_service.py::test_job_service_reindexes_an_already_indexed_document` | READY 文档复用正式对象创建新 Job/Task/READY Outbox 和递增版本；重建成功前旧 active version 保持可检索；Fake metadata 离线测试。 |
+| `tests/integration/test_mysql_submission.py::test_indexed_document_reindex_creates_ready_new_version_without_hiding_active` | 在真实 MySQL 事务中验证主动重建的版本分配、幂等回放、配置摘要冲突、Outbox 及聚合行数。 |
+| `tests/contract/test_proto_contract.py`、`tests/contract/test_grpc_application_contract.py` | 验证 `ReindexDocument` protobuf 字段、result/error oneof 与 RPC 到 application 的错误映射。 |
+| `tests/unit/test_dev_cli.py::test_mutating_commands_require_request_and_idempotency_keys` | 将 `reindex-document` 纳入命令型 CLI 的 request/idempotency key 强制校验。 |
+| `backend/go-api/internal/ragclient/client_test.go::TestReindexDocumentForwardsIdempotentCommand`、`TestReindexDocumentRejectsBusinessErrorAndMissingResult` | 验证 Go 控制面正确转发主动重建命令，并对业务错误和缺失结果 fail closed。 |
+| `apps/web/tests/dataset-batch.spec.ts` | 验证单个及批量已索引文档可发起重新索引，并展示已受理数量。 |
+| `apps/web/tests/api-contracts.spec.ts` | 验证前端重新索引路由与 Go API 路径一致。 |
+| `backend/go-api/internal/agent/*_test.go` | 验证模型调用次数仅用于观测而不再硬性终止；查询改写、检索、工具和上下文预算仍然生效，重复查询会收敛到最终回答。 |
+
 ### 2026-09-13 开发环境 Make 入口
 
 | 合并后保留的测试 | 职责与运行边界 |

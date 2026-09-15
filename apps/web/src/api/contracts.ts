@@ -11,6 +11,7 @@ export const rootRoutes = [
   "/datasets/:id/jobs",
   "/jobs/:id/cancel",
   "/jobs/:id/retry",
+  "/documents/:id/reindex",
   "/documents/:id",
   "/documents/:id/source-topic",
   "/settings",

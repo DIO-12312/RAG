@@ -134,6 +134,19 @@ export const handlers = [
     return HttpResponse.json(job);
   }),
 
+  http.post("*/documents/:id/reindex", ({ params }) => {
+    const unauthorized = requireSignedIn();
+    if (unauthorized) return unauthorized;
+    return HttpResponse.json({
+      id: `job-reindex-${String(params.id)}`,
+      datasetId: "dataset-ready",
+      sourceName: "文档",
+      status: "PENDING",
+      progress: 0,
+      retryable: false,
+    }, { status: 202 });
+  }),
+
   http.delete("*/documents/:id", () => {
     const unauthorized = requireSignedIn();
     if (unauthorized) return unauthorized;
