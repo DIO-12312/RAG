@@ -31,10 +31,8 @@ from rag_mvp.retrieval.hybrid import (
     reciprocal_rank_fusion,
 )
 from rag_mvp.retrieval.provenance import hybrid_evidence, reranked_evidence
-from rag_mvp.retrieval.query_analysis import analyze_query
-from rag_mvp.retrieval.query_analysis import QueryIntent
+from rag_mvp.retrieval.query_analysis import QueryIntent, analyze_query
 from rag_mvp.retrieval.rerank import RerankedCandidate, apply_rerank_scores
-
 
 CandidateT = TypeVar("CandidateT", HybridCandidate, RerankedCandidate)
 
