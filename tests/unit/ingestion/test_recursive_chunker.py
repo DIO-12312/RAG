@@ -66,3 +66,59 @@ async def test_recursive_chunker_matches_txt_golden_fixture() -> None:
         }
         for draft in actual
     ] == fixture["chunks"]
+
+
+@pytest.mark.asyncio
+async def test_recursive_chunker_drops_table_of_contents_segments() -> None:
+    """目录页只重复章节标题与页码，不得进入索引、证据和引用。"""
+
+    chunker = RecursiveChunker(chunk_size=800, overlap=120)
+    leaders = "." * 40
+    segments = (
+        ParsedSegment(
+            text=f"第 10 章 QoS 策略{leaders} 119",
+            locator=Locator(page_number=3, start_line=14, end_line=16),
+            metadata={"source_type": "pdf"},
+        ),
+        ParsedSegment(
+            text=f"| 1.1 | 分布式系统{leaders} 1 |\n| 1.2 | 中间件{leaders} 2 |",
+            locator=Locator(page_number=3, start_line=17, end_line=18),
+            metadata={"source_type": "pdf"},
+        ),
+        ParsedSegment(
+            text="Durability QoS 控制 DataReader 是否获取 DataWriter 发送的历史数据。",
+            locator=Locator(page_number=127, start_line=30, end_line=33),
+            metadata={"source_type": "pdf"},
+        ),
+    )
+
+    drafts = await chunker.split(segments)
+
+    assert len(drafts) == 1
+    assert drafts[0].ordinal == 0
+    assert "Durability QoS" in drafts[0].content_with_weight
+
+
+@pytest.mark.asyncio
+async def test_recursive_chunker_keeps_ellipsis_and_short_page_numbers() -> None:
+    """正文里的省略号与带页码的表格行不能被误判成目录条目。"""
+
+    chunker = RecursiveChunker(chunk_size=800, overlap=120)
+    segments = (
+        ParsedSegment(
+            text="更多...\n\nDCPSDLL void DDS_DomainParticipantFactory_get_qos(...)",
+            locator=Locator(start_line=1, end_line=2),
+            metadata={"source_type": "chm"},
+        ),
+        ParsedSegment(
+            text="内存：256M\n磁盘空间：开发机 500M，运行机取决于应用大小",
+            locator=Locator(page_number=1, start_line=4, end_line=5),
+            metadata={"source_type": "pdf"},
+        ),
+    )
+
+    drafts = await chunker.split(segments)
+
+    assert len(drafts) == 2
+    assert "更多..." in drafts[0].content_with_weight
+    assert "内存：256M" in drafts[1].content_with_weight

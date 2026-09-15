@@ -100,7 +100,7 @@ async def test_job_service_reindexes_an_already_indexed_document() -> None:
 
     result = await JobService(repository).reindex_document(
         ReindexDocumentCommand(
-            "request", "reindex", document.id, "source-router-v10", 800, 120, now
+            "request", "reindex", document.id, "source-router-v11", 800, 120, now
         )
     )
 

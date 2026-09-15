@@ -26,6 +26,7 @@
 | `tests/unit/ingestion/test_multiformat_parsers.py::test_non_pdf_formats_do_not_fabricate_printed_page_numbers` | 非 PDF 输入不伪造印刷页码，离线解析测试 |
 | `backend/go-api/internal/ragclient/client_test.go::TestRetrieveDisplaysPrintedAndPhysicalPDFPages`、`TestRetrieveFallsBackToPhysicalPDFPageWithoutPrintedFooter` | 兼容历史双页码 metadata，新结果无印刷页码时回退物理页；离线 Go RPC 替身 |
 
+2026-09-16 目录噪声过滤：`source-router-v11`（此前 v10）在切块阶段丢弃纯目录/索引导引点段落，避免目录条目成为证据与引用；ZRDDS PDF 实测移除 93 个目录 Chunk，CHM/CHI 分段不受影响。
 2026-09-15 PDF 索引回退说明：`source-router-v10`（此前 v9）恢复 CHM3 验证过的 pdfplumber 词级坐标与版面分段路径，同时保留页脚印刷页码、物理页码、OCR、重复页眉页脚过滤和来源 bbox。`tests/unit/ingestion/test_pdf_deepdoc_parser.py` 覆盖标题、表格、OCR、页码与 CHM3 风格分段；Python 离线检查只验证确定性结构，不替代真实 ZRDDS PDF 重新索引后的人工质量验收。
 
 main 中无冲突的展示兼容仍保留：`tests/unit/retrieval/test_provenance.py` 的 `test_pdf_evidence_repairs_false_tables_and_emits_valid_markdown_tables` 与 `apps/web/tests/markdown-content.spec.ts` 的历史 PDF 修复用例验证展示投影；`backend/go-api/internal/ragclient/client_test.go` 的双页码及物理页回退用例验证历史 metadata 兼容；`tests/unit/ingestion/test_multiformat_parsers.py` 与 CHM/CHI 测试继续保证非 PDF 来源不伪造页码。这些均为离线测试，不要求新解析器产出印刷页码。
@@ -407,6 +408,8 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | `ingestion/test_recursive_chunker.py` | `test_recursive_chunker_is_stable_bounded_and_overlapping` | 切块边界稳定、长度受限且 overlap 正确。 |
 | 同上 | `test_recursive_chunker_rejects_invalid_overlap` | 非法 overlap 参数被拒绝。 |
 | 同上 | `test_recursive_chunker_matches_txt_golden_fixture` | TXT 切块结果与 golden fixture 一致。 |
+| 同上 | `test_recursive_chunker_drops_table_of_contents_segments` | 目录页导引点条目不作为 Chunk 进入索引，正文段落不受影响。 |
+| 同上 | `test_recursive_chunker_keeps_ellipsis_and_short_page_numbers` | 正文省略号与带单位的短行不会被误判为目录条目。 |
 | `ingestion/test_text_parser.py` | `test_text_parser_normalizes_bom_and_newlines_with_line_locator` | 规范 BOM/换行并生成行定位。 |
 | 同上 | `test_text_parser_rejects_invalid_utf8_with_stable_error` | 非法 UTF-8 返回稳定错误码。 |
 | `ingestion/test_worker.py` | `test_worker_claims_executes_completes_then_acks` | Worker 的认领、执行、完成、ACK 顺序正确。 |

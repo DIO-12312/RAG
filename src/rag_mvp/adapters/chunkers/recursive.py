@@ -6,6 +6,7 @@ import re
 from collections.abc import Sequence
 
 from rag_mvp.domain.models import Locator
+from rag_mvp.domain.textnoise import is_navigation_index
 from rag_mvp.ports.chunker import ChunkDraft
 from rag_mvp.ports.parser import ParsedSegment
 
@@ -28,6 +29,9 @@ class RecursiveChunker:
     async def split(self, segments: Sequence[ParsedSegment]) -> tuple[ChunkDraft, ...]:
         drafts: list[ChunkDraft] = []
         for segment in segments:
+            # 目录页只重复章节标题与页码：作为证据没有信息量，还会挤占引用编号。
+            if is_navigation_index(segment.text):
+                continue
             start = 0
             while start < len(segment.text):
                 end = self._find_end(segment.text, start)

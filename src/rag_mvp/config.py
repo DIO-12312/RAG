@@ -13,6 +13,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from rag_mvp.ports.parser import PdfParserMode
 
+# 解析/切块行为变化时必须同步提升该版本号：它参与 config_digest，
+# 决定同一份文件在重新索引时是否产生新的索引版本。
+DEFAULT_PARSER_VERSION = "source-router-v11"
+
 DEFAULT_MYSQL_DSN = "mysql+asyncmy://rag:rag@mysql:3306/rag"
 
 
@@ -88,7 +92,7 @@ class Settings(BaseSettings):
     object_root: Path = Path("data/objects")
 
     max_upload_bytes: int = Field(default=64 * 1024 * 1024, ge=1)
-    parser_version: str = "source-router-v10"
+    parser_version: str = DEFAULT_PARSER_VERSION
     chunk_size: int = Field(default=800, ge=1)
     chunk_overlap: int = Field(default=120, ge=0)
     pdf_parser_mode: PdfParserMode = PdfParserMode.AUTO

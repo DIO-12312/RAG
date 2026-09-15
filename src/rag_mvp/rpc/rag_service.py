@@ -22,6 +22,7 @@ from rag_mvp.application.dto import (
 from rag_mvp.application.job_service import JobService
 from rag_mvp.application.retrieval_service import RetrievalService
 from rag_mvp.application.source_service import SourceService
+from rag_mvp.config import DEFAULT_PARSER_VERSION
 from rag_mvp.domain.enums import DocumentStatus, JobStatus, JobType, TaskStatus
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.models import Evidence, Locator, ScoreBreakdown
@@ -195,7 +196,7 @@ class RagService:
         retrieval: RetrievalService | None = None,
         sources: SourceService | None = None,
         now: Callable[[], datetime] | None = None,
-        parser_version: str = "source-router-v10",
+        parser_version: str = DEFAULT_PARSER_VERSION,
         chunk_size: int = 800,
         chunk_overlap: int = 120,
         embedding_model: str | None = None,
