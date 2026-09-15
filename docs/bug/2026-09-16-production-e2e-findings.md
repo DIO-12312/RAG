@@ -254,3 +254,25 @@ curl -X POST $B/auth/register -d '{"email":"weak-…","password":"87654321"}' �
 | P15 | 部分缓解：失败文档可走「重新索引已选」；指纹语义仍按 SPEC | `47d0823` | 组件用例 |
 
 另外本轮顺带修掉两处**已提交但红色**的前端问题：会话切换知识库的 `vue-tsc` 类型错误与失败用例（`278a9ed`），以及问题长度按 UTF-8 字节校验（`47d0823`）。
+
+## 8. 生产复验结果（部署 `adc67c6` 后实测）
+
+按用户指示以 `make down` 停掉两套开发 Compose（数据卷保留），再用 `make production-run` 重建并启动生产；线上运行 `adc67c6`，前端徽标注入 `adc67c66b3443180b28e1708b18a6d7d95c60593`（此前为 `unknown`）。
+
+| 项 | 复验证据 | 结论 |
+|---|---|---|
+| P1 | bundle 内嵌 `adc67c66…`，与 HEAD 一致 | ✅ |
+| P2 | `POST /settings/models/embedding/test` → `{"detail":"Embedding 模型返回 1024 维向量","latencyMs":522,"ok":true}`（同一账号此前为 `400 Bad Request`） | ✅ |
+| P3 | 真实问答收到 2 条 `context`：`{evidenceCount:0, estimatedTokens:1129}` 与 `{evidenceCount:25, estimatedTokens:8377}` | ✅ |
+| P7 | `final.citations` 的 ordinal = `[1,2,3,4]`，连续 | ✅ |
+| P8 | 日志为 `{"msg":"agent_run","stage":"complete","stop_reason":"evidence_insufficient",…}`，字段可解析 | ✅ |
+| P10 | 首页含 CSP 与 Permissions-Policy，`Server: nginx`（无版本），`X-Frame-Options`/`X-Content-Type-Options` 各一次 | ✅ |
+| P11 | 空知识库提问只收到 1 个 `final` 事件与固定说明，无模型/检索调用 | ✅ |
+| P12 | 空文件 → `400 EMPTY_FILE`；损坏 PDF → 任务 `FAILED` 且原因为「文件不是可解析的 PDF」 | ✅ |
+| P14 | 33 MiB → `413 UPLOAD_TOO_LARGE`（此前 502）；3 MiB → 202；诊断日志 `reason:"http: request body too large"` 定位到入口 33 MiB 中间件 | ✅ |
+| P5 | 同一邮箱连续失败：前 10 次 401，第 11 次起 429；真实账号不受影响 | ✅ |
+| P9 | `rag-production.service` 已安装启用，`systemctl start` 后 `ExecMainStatus=0` | ✅ |
+| P4 | 真实 MySQL 用例覆盖幂等、切换知识库、跨用户 404 与归属不被篡改（生产未使用他人会话 id 复现） | ✅（单测/集成） |
+| P13 | 未修 | ⏳ |
+
+已知取舍与代价：口令复杂度仍属产品决策（现仅 8–128 位长度）；CJK 逐字 SSE 保留为后续优化；复验期间为确认"正常大小仍可用"，一个 3 MiB 文本被真实 Embedding 摄取（产生少量费用），该测试知识库随后已删除。手工 `make production-run` 不更新 `/var/lib/rag-deploy/active.json`，因此运行镜像与发布记录仍可能不一致，部署文档已写明该行为与恢复方式。
