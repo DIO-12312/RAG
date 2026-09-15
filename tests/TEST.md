@@ -103,11 +103,12 @@ production-baseline/production-deploy/production-recover；仍校验 Earthfile �
 | 测试文件 / 函数 | 职责与运行边界 |
 | --- | --- |
 | `contract/test_release_deployment.py::test_release_success_persists_previous_and_never_recreates_infrastructure` | 发布状态持久化、只更新应用、不触发迁移或基础设施重建 |
+| `contract/test_release_deployment.py::test_legacy_fingerprint_allows_safe_application_only_transition` | 旧摘要仅在生产 SHA 属于清单列出的同维护敏感文件树祖先时迁移到新版摘要；不得跨越数据库或基础设施变化 |
 | `test_release_failure_restores_images_and_preserves_active_state` | 拉取、部分更新、代理 reload 失败的回退，拉取失败不停止应用 |
 | `test_failed_rollback_keeps_journal_for_next_recovery` | 回退再次失败保留 journal，下次恢复旧镜像 |
 | `test_schema_change_and_stale_release_fail_before_stop` | 兼容边界变化及过期序号在停服前拒绝 |
 | `test_manifest_rejects_mutable_tag_wrong_sha_and_registry` | 错误 SHA、浮动标签、非批准镜像仓库拒绝 |
-| `test_deploy_workflow_requires_checks_and_uses_existing_secret_names` | main 触发、门禁顺序、部署不取消、门禁步骤使用 Earthly `--ci` 而 LOCALLY 发布步骤不得继承（`--ci` 隐含 `--strict`）、已有 Secret 名称和 SSH 主机校验 |
+| `test_deploy_workflow_requires_checks_and_uses_existing_secret_names` | main 触发、门禁顺序、部署不取消、门禁步骤使用 Earthly `--ci` 而 LOCALLY 发布步骤不得继承（`--ci` 隐含 `--strict`）、已有 Secret 名称、SSH 主机校验以及 systemd 日志回传 |
 | `test_health_failure_after_switch_rolls_back` | 新版探针失败后恢复旧镜像和 active 状态 |
 | `test_image_drift_and_revision_mismatch_block_before_stopping` | 手工镜像漂移或拉取镜像 revision 不匹配时停服前拒绝 |
 | `test_baseline_uses_actual_image_ids_and_refuses_overwrite` | 首次基线使用实际运行 Image ID，加保留标签且不替换容器；禁止覆盖 |

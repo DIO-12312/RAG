@@ -35,23 +35,20 @@ APP_IMAGE = {
     "api": "api",
     "web": "web",
 }
-# Conservative guard: changes here need a maintenance release and a new baseline.
-PROTECTED = (
+# Only persistent schema and production infrastructure changes require a
+# maintenance release. Application images are replaced as one unit.
+MAINTENANCE_PATHS = (
     "compose.production.yml",
     "deploy/production/Caddyfile",
     "migrations",
     "alembic.ini",
-    "proto",
     "backend/go-api/internal/storage",
-    "backend/go-api/cmd/api",
-    "src/rag_mvp/domain",
-    "src/rag_mvp/adapters/metadata",
-    "src/rag_mvp/adapters/search_engine",
     "docker/search-guard",
     "scripts/search_guard",
     "Dockerfile.elasticsearch",
     "Dockerfile.search-guard-bootstrap",
 )
+MAX_COMPATIBLE_BASES = 128
 
 
 class ReleaseError(RuntimeError):
@@ -94,7 +91,7 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def compatibility(root: Path) -> str:
     digest = hashlib.sha256()
-    for name in PROTECTED:
+    for name in MAINTENANCE_PATHS:
         path = root / name
         if not path.exists():
             raise ReleaseError(f"missing compatibility input: {name}")
@@ -106,11 +103,38 @@ def compatibility(root: Path) -> str:
     return digest.hexdigest()
 
 
+def compatible_base_shas(root: Path, sha: str) -> list[str]:
+    """Return recent ancestors whose maintenance-sensitive trees match this release."""
+
+    history = run(
+        ["git", "rev-list", f"--max-count={MAX_COMPATIBLE_BASES}", sha],
+        cwd=root,
+    ).splitlines()
+    compatible: list[str] = []
+    for candidate in history:
+        changed = run(
+            ["git", "diff", "--name-only", candidate, sha, "--", *MAINTENANCE_PATHS],
+            cwd=root,
+        )
+        if not changed:
+            compatible.append(candidate)
+    return compatible
+
+
 def validate_release(value: dict[str, Any], sha: str, root: Path) -> None:
     if not re.fullmatch(r"[0-9a-f]{40}", sha) or value.get("sha") != sha:
         raise ReleaseError("release SHA mismatch")
     if value.get("compatibility") != compatibility(root):
         raise ReleaseError("release compatibility fingerprint mismatch")
+    bases = value.get("compatible_base_shas")
+    if (
+        not isinstance(bases, list)
+        or sha not in bases
+        or any(
+            not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{40}", item) for item in bases
+        )
+    ):
+        raise ReleaseError("release compatible base list is invalid")
     images = value.get("images", {})
     if set(images) != set(IMAGES):
         raise ReleaseError("release image set mismatch")
@@ -159,7 +183,12 @@ def publish(root: Path, sha: str, output: Path) -> None:
             images[name] = (
                 tag.rsplit(":", 1)[0] + "@" + read_json(metadata)["containerimage.digest"]
             )
-    value = {"sha": sha, "compatibility": compatibility(root), "images": images}
+    value = {
+        "sha": sha,
+        "compatibility": compatibility(root),
+        "compatible_base_shas": compatible_base_shas(root, sha),
+        "images": images,
+    }
     validate_release(value, sha, root)
     write_json(output, value)
 
@@ -318,7 +347,10 @@ def deploy(root: Path, manifest: Path, state: Path, sha: str, sequence: int) -> 
     active = read_json(state / "active.json")
     if sequence <= active["sequence"]:
         raise ReleaseError("stale release sequence; refusing to replace a newer deployment")
-    if active["compatibility"] != release["compatibility"]:
+    if (
+        active["compatibility"] != release["compatibility"]
+        and active["sha"] not in release["compatible_base_shas"]
+    ):
         raise ReleaseError("schema/RPC/infrastructure changed: maintenance deployment required")
     old_path = Path(active["config"])
     health(old_path)

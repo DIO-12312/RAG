@@ -279,10 +279,13 @@ git archive 放入 `/data/RAG/.releases/` 独立版本目录，不覆盖开发�
 --pull never 仅替换 Server/Worker/Outbox/API/Web，并复核容器、API readiness、Web 页面与 Caddy 路由。
 不自动执行 Python migration，不替换 MySQL/ES/NATS/Caddy 或 Search Guard 配置。
 
-迁移目录、Go storage/启动代码、领域数据、RPC、ES/元数据 adapter、生产 Compose/Caddy 和
-Search Guard 资产的兼容性摘要发生变化时，在停服前拒绝发布，需按维护部署流程升级并重新
-建立基线。此门禁是保守变化检测，不是任意代码的数据向后兼容证明；业务变更仍须审查旧版
-可读取新版写入数据。失败回退仅恢复应用镜像，不自动回滚数据库或用户数据。
+迁移目录、Go 持久化 schema、生产 Compose/Caddy 和 Search Guard/Elasticsearch 基础设施资产
+的兼容性摘要发生变化时，在停服前拒绝发布，需按维护部署流程升级并重新建立基线。普通
+Python/Go 实现和内部 gRPC 契约随 Server/Worker/Outbox/API/Web 整组替换，不因代码文件摘要
+变化误判为数据库维护；发布清单记录最近祖先中维护敏感文件树未变化的 commit，旧版摘要只在
+当前生产 SHA 位于该白名单时完成一次安全迁移。清单不得授权跨越真实迁移或基础设施变化。
+失败回退仅恢复应用镜像，不自动回滚数据库或用户数据。远端 systemd unit 的 stdout/stderr
+必须通过 SSH 回传 Actions，使维护拦截和切换失败可直接诊断，不得只显示退出码。
 切换前写持久化 pending journal；失败恢复上一版本，恢复失败保留 journal 并报错，下一次部署
 或 `make production-recover` 优先恢复。主机断电后 journal 不自动执行，需要该恢复命令或下次部署。
 当前范围不含镜像签名、漏洞扫描平台、异机备份自动化；不得把离线模拟通过视为 GHCR/SSH 实际部署通过。生产主机从 registry 拉取镜像依赖主机代理/TUN 在线：代理不可用时 `production-deploy` 会在拉取阶段超时失败，该失败发生在写 pending journal 与停止应用之前，生产继续运行，恢复代理后重跑即可；不得为此放宽超时或跳过 digest 校验。

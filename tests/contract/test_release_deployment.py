@@ -41,6 +41,7 @@ class DockerSimulator:
             {
                 "sha": SHA,
                 "compatibility": release.compatibility(ROOT),
+                "compatible_base_shas": [SHA],
                 "images": {
                     name: f"ghcr.io/dio-12312/rag-{name}@sha256:{'c' * 64}"
                     for name in release.IMAGES
@@ -141,6 +142,27 @@ def test_schema_change_and_stale_release_fail_before_stop(
     assert not docker.calls
 
 
+def test_legacy_fingerprint_allows_safe_application_only_transition(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """旧版摘要可由清单中的同基础设施祖先安全迁移到新版摘要。"""
+
+    docker = DockerSimulator(monkeypatch, tmp_path)
+    previous = copy.deepcopy(docker.previous)
+    previous["compatibility"] = "legacy-fingerprint"
+    release.write_json(docker.state / "active.json", previous)
+    manifest = release.read_json(docker.manifest)
+    manifest["compatible_base_shas"] = [previous["sha"], SHA]
+    release.write_json(docker.manifest, manifest)
+
+    docker.deploy()
+
+    active = release.read_json(docker.state / "active.json")
+    assert active["sha"] == SHA
+    assert active["compatibility"] == release.compatibility(ROOT)
+
+
 def test_manifest_rejects_mutable_tag_wrong_sha_and_registry(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -182,7 +204,7 @@ def test_deploy_workflow_requires_checks_and_uses_existing_secret_names() -> Non
     assert all(not step.get("continue-on-error") for step in steps)
     sender = (ROOT / "deploy/production/send-release.sh").read_text()
     assert "StrictHostKeyChecking=yes" in sender
-    assert "systemd-run --wait" in sender
+    assert "systemd-run --wait --pipe --collect" in sender
     assert "--password-stdin" in sender
     assert "refs/heads/main" in sender
 
@@ -263,6 +285,10 @@ def test_publish_injects_release_sha_into_web_image(
         calls.append(args)
         if args[:2] == ["git", "rev-parse"]:
             return SHA
+        if args[:2] == ["git", "rev-list"]:
+            return SHA
+        if args[:3] == ["git", "diff", "--name-only"]:
+            return ""
         if "--metadata-file" in args:
             release.write_json(
                 Path(args[args.index("--metadata-file") + 1]),
@@ -281,3 +307,4 @@ def test_publish_injects_release_sha_into_web_image(
     assert release.read_json(manifest)["images"]["web"] == (
         "ghcr.io/dio-12312/rag-web@sha256:" + "e" * 64
     )
+    assert release.read_json(manifest)["compatible_base_shas"] == [SHA]

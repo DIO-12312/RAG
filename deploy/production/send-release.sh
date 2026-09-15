@@ -27,4 +27,4 @@ printf '%s' "$GHCR_TOKEN" | ssh "${ssh_args[@]}" -p 22 "$target" \
   "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
 # systemd owns the process: SSH loss does not interrupt the switch or its rollback.
 ssh "${ssh_args[@]}" -p 22 "$target" \
-  "systemd-run --wait --collect --unit=rag-deploy-$GITHUB_RUN_NUMBER-$GITHUB_RUN_ATTEMPT --property=RuntimeMaxSec=1800 --property=TimeoutStopSec=240 --working-directory='$release_dir' /bin/bash deploy/production/run-release.sh '$GITHUB_SHA' '$GITHUB_RUN_NUMBER'"
+  "systemd-run --wait --pipe --collect --unit=rag-deploy-$GITHUB_RUN_NUMBER-$GITHUB_RUN_ATTEMPT --property=RuntimeMaxSec=1800 --property=TimeoutStopSec=240 --working-directory='$release_dir' /bin/bash deploy/production/run-release.sh '$GITHUB_SHA' '$GITHUB_RUN_NUMBER'"
