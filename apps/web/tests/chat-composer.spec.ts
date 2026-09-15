@@ -65,6 +65,13 @@ it("同一会话切换知识库后保留历史并带新知识库继续提问", a
       requests.push(await request.json() as { datasetId: string; conversationId?: string });
       return sseResponse();
     }),
+    // 会话历史按知识库隔离：切到新库时不应显示旧库的消息，切回来时应恢复。
+    http.get("*/conversations/:id/messages", ({ request }) => {
+      const dataset = new URL(request.url).searchParams.get("datasetId");
+      return HttpResponse.json(dataset === "dataset-ready"
+        ? [{ role: "assistant", content: "迁移窗口截至 2026 年 12 月 31 日。", citations: [] }]
+        : []);
+    }),
   );
   await login({ email: "demo@example.test", password: "password" });
   const router = createAppRouter({ isAuthenticated: true, restore: async () => {} });
@@ -77,8 +84,11 @@ it("同一会话切换知识库后保留历史并带新知识库继续提问", a
   await flushPromises();
   await wrapper.get("select").setValue("dataset-second");
   await flushPromises();
+  await flushPromises();
 
-  expect(wrapper.text()).toContain("迁移窗口截至 2026 年 12 月 31 日。");
+  // 切库后只显示目标库的历史，不把旧库消息混进当前上下文。
+  expect(wrapper.text()).not.toContain("迁移窗口截至 2026 年 12 月 31 日。");
+
   await wrapper.get("textarea").setValue("第二问");
   await wrapper.get("form").trigger("submit");
   await flushPromises();
@@ -88,5 +98,11 @@ it("同一会话切换知识库后保留历史并带新知识库继续提问", a
     expect.objectContaining({ datasetId: "dataset-ready" }),
     expect.objectContaining({ datasetId: "dataset-second", conversationId: "c" }),
   ]);
+
+  // 切回原库时历史按知识库恢复，验证「会话可自由切换知识库」。
+  await wrapper.get("select").setValue("dataset-ready");
+  await flushPromises();
+  await flushPromises();
+  expect(wrapper.text()).toContain("迁移窗口截至 2026 年 12 月 31 日。");
   wrapper.unmount();
 });
