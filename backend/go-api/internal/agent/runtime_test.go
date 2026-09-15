@@ -794,13 +794,63 @@ func TestEmitContextSkipsUnchangedUsage(t *testing.T) {
 	state := h.newRunState("dataset", "question", nil)
 	count := 0
 	emit := func(string, any) error { count++; return nil }
-	if err := h.emitContext(state, emit); err != nil {
+	if err := h.emitContext(state, state.Messages, emit); err != nil {
 		t.Fatalf("first report failed: %v", err)
 	}
-	if err := h.emitContext(state, emit); err != nil {
+	if err := h.emitContext(state, state.Messages, emit); err != nil {
 		t.Fatalf("second report failed: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("unchanged usage must not repeat the event, got %d", count)
+	}
+}
+
+// stubAssessor 返回固定充分性结论，用于覆盖 SCA 之后的最终回答轮次。
+type stubAssessor struct{ decision SufficiencyDecision }
+
+func (s stubAssessor) Assess(context.Context, string, []Citation) (SufficiencyDecision, error) {
+	return s.decision, nil
+}
+
+// TestRuntimeReportsContextForFinalAnswerRound 验证生产路径（配置了 SCA、答案在
+// finalizePhase 生成）也会发出占用事件，且必须带上检索后的证据数量与更大的用量——
+// 否则前端占用告警永远只看到检索前的估算。
+func TestRuntimeReportsContextForFinalAnswerRound(t *testing.T) {
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "migration"),
+		{Content: "Migration ends in December. [1]"},
+	}}
+	h := Harness{Model: model, Tool: &retriever{}, Assessor: stubAssessor{decision: SufficiencyDecision{Sufficient: true, ReasonCode: "covered"}}}
+	state := h.newRunState("owned-dataset", "question", nil)
+
+	type report struct {
+		tokens   int
+		evidence int
+	}
+	var reports []report
+	err := h.runStateMachine(context.Background(), state, func(event string, data any) error {
+		if event != "context" {
+			return nil
+		}
+		payload := data.(map[string]any)
+		tokens, _ := payload["estimatedTokens"].(int)
+		evidence, _ := payload["evidenceCount"].(int)
+		reports = append(reports, report{tokens: tokens, evidence: evidence})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if len(reports) != 2 {
+		t.Fatalf("expected pre-retrieval and final-answer context reports, got %d: %+v", len(reports), reports)
+	}
+	if reports[0].evidence != 0 {
+		t.Fatalf("first report must be pre-retrieval: %+v", reports[0])
+	}
+	if reports[1].evidence != 1 || reports[1].tokens <= reports[0].tokens {
+		t.Fatalf("final-answer report must include evidence and larger usage: %+v", reports)
+	}
+	if state.StopReason != StopReasonEvidenceSufficient || state.Answer != "Migration ends in December. [1]" {
+		t.Fatalf("unexpected stop state: %+v", state)
 	}
 }

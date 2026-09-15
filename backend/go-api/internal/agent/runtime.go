@@ -111,7 +111,7 @@ func (h Harness) modelPhase(ctx context.Context, state *RunState, emit Emit) err
 		state.MarkFailed(StopReasonBudgetExceeded)
 		return errors.New("context budget exceeded")
 	}
-	if err := h.emitContext(state, emit); err != nil {
+	if err := h.emitContext(state, state.Messages, emit); err != nil {
 		return err
 	}
 
@@ -390,6 +390,9 @@ func (h Harness) finalizePhase(ctx context.Context, state *RunState, emit Emit) 
 			state.MarkFailed(StopReasonBudgetExceeded)
 			return errors.New("context budget exceeded")
 		}
+		if err := h.emitContext(state, messages, emit); err != nil {
+			return err
+		}
 		msg, err := h.complete(ctx, state, messages, ToolPolicy{Mode: ToolNone}, emit)
 		if err != nil {
 			return failFromError(state, ctx, err)
@@ -509,13 +512,15 @@ func exhaustRetrievalBudget(state *RunState, remaining []ToolCall) {
 }
 
 // emitContext 汇报当前模型上下文占用与证据数量，供前端在接近预算时告警。
-// 只有用量或证据数发生变化时才发送，避免每轮重复事件。
-func (h Harness) emitContext(state *RunState, emit Emit) error {
+// messages 是本次真正要发给模型的切片：modelPhase 传 state.Messages，finalizePhase
+// 传裁剪并附加指令后的切片；若只统计 state.Messages 会漏报带证据的最终回答用量。
+// 只有用量或证据数发生变化时才发送，避免同一 Run 重复事件。
+func (h Harness) emitContext(state *RunState, messages []Message, emit Emit) error {
 	usable := state.Budget.MaxTokens - state.Budget.ReserveTokens
 	if usable < 1 {
 		usable = state.Budget.MaxTokens
 	}
-	used := state.Budget.UsedTokens(state.Messages)
+	used := state.Budget.UsedTokens(messages)
 	evidence := 0
 	if state.Pool != nil {
 		evidence = state.Pool.Len()
