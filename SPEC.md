@@ -235,7 +235,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 
 | 能力 | MVP 策略 | 默认参数（可配置） |
 |---|---|---|
-| Embedding | OpenAI-compatible `/embeddings` | `batch_size=20`、`max_concurrency=4`；一个文档内按有界并发发送批次并保持全局输入顺序。默认批次大小按提供方常见上限（20）设定：超限会被 400 拒绝并触发二分，等于把每个批次放大成三次请求。多输入批次收到 HTTP 400 时按输入顺序二分并重试，并从错误文本中学习提供方声明的单请求上限以收紧后续批次；单条仍被拒绝则返回 `EMBEDDING_REQUEST_REJECTED`；429/5xx 执行遵循 `Retry-After` 的有限退避重试，并按 `embedding_max_chars_per_minute`（默认 25 万字符/分钟，0 表示不限制）以字符数近似输入量做滑动窗口节流，被限流后按半数收紧预算，避免大文档以突发流量反复触发配额窗口，额度类错误码（如 `insufficient_quota`）单独返回 `EMBEDDING_QUOTA_EXCEEDED`，避免把额度问题显示成网络故障；维度由模型返回后校验并固定 Elasticsearch index mapping。 |
+| Embedding | OpenAI-compatible `/embeddings` | `batch_size=20`、`max_concurrency=4`；一个文档内按有界并发发送批次并保持全局输入顺序。默认批次大小按提供方常见上限（20）设定：超限会被 400 拒绝并触发二分，等于把每个批次放大成三次请求。多输入批次收到 HTTP 400 时按输入顺序二分并重试，并从错误文本中学习提供方声明的单请求上限以收紧后续批次；单条仍被拒绝则返回 `EMBEDDING_REQUEST_REJECTED`；429/5xx 执行遵循 `Retry-After` 的有限退避重试，并按 `embedding_max_chars_per_minute`（默认 25 万字符/分钟，0 表示不限制）以字符数近似输入量做令牌桶节流（突发容量约 10 秒预算，避免开头一次性打满整分钟配额），被限流后按半数收紧、持续成功后小幅恢复，额度类错误码（如 `insufficient_quota`）单独返回 `EMBEDDING_QUOTA_EXCEEDED`，避免把额度问题显示成网络故障；维度由模型返回后校验并固定 Elasticsearch index mapping。 |
 | Chunking | 多格式递归切分 | `chunk_size=800` 字符，`overlap=120`；代码按函数/类优先；CHM 固定 Topic/标题硬边界，超长标题段按段落→句子→词法 token 递归切分。 |
 | PDF 解析 | `plain / deepdoc / auto` | 默认 `auto`；每页原生文字少于 40 字符时尝试 `chi_sim+eng`、200 DPI OCR；最多 1000 页；重复页眉页脚在跨页统计后删除。 |
 | Dense 召回 | Cosine KNN | `dense_top_k=20` |

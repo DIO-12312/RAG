@@ -329,7 +329,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_exhausted_throttling_reports_provider_status_and_code` | 限流耗尽后的失败信息包含提供方状态码与错误码，且不泄漏凭据或输入文本。 |
 | 同上 | `test_batch_limit_from_provider_is_learned_and_reused` | 提供方声明单请求输入上限后收紧后续批次，不再让每个批次都先撞一次 400。 |
 | 同上 | `test_quota_exhaustion_is_reported_as_quota_not_transport` | 额度类 429 返回 `EMBEDDING_QUOTA_EXCEEDED`，不与地址/网络故障混淆。 |
-| 同上 | `test_pacer_reserves_within_window_and_reports_remaining_wait` | 按字符数限制每分钟输入量，超出预算的批次等待窗口滑出后再发送。 |
+| 同上 | `test_pacer_reserves_within_window_and_reports_remaining_wait` | 令牌桶按字符数节流：突发容量内可立即发送，额度耗尽后等待补充。 |
 | 同上 | `test_throttling_halves_the_pacing_budget` | 被限流后按半数收紧每分钟字符预算，避免持续突发。 |
 | 同上 | `test_pacing_recovers_budget_after_sustained_success` | 持续成功后小幅恢复每分钟字符预算，避免一次限流把整篇文档压到最低速率。 |
 | 同上 | `test_timeout_exhaustion_maps_to_retryable_unavailable` | 网络超时耗尽重试后映射为可重试 `EMBEDDING_UNAVAILABLE`。 |

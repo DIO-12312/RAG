@@ -7,7 +7,6 @@ import math
 import random
 import re
 import time
-from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -30,9 +29,10 @@ _BATCH_LIMIT = re.compile(r"not be larger than\s+(\d+)", re.IGNORECASE)
 _QUOTA_CODES = ("quota", "balance", "arrearage", "insufficient_quota")
 _LOGGER = structlog.get_logger("rag_mvp.model")
 
-# 提供方按时间窗口限制输入量：以字符数近似输入量并按分钟节流，
-# 触发限流后按半数收紧，避免大文档以突发流量反复撞 429。
-_PACING_WINDOW_SECONDS = 60.0
+# 提供方按时间窗口限制输入量：以字符数近似输入量并按分钟节流。
+# 用令牌桶而不是「整分钟滑动窗口」：后者允许在开头一次性发满整分钟预算，
+# 正是这种突发会直接打穿提供方的窗口配额，之后再靠重试慢慢恢复。
+_PACING_BURST_SECONDS = 10.0
 _MIN_PACING_FRACTION = 16.0
 # 每累计这么多次成功后小幅提高预算：一次限流不该让整篇文档停留在最低速率。
 _PACING_RECOVERY_SUCCESSES = 20
@@ -49,12 +49,20 @@ class _CharacterPacer:
         sleep: Callable[[float], Awaitable[None]],
     ) -> None:
         self._initial = float(limit_per_minute)
-        self._limit = float(limit_per_minute)
         self._floor = max(float(limit_per_minute) / _MIN_PACING_FRACTION, 1.0)
         self._successes = 0
         self._clock = clock
         self._sleep = sleep
-        self._window: deque[tuple[float, int]] = deque()
+        self._tokens = 0.0
+        self._last = clock()
+        self._apply(float(limit_per_minute))
+        self._tokens = self._capacity
+
+    # 按每分钟字符预算推导每秒补充速率与突发容量（只允许约 10 秒的突发）。
+    def _apply(self, limit_per_minute: float) -> None:
+        self._limit = limit_per_minute
+        self._rate = limit_per_minute / 60.0
+        self._capacity = max(self._rate * _PACING_BURST_SECONDS, self._rate)
 
     @property
     def limit(self) -> float:
@@ -68,7 +76,8 @@ class _CharacterPacer:
 
         if self._limit <= 0:
             return 0.0
-        self._limit = max(self._limit / 2, self._floor)
+        self._apply(max(self._limit / 2, self._floor))
+        self._tokens = min(self._tokens, self._capacity)
         return self._limit
 
     # 成功后按固定间隔小幅恢复预算，避免一次限流把整篇文档压到最低速率。
@@ -79,25 +88,23 @@ class _CharacterPacer:
             return
         self._successes += 1
         if self._successes % _PACING_RECOVERY_SUCCESSES == 0:
-            self._limit = min(self._limit * _PACING_RECOVERY_FACTOR, self._initial)
+            self._apply(min(self._limit * _PACING_RECOVERY_FACTOR, self._initial))
 
-    # 在预算内为本次请求预留额度；超出时等到最早的一次记录滑出窗口。
+    # 以令牌桶节流：按秒补充额度，突发容量约 10 秒，避免开头一次性打满整分钟预算。
     async def reserve(self, chars: int) -> None:
-        """Wait until the rolling window has room for this request."""
+        """Wait until enough character budget has accumulated for this request."""
 
         if self._limit <= 0:
             return
         while True:
             now = self._clock()
-            while self._window and now - self._window[0][0] > _PACING_WINDOW_SECONDS:
-                self._window.popleft()
-            used = sum(entry[1] for entry in self._window)
-            # 单次请求本身就超预算时只能放行，否则会永远等待。
-            if used + chars <= self._limit or chars > self._limit:
-                self._window.append((now, chars))
+            self._tokens = min(self._capacity, self._tokens + (now - self._last) * self._rate)
+            self._last = now
+            # 单次请求本身就超容量时只能放行，否则会永远等待。
+            if self._tokens >= chars or chars > self._capacity:
+                self._tokens = max(0.0, self._tokens - chars)
                 return
-            wait = _PACING_WINDOW_SECONDS - (now - self._window[0][0]) + 0.05
-            await self._sleep(min(wait, _PACING_WINDOW_SECONDS))
+            await self._sleep(min((chars - self._tokens) / self._rate, 60.0))
 
 
 class OpenAICompatibleModelGateway:

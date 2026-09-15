@@ -469,16 +469,17 @@ async def test_pacer_reserves_within_window_and_reports_remaining_wait() -> None
 
     client = _client(handler)
     gateway = _gateway(
-        client, max_retries=0, jitter=lambda: 1.0, clock=clock, max_chars_per_minute=1000
+        client, max_retries=0, jitter=lambda: 1.0, clock=clock, max_chars_per_minute=6000
     )
     try:
-        # 两条 500 字符请求刚好占满 1000 字符/分钟的预算，后两条必须等窗口滑出。
-        vectors = await gateway.embed(["a" * 500, "b" * 500, "c" * 500, "d" * 500])
-        assert len(vectors) == 4
+        # 6000 字符/分钟对应每秒 100 字符、突发容量 1000 字符：
+        # 前两批各 500 字符可立即发送，第三批必须等额度补充。
+        vectors = await gateway.embed(["a" * 500] * 6)
+        assert len(vectors) == 6
     finally:
         await gateway.close()
 
-    assert attempts == 2
+    assert attempts == 3
     assert clock.sleeps
 
 
