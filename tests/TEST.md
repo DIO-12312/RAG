@@ -26,7 +26,7 @@
 | `tests/unit/ingestion/test_multiformat_parsers.py::test_non_pdf_formats_do_not_fabricate_printed_page_numbers` | 非 PDF 输入不伪造印刷页码，离线解析测试 |
 | `backend/go-api/internal/ragclient/client_test.go::TestRetrieveDisplaysPrintedAndPhysicalPDFPages`、`TestRetrieveFallsBackToPhysicalPDFPageWithoutPrintedFooter` | 兼容历史双页码 metadata，新结果无印刷页码时回退物理页；离线 Go RPC 替身 |
 
-2026-09-14 合并说明：Agent 与 PDF 冲突采用 `merge-feature-into-main` 的状态机、ToolPolicy 和 pdfminer 实现及配套测试。旧 `multiQueryModel`、`expandingRetriever`、`TestParallelToolCallsShareEvidenceBudgetWithoutFailing` 由该分支 evidence pool/runtime 预算测试覆盖替代；旧 `_fragmented_pdf_with_printed_page` 和 `test_deepdoc_pdf_uses_word_coordinates_and_records_printed_page_number` 随 pdfplumber 路径移除，当前解析器不生成印刷页码。目录仍使用既有 `backend/go-api/internal/agent/*_test.go`、`tests/unit/ingestion/test_pdf_deepdoc_parser.py`；Python 离线检查及 Go/前端测试通过 `make release-check` 验证，不替代真实模型或 PDF 质量验收。
+2026-09-15 PDF 索引回退说明：`source-router-v9` 恢复 CHM3 验证过的 pdfplumber 词级坐标与版面分段路径，同时保留页脚印刷页码、物理页码、OCR、重复页眉页脚过滤和来源 bbox。`tests/unit/ingestion/test_pdf_deepdoc_parser.py` 覆盖标题、表格、OCR、页码与 CHM3 风格分段；Python 离线检查只验证确定性结构，不替代真实 ZRDDS PDF 重新索引后的人工质量验收。
 
 main 中无冲突的展示兼容仍保留：`tests/unit/retrieval/test_provenance.py` 的 `test_pdf_evidence_repairs_false_tables_and_emits_valid_markdown_tables` 与 `apps/web/tests/markdown-content.spec.ts` 的历史 PDF 修复用例验证展示投影；`backend/go-api/internal/ragclient/client_test.go` 的双页码及物理页回退用例验证历史 metadata 兼容；`tests/unit/ingestion/test_multiformat_parsers.py` 与 CHM/CHI 测试继续保证非 PDF 来源不伪造页码。这些均为离线测试，不要求新解析器产出印刷页码。
 
@@ -263,7 +263,7 @@ tests/
    │  ├─ test_chm_parser.py
    │  ├─ test_failpoints.py
    │  ├─ test_multiformat_parsers.py
-   │  ├─ test_pdf_deepdoc_parser.py        # PDF 字符坐标、下标、目录、保守表格、段落合并、OCR 和安全上限
+   │  ├─ test_pdf_deepdoc_parser.py        # CHM3/pdfplumber 词坐标、标题、表格、双页码、OCR 和安全上限
    │  ├─ test_pipeline.py                 # 稳定去重、重复 PDF 页列表和重执行幂等
    │  ├─ test_recursive_chunker.py
    │  ├─ test_text_parser.py
@@ -345,6 +345,8 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_chi_reference_replaces_duplicate_direct_chm_anchor` | CHI 回指与普通混合检索命中同一 CHM Chunk 时不复制正文：保留直接锚点位置和真实分数，并附加 CHI 桥接审计字段。 |
 | 同上 | `test_identifier_priority_supports_mixed_case_c_api_names` | 显式混合大小写 C API 名完整命中优先于更高 RRF 的无关候选，覆盖 `DDS_DomainParticipantFactory_create_participant` 形式。 |
 | 同上 | `test_vague_dds_query_runs_all_rewrites_through_dense_and_sparse_routes` | 模糊 DDS 问题产生的 2～3 个子查询全部经过 Dense/BM25 召回，并能用规范接口词命中证据。 |
+| 同上 | `test_general_query_deduplicates_topics_and_reserves_pdf` | 概念类查询按内容摘要跨文档去重、限制跨语言重复 Topic，并在存在 PDF 候选时保留叙述型手册证据。 |
+| 同上 | `test_api_query_does_not_force_pdf_ahead_of_chm` | API 查询保持精确 CHM 接口证据优先，不机械套用 PDF 配额。 |
 | `application/test_source_service.py` | `test_source_service_returns_complete_normalized_topic_as_markdown` | 以 Document、激活版本和安全 Topic 路径从原始 CHM 恢复完整 Topic Markdown。 |
 | 同上 | `test_source_service_rejects_stale_citation_version` | 旧索引版本的引用不得读取当前版本原文，避免来源错配。 |
 | 同上 | `test_source_service_rejects_unsafe_topic_path` | 路径穿越在读取对象前 fail closed。 |
@@ -376,9 +378,9 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_deepdoc_pdf_uses_ocr_for_a_scanned_page_and_keeps_confidence` | 原生文字不足时只对扫描页调用 OCR，并保留页码、坐标和置信度。 |
 | 同上 | `test_forced_deepdoc_rejects_scanned_pdf_when_ocr_is_unavailable` | 强制 DeepDoc 且缺少 OCR 工具时返回稳定错误，不把空内容伪装成成功。 |
 | 同上 | `test_auto_mode_degrades_to_native_content_without_ocr_tools` | auto 模式缺少 OCR 工具时仍保留已有原生文字。 |
-| 同上 | `test_pdf_keeps_scaled_grid_subscripts_and_contents_in_physical_rows` | 自生成缩放 PDF 验证目录编号与条目同行、稀疏网格及下标 Q0/Q1/Q2 不丢失。 |
-| 同上 | `test_pdf_bold_labels_stay_body_and_adjacent_small_blocks_merge` | 加粗短标签保留正文，同页同标题小段合并，单页异常页脚按页码形态过滤。 |
-| 同上 | `test_pdf_requires_aligned_columns_and_excludes_bullets_from_tables` | 几何对齐的连续行才成为表格，错位列和项目符号行不误判。 |
+| 同上 | `test_pdfplumber_keeps_scaled_contents_and_repeated_pages_deterministic` | 自生成缩放 PDF 验证目录编号、网格文字与下标数字不丢失，并保证重复页面产生相同规范化正文。 |
+| 同上 | `test_pdfplumber_uses_bold_labels_as_heading_boundaries` | 验证 CHM3 基线将短加粗标签作为标题边界并保留其后正文。 |
+| 同上 | `test_pdfplumber_recognizes_repeated_multicolumn_rows_as_tables` | 验证 CHM3 基线按重复多列物理行形成 Markdown 表格。 |
 | 同上 | `test_pdf_page_limit_fails_before_ocr` | 超过页数安全上限时在渲染/OCR 前拒绝文档。 |
 | `test_config.py` | `test_pdf_content_settings_change_the_parser_fingerprint` | 会改变 PDF 索引正文的配置必须改变 parser fingerprint，防止错误复用旧索引。 |
 | `ingestion/test_chm_parser.py` | `test_chm_parser_orders_topics_and_preserves_heading_provenance` | CHM 按 HHC 目录稳定排列 Topic，按标题层级分段，过滤脚本/样式并保留 Topic、标题路径与锚点。 |

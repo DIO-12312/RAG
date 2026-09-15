@@ -55,7 +55,10 @@ type RunLimits struct {
 // DefaultRunLimits 保留既有对外行为并补齐检索/改写轮次上限。
 func DefaultRunLimits() RunLimits {
 	return RunLimits{
-		MaxRetrievalRounds:   3,
+		// One initial query plus two rewrites with at most two subqueries each.
+		// RetrievalRounds counts actual tool calls, so three truncated the second
+		// rewrite halfway through and made outcomes depend on query ordering.
+		MaxRetrievalRounds:   5,
 		MaxRewriteRounds:     2,
 		MaxToolCallsPerRound: 4,
 		MaxEvidence:          40,

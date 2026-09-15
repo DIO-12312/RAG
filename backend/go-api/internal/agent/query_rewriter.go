@@ -77,7 +77,7 @@ func (r ModelQueryRewriter) Rewrite(ctx context.Context, request RewriteRequest)
 		}
 	}
 
-	msg, err := r.Model.Complete(ctx, messages, ToolPolicy{Mode: ToolNone})
+	msg, err := r.Model.Complete(ctx, messages, DeterministicToolNone())
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return RewriteResult{}, ctxErr

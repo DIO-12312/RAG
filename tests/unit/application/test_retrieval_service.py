@@ -14,6 +14,7 @@ from rag_mvp.domain.ids import content_sha256
 from rag_mvp.domain.models import Chunk, Dataset, Document, Locator
 from rag_mvp.ports.search_engine import IndexedChunk, SearchCandidate, SearchRequest
 from rag_mvp.retrieval.hybrid import HybridCandidate
+from rag_mvp.retrieval.query_analysis import QueryIntent
 from tests.fakes.metadata import FakeMetadataRepository
 from tests.fakes.model import FakeModelGateway
 from tests.fakes.search_engine import FakeSearchEngine
@@ -552,3 +553,105 @@ async def test_vague_dds_query_runs_all_rewrites_through_dense_and_sparse_routes
     sparse_queries = tuple(request.query or "" for request in search.sparse_requests)
     assert any("DDS_DataWriter" in search_query for search_query in sparse_queries)
     assert any("DDS_Publisher_create_datawriter" in search_query for search_query in sparse_queries)
+
+
+def test_general_query_deduplicates_topics_and_reserves_pdf() -> None:
+    duplicate_text = "Topic: ZRDDS 下载\nZRDDS 安装包下载"
+    candidates = (
+        HybridCandidate(
+            "chm-c",
+            "dataset-1",
+            _chunk(
+                "document-c",
+                1,
+                duplicate_text,
+                chunk_id="chm-c",
+                topic_path="download.html",
+                source_name="ZRDDS_C_UserManual.chm",
+            ),
+            1.0,
+            1.0,
+            1.0,
+        ),
+        HybridCandidate(
+            "chm-cpp",
+            "dataset-1",
+            _chunk(
+                "document-cpp",
+                1,
+                "C++ 安装包下载",
+                chunk_id="chm-cpp",
+                topic_path="download.html",
+                source_name="ZRDDS_CPP_UserManual.chm",
+            ),
+            0.9,
+            0.9,
+            0.9,
+        ),
+        HybridCandidate(
+            "pdf-overview",
+            "dataset-1",
+            _chunk(
+                "document-pdf",
+                1,
+                "ZRDDS 是面向实时系统的数据分发服务产品。",
+                chunk_id="pdf-overview",
+                source_type="pdf",
+                source_name="ZRDDS用户手册.pdf",
+            ),
+            0.8,
+            0.8,
+            0.8,
+        ),
+        HybridCandidate(
+            "duplicate-content",
+            "dataset-1",
+            _chunk(
+                "document-copy",
+                1,
+                duplicate_text,
+                chunk_id="duplicate-content",
+                source_name="copy.txt",
+            ),
+            0.7,
+            0.7,
+            0.7,
+        ),
+    )
+
+    selected = RetrievalService._select_diverse_anchors(candidates, 3, intent=QueryIntent.GENERAL)
+
+    assert [candidate.record_id for candidate in selected] == ["pdf-overview", "chm-c", "chm-cpp"]
+    assert sum(candidate.chunk.metadata.get("source_type") == "pdf" for candidate in selected) == 1
+
+
+def test_api_query_does_not_force_pdf_ahead_of_chm() -> None:
+    candidates = (
+        HybridCandidate(
+            "api",
+            "dataset-1",
+            _chunk("chm", 1, "DDS_DataReader_take", chunk_id="api"),
+            1.0,
+            1.0,
+            1.0,
+        ),
+        HybridCandidate(
+            "pdf",
+            "dataset-1",
+            _chunk(
+                "pdf",
+                1,
+                "DataReader overview",
+                chunk_id="pdf",
+                source_type="pdf",
+                source_name="manual.pdf",
+            ),
+            0.5,
+            0.5,
+            0.5,
+        ),
+    )
+
+    selected = RetrievalService._select_diverse_anchors(candidates, 2, intent=QueryIntent.API_USAGE)
+
+    assert [candidate.record_id for candidate in selected] == ["api", "pdf"]

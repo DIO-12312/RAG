@@ -75,7 +75,7 @@ Python MVP 的唯一入口是 gRPC；本地调试也调用同一 gRPC 服务。P
 
 必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java`、PDF、`.chm` 与 `.chi`。PDF 默认使用 `auto` 路由：优先读取原生文字和坐标，原生文字不足的页面才经 Poppler 渲染并使用 Tesseract OCR；输出标题路径、阅读顺序、段落/列表/表格型文本、页码与矩形坐标。OCR 只识别文字，不负责图片语义和公式结构理解。
 
-自 `source-router-v8` 起，PDF `auto/deepdoc` 原生路径使用 pdfminer.six 的字符坐标和实际字号恢复物理行，避免 pypdf 文字回调在文本对象/变换矩阵切换时返回失真的坐标；`plain` 继续使用 pypdf。表格只有连续行的列起点、列数和行距均一致时才输出 Markdown 行；稀疏甘特图不能证明列结构时保留物理行与空白分隔，不猜测缺失单元格。加粗本身不构成标题，项目符号、短大写标签和表格行不得提升为标题；页首标题重置根层级。同页同标题下相邻段落/列表共同形成 segment，表格、页面和标题仍是边界，长段由既有 chunk_size/overlap 切块。页边以页码形态结尾的行可独立过滤，其他页眉页脚仍按跨页重复识别。这些规则改变正文、digest 和 Chunk ID，已有 PDF 必须通过新版本重建后才生效。
+自 `source-router-v9` 起，PDF `auto/deepdoc` 恢复经 CHM3 实际知识库验证的 pdfplumber 词级坐标路径：先按页面提取词块，再按纵向容差恢复物理行和横向间距；连续多列行可形成 Markdown 表格，段落、列表、表格、标题与明显纵向间距共同构成 segment 边界，长段仍由既有 `chunk_size/overlap` 切块。原生文本不足时继续按页降级到 Poppler + Tesseract OCR；重复页眉页脚仍按跨页统计移除。页脚印刷页码作为 `printed_page_number` 来源元数据保留并从正文剔除，物理页码继续保存在 locator，前端可同时展示两者。该回退仅改变 PDF 解析和索引正文，不改变 CHM/CHI、Embedding、ES schema 或查询流程；已有 PDF 必须通过新版本重建后才生效。
 
 一个上传的 CHM 对应一个既有 `Document`，不为 Topic 新建数据库 Document。CHM 内每个 HTML Topic 是逻辑子文档和不可跨越的切块硬边界；Topic 内先按 `h1`～`h6` 标题层级形成段落，超长标题段再依次优先选择段落、句子和词法 token 边界，单个不可分 token 才允许按字符硬截断。Topic 顺序优先采用 `.hhc` 目录，未列入目录的 HTML 按规范化路径稳定追加。每个 CHM Chunk 的 `content_with_weight` 必须在正文前稳定加入 `topic_title`、`heading_path` 与 locator `symbol` 上下文，使同一 Topic 的所有分块均可按页面标题、标题路径和接口符号检索；正文切分上限不包含该检索权重前缀。权重文本参与 Embedding、内容摘要和 `chunk_id` 计算，因此修改前缀规则必须提升 parser/chunker 配置版本并重建索引。Chunk 与 Evidence 必须同时保留原 CHM `source_name`，并在 metadata/locator metadata 中返回 `topic_path`、`topic_title`、`topic_order`、`heading_path` 和可选 `anchor`；行号仍表示 Topic 规范化正文中的行范围，不计算检索权重前缀。
 
@@ -112,7 +112,9 @@ PENDING → RUNNING → SUCCEEDED
 2. Sparse：BM25/关键词召回；
 3. Fusion：RRF 融合两个候选排名；
 4. 可选 Rerank：只重排 Top-20，输出 Top-6；
-5. ContextBuilder：在模型上下文预算内选取证据，超限时按得分截断，不截断句中间。
+5. 锚点多样化：按内容摘要跨文档去重，限制跨语言重复 Topic；概念、安装、配置、排错和性能类问题在有 PDF 候选时保留约三分之一叙述型手册锚点，API/QoS 问题仍按精确接口相关性排序；
+6. Topic 邻居只在锚点多样化后扩展，不占用直接召回锚点配额；
+7. ContextBuilder：在模型上下文预算内选取证据，超限时按得分截断，不截断句中间。
 
 ### 2.4 全链路可插拔，但只实现一套默认适配器
 

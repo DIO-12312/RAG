@@ -16,6 +16,16 @@ const (
 type ToolPolicy struct {
 	Mode         ToolMode
 	RequiredName string
+	// Temperature is optional so ordinary answer generation keeps the provider
+	// default while structured control decisions can request deterministic output.
+	Temperature *float64
+}
+
+// DeterministicToolNone is used for structured JSON decisions such as query
+// rewriting and evidence sufficiency assessment.
+func DeterministicToolNone() ToolPolicy {
+	temperature := 0.0
+	return ToolPolicy{Mode: ToolNone, Temperature: &temperature}
 }
 
 // PolicyForIntent 返回零基 round 对应的工具策略。

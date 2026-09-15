@@ -26,6 +26,9 @@ func (m OpenAI) Complete(ctx context.Context, messages []Message, policy ToolPol
 	endpoint, _ := url.Parse(m.BaseURL)
 	deepseek := strings.HasPrefix(strings.ToLower(m.Name), "deepseek-") || (endpoint != nil && endpoint.Hostname() == "api.deepseek.com")
 	payload := map[string]any{"model": m.Name, "messages": messages, "stream": false, "max_tokens": 4096}
+	if policy.Temperature != nil {
+		payload["temperature"] = *policy.Temperature
+	}
 	applyThinkingPolicy(payload, deepseek, m.Thinking)
 	applyToolPolicy(payload, policy, deepseek, m.Thinking)
 	b, _ := json.Marshal(payload)
@@ -81,6 +84,9 @@ func (m OpenAI) Stream(
 		"messages":   messages,
 		"stream":     true,
 		"max_tokens": 4096,
+	}
+	if policy.Temperature != nil {
+		payload["temperature"] = *policy.Temperature
 	}
 
 	applyThinkingPolicy(payload, deepseek, m.Thinking)

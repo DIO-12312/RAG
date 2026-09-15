@@ -144,6 +144,9 @@ func TestModelSufficiencyAssessorDecisionMapping(t *testing.T) {
 			if model.calls != 1 {
 				t.Fatalf("expected one assessor model call, got %d", model.calls)
 			}
+			if model.policies[0].Temperature == nil || *model.policies[0].Temperature != 0 {
+				t.Fatalf("assessor must request deterministic sampling, got %+v", model.policies[0])
+			}
 			if model.policies[0].Mode != ToolNone {
 				t.Fatalf("assessor must use ToolNone, got %+v", model.policies[0])
 			}

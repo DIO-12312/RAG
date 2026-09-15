@@ -36,8 +36,8 @@ func TestModelQueryRewriterSingleGapProducesOneQuery(t *testing.T) {
 	if len(result.Queries) != 1 || result.Queries[0] != "timeout 的最大允许值和单位" {
 		t.Fatalf("unexpected queries: %+v", result)
 	}
-	if model.policies[0].Mode != ToolNone {
-		t.Fatalf("rewriter must use ToolNone, got %+v", model.policies[0])
+	if model.policies[0].Mode != ToolNone || model.policies[0].Temperature == nil || *model.policies[0].Temperature != 0 {
+		t.Fatalf("rewriter must use deterministic ToolNone, got %+v", model.policies[0])
 	}
 	request := model.messages[0][len(model.messages[0])-1].Content
 	for _, want := range []string{"timeout 最大是多少？", "timeout 的最大允许值", "timeout 最大是多少？"} {

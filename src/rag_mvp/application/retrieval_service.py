@@ -6,6 +6,7 @@ import asyncio
 import re
 from collections.abc import Mapping, Sequence
 from time import perf_counter
+from typing import TypeVar
 
 from rag_mvp.application.dto import RetrieveQuery
 from rag_mvp.domain.enums import DatasetStatus
@@ -31,7 +32,11 @@ from rag_mvp.retrieval.hybrid import (
 )
 from rag_mvp.retrieval.provenance import hybrid_evidence, reranked_evidence
 from rag_mvp.retrieval.query_analysis import analyze_query
-from rag_mvp.retrieval.rerank import apply_rerank_scores
+from rag_mvp.retrieval.query_analysis import QueryIntent
+from rag_mvp.retrieval.rerank import RerankedCandidate, apply_rerank_scores
+
+
+CandidateT = TypeVar("CandidateT", HybridCandidate, RerankedCandidate)
 
 
 class RetrievalService:
@@ -122,7 +127,7 @@ class RetrievalService:
             rrf_k=60,
         )
         fused = self._prioritize_identifiers(analysis.normalized_query, fused)
-        anchors = await self._evidence(query, fused)
+        anchors = await self._evidence(query, fused, intent=analysis.intent)
         anchors, referenced_chunks = await self._expand_chi_topic_references(
             query,
             anchors,
@@ -292,27 +297,14 @@ class RetrievalService:
 
     # 内部辅助：完成 evidence 所需的局部转换或校验。
     async def _evidence(
-        self, query: RetrieveQuery, fused: Sequence[HybridCandidate]
+        self,
+        query: RetrieveQuery,
+        fused: Sequence[HybridCandidate],
+        *,
+        intent: QueryIntent,
     ) -> tuple[Evidence, ...]:
         if not query.enable_rerank:
-            selected: list[HybridCandidate] = []
-            deferred: list[HybridCandidate] = []
-            seen_topics: set[tuple[str, str]] = set()
-            for candidate in fused:
-                metadata = candidate.chunk.metadata
-                # CHM chunks carry topic_path; diversify direct anchors by
-                # Topic even when older indexed records lack source_type.
-                if metadata.get("topic_path"):
-                    topic = (candidate.chunk.document_id, metadata.get("topic_path", ""))
-                    if topic in seen_topics:
-                        deferred.append(candidate)
-                        continue
-                    seen_topics.add(topic)
-                selected.append(candidate)
-                if len(selected) == query.top_k:
-                    break
-            if len(selected) < query.top_k:
-                selected.extend(deferred[: query.top_k - len(selected)])
+            selected = self._select_diverse_anchors(fused, query.top_k, intent=intent)
             return tuple(hybrid_evidence(candidate) for candidate in selected)
 
         candidates = tuple(fused[:20])
@@ -326,12 +318,14 @@ class RetrievalService:
         except DomainError as error:
             if not error.failure.retryable:
                 raise
-            return tuple(hybrid_evidence(candidate) for candidate in fused[: query.top_k])
+            selected = self._select_diverse_anchors(fused, query.top_k, intent=intent)
+            return tuple(hybrid_evidence(candidate) for candidate in selected)
         except (ConnectionError, TimeoutError):
-            return tuple(hybrid_evidence(candidate) for candidate in fused[: query.top_k])
+            selected = self._select_diverse_anchors(fused, query.top_k, intent=intent)
+            return tuple(hybrid_evidence(candidate) for candidate in selected)
 
         try:
-            ranked = apply_rerank_scores(candidates, scores, top_n=query.top_k)
+            ranked = apply_rerank_scores(candidates, scores, top_n=len(candidates))
         except ValueError as error:
             raise DomainError(
                 DomainFailure(
@@ -340,7 +334,64 @@ class RetrievalService:
                     retryable=True,
                 )
             ) from error
-        return tuple(reranked_evidence(candidate) for candidate in ranked)
+        selected = self._select_diverse_anchors(ranked, query.top_k, intent=intent)
+        return tuple(reranked_evidence(candidate) for candidate in selected)
+
+    @staticmethod
+    def _select_diverse_anchors(
+        candidates: Sequence[CandidateT],
+        top_k: int,
+        *,
+        intent: QueryIntent,
+    ) -> tuple[CandidateT, ...]:
+        """Keep ranking relevance while preventing duplicate CHM topics from crowding sources."""
+
+        unique: list[CandidateT] = []
+        deferred_topics: list[CandidateT] = []
+        seen_content: set[str] = set()
+        seen_topics: set[str] = set()
+        for candidate in candidates:
+            chunk = candidate.chunk
+            if chunk.content_sha256 in seen_content:
+                continue
+            seen_content.add(chunk.content_sha256)
+            topic_path = chunk.metadata.get("topic_path", "").strip().casefold()
+            if topic_path and topic_path in seen_topics:
+                deferred_topics.append(candidate)
+                continue
+            if topic_path:
+                seen_topics.add(topic_path)
+            unique.append(candidate)
+
+        # Conceptual, installation, configuration and troubleshooting questions benefit
+        # from narrative manuals. Reserve one third of the anchors for PDFs when such
+        # candidates exist; API/QoS queries keep their natural symbol-oriented ranking.
+        pdf_intents = {
+            QueryIntent.GENERAL,
+            QueryIntent.INSTALLATION,
+            QueryIntent.CONFIGURATION,
+            QueryIntent.TROUBLESHOOTING,
+            QueryIntent.PERFORMANCE_TUNING,
+        }
+        selected: list[CandidateT] = []
+        if intent in pdf_intents:
+            pdf_quota = max(1, (top_k + 2) // 3)
+            selected.extend(
+                candidate
+                for candidate in unique
+                if candidate.chunk.metadata.get("source_type") == "pdf"
+            )
+            selected = selected[:pdf_quota]
+
+        selected_ids = {candidate.record_id for candidate in selected}
+        for candidate in (*unique, *deferred_topics):
+            if candidate.record_id in selected_ids:
+                continue
+            selected.append(candidate)
+            selected_ids.add(candidate.record_id)
+            if len(selected) == top_k:
+                break
+        return tuple(selected[:top_k])
 
     async def _expand_topic_neighbors(
         self,
