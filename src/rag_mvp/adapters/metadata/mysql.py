@@ -7,7 +7,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from typing import Any, cast
 
 from sqlalchemy import delete, select, update
@@ -63,6 +63,9 @@ from rag_mvp.ports.metadata import (
     SubmitResult,
     TaskClaim,
 )
+
+# jobs.progress 的列精度：NUMERIC(7,6)，写入前按该精度向下取整。
+_PROGRESS_QUANTUM = Decimal("0.000001")
 
 SUBMIT_OPERATION = "SUBMIT_INGESTION"
 RETRY_OPERATION = "RETRY_JOB"
@@ -827,6 +830,8 @@ class MySQLMetadataRepository:
     async def set_job_progress(self, task_id: str, progress: float, now: datetime) -> bool:
         if not 0.0 <= progress <= 1.0:
             raise ValueError("progress must be between 0 and 1")
+        # jobs.progress 是 NUMERIC(7,6)：必须按列精度取整，否则浮点比值会被拒绝或截断。
+        quantized = Decimal(str(progress)).quantize(_PROGRESS_QUANTUM, rounding=ROUND_DOWN)
         async with self._session_factory() as session, session.begin():
             result = cast(
                 CursorResult[Any],
@@ -839,9 +844,9 @@ class MySQLMetadataRepository:
                         .scalar_subquery(),
                         JobTable.status == JobStatus.RUNNING,
                         JobTable.cancel_requested_at.is_(None),
-                        JobTable.progress < Decimal(str(progress)),
+                        JobTable.progress < quantized,
                     )
-                    .values(progress=Decimal(str(progress)), updated_at=now)
+                    .values(progress=quantized, updated_at=now)
                 ),
             )
             return bool(result.rowcount)
