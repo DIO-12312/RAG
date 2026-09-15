@@ -327,6 +327,8 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_transient_statuses_retry_with_a_bound_and_recover` | 429/5xx 按有上限的指数退避重试，并在后续成功时恢复。 |
 | 同上 | `test_throttling_honours_retry_after_and_pauses_every_batch` | 429 按 `Retry-After` 退避，并让同一文档的其他并发批次一起放慢。 |
 | 同上 | `test_exhausted_throttling_reports_provider_status_and_code` | 限流耗尽后的失败信息包含提供方状态码与错误码，且不泄漏凭据或输入文本。 |
+| 同上 | `test_batch_limit_from_provider_is_learned_and_reused` | 提供方声明单请求输入上限后收紧后续批次，不再让每个批次都先撞一次 400。 |
+| 同上 | `test_quota_exhaustion_is_reported_as_quota_not_transport` | 额度类 429 返回 `EMBEDDING_QUOTA_EXCEEDED`，不与地址/网络故障混淆。 |
 | 同上 | `test_timeout_exhaustion_maps_to_retryable_unavailable` | 网络超时耗尽重试后映射为可重试 `EMBEDDING_UNAVAILABLE`。 |
 | `application/test_document_service.py` | `test_create_dataset_rejects_runtime_embedding_mismatch` | Dataset 声明的 Embedding 模型或维度与运行配置不一致时返回稳定错误。 |
 | `application/test_cleanup_service.py` | `test_dataset_cleanup_deletes_search_then_objects_then_purges_metadata` | Dataset cleanup 按 ES、对象、MySQL 顺序执行并最终移除完整聚合。 |

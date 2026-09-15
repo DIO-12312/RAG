@@ -138,7 +138,7 @@ class Settings(BaseSettings):
         gt=0,
         validation_alias="EMBEDDING_MODEL_DIMENSION",
     )
-    embedding_batch_size: int = Field(default=32, ge=1, le=256)
+    embedding_batch_size: int = Field(default=20, ge=1, le=256)
     embedding_max_concurrency: int = Field(default=4, ge=1, le=32)
     embedding_timeout_seconds: float = Field(default=30.0, gt=0)
     embedding_max_retries: int = Field(default=3, ge=0, le=10)

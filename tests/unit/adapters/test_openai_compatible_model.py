@@ -443,3 +443,78 @@ async def test_timeout_exhaustion_maps_to_retryable_unavailable(
     assert error.value.failure.code == "EMBEDDING_UNAVAILABLE"
     assert error.value.failure.retryable is True
     assert SECRET not in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_batch_limit_from_provider_is_learned_and_reused() -> None:
+    """提供方声明单请求上限后，后续批次不再逐个撞 400 再二分。"""
+
+    sizes: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
+        batch = json.loads(request.read())["input"]
+        sizes.append(len(batch))
+        if len(batch) > 3:
+            return httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "code": "InvalidParameter",
+                        "message": "batch size is invalid, it should not be larger than 3.",
+                    }
+                },
+            )
+        payload = {
+            "object": "list",
+            "data": [{"index": index, "embedding": [1, 2, 3]} for index in range(len(batch))],
+        }
+        return httpx.Response(200, json=payload)
+
+    client = _client(handler)
+    gateway = _gateway(client, batch_size=8, max_retries=0, jitter=lambda: 1.0)
+    try:
+        vectors = await gateway.embed([f"t{index}" for index in range(8)])
+    finally:
+        await gateway.close()
+
+    assert len(vectors) == 8
+    # 第一次 8 条被拒后按 4/4 二分，两侧的 4 条再次被拒再各分 2/2，
+    # 之后学习到上限 3，剩余调用不再出现超过 3 条的请求。
+    assert sizes[0] == 8
+    assert len([size for size in sizes if size > 3]) == 3
+    assert all(size <= 4 for size in sizes[1:])
+
+
+@pytest.mark.asyncio
+async def test_quota_exhaustion_is_reported_as_quota_not_transport() -> None:
+    """额度用尽必须返回可区分的错误码，避免被当成地址或网络故障。"""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
+        return httpx.Response(
+            429,
+            json={
+                "error": {
+                    "code": "insufficient_quota",
+                    "message": (
+                        "You exceeded your current quota, "
+                        "please check your plan and billing details."
+                    ),
+                }
+            },
+        )
+
+    clock = FakeClock()
+    client = _client(handler)
+    gateway = _gateway(client, max_retries=1, jitter=lambda: 1.0, clock=clock)
+    try:
+        with pytest.raises(DomainError) as error:
+            await gateway.embed(["a"])
+    finally:
+        await gateway.close()
+
+    failure = error.value.failure
+    assert failure.code == "EMBEDDING_QUOTA_EXCEEDED"
+    assert failure.retryable is True
+    assert "insufficient_quota" in failure.message

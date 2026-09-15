@@ -52,8 +52,11 @@ func uploadFailure(err error) (int, string, string) {
 // jobFailureMessages 把 RAG 侧的稳定错误码映射为面向用户的中文说明；
 // 未收录的码回退到原始 message，避免出现无法解释的空文案。
 var jobFailureMessages = map[string]string{
-	"EMBEDDING_AUTH_FAILED":        "Embedding 模型鉴权失败：请在设置中更新 API Key 后重试",
-	"EMBEDDING_UNAVAILABLE":        "Embedding 服务不可用，请检查模型地址与网络",
+	"EMBEDDING_AUTH_FAILED": "Embedding 模型鉴权失败：请在设置中更新 API Key 后重试",
+	"EMBEDDING_UNAVAILABLE": "Embedding 服务不可用，请检查模型地址与网络",
+	// 额度/计费类失败与网络故障的处置完全不同，必须分开提示，
+	// 否则用户会去排查地址与网络，而真正的问题是配额用尽。
+	"EMBEDDING_QUOTA_EXCEEDED":     "Embedding 模型额度不足或已达限流上限：请检查模型服务的配额与计费，或稍后重试",
 	"EMBEDDING_DIMENSION_MISMATCH": "Embedding 维度与该知识库不一致，请使用相同维度的模型",
 	"EMPTY_DOCUMENT":               "文档没有可索引的文本内容",
 	"UPLOAD_TOO_LARGE":             "文件超过服务端大小上限",

@@ -82,7 +82,7 @@ class DatasetProfileGateway:
         rerank_dataset_id: str = "",
         *,
         allow_local_models: bool = False,
-        batch_size: int = 32,
+        batch_size: int = 20,
         max_retries: int = 2,
         max_concurrency: int = 4,
     ) -> None:

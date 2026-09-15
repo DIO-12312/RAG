@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import math
 import random
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
@@ -22,7 +23,10 @@ from rag_mvp.domain.errors import DomainError, DomainFailure
 INITIAL_RETRY_DELAY_SECONDS = 1.0
 MAX_RETRY_DELAY_SECONDS = 30.0
 _PROVIDER_DETAIL_LIMIT = 200
-
+# 提供方在 400 中声明「单请求输入数不能大于 N」时，从文本里取回该上限。
+_BATCH_LIMIT = re.compile(r"not be larger than\s+(\d+)", re.IGNORECASE)
+# 这些错误码表示额度或计费问题，与网络/上游故障必须区分，否则用户会去查错方向。
+_QUOTA_CODES = ("quota", "balance", "arrearage", "insufficient_quota")
 _LOGGER = structlog.get_logger("rag_mvp.model")
 
 
@@ -81,6 +85,7 @@ class OpenAICompatibleModelGateway:
         # 否则并发中的其他批次会在同一限流窗口里继续触发 429。
         self._pause_until = 0.0
         self._pause_lock = asyncio.Lock()
+        self._learned_batch_size: int | None = None
 
     # 返回不暴露敏感配置的调试表示。
     def __repr__(self) -> str:
@@ -94,10 +99,14 @@ class OpenAICompatibleModelGateway:
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
         """Embed inputs in bounded batches while preserving original order."""
 
-        batches = [
-            texts[offset : offset + self._batch_size]
-            for offset in range(0, len(texts), self._batch_size)
-        ]
+        # 提供方可能声明了比配置更小的单请求上限（例如 20），learned_batch_size
+        # 会在收到该声明后收紧后续请求，避免每个批次都用一次 400 换二分。
+        size = (
+            self._batch_size
+            if self._learned_batch_size is None
+            else min(self._batch_size, self._learned_batch_size)
+        )
+        batches = [texts[offset : offset + size] for offset in range(0, len(texts), size)]
         semaphore = asyncio.Semaphore(self._max_concurrency)
 
         async def embed_bounded(batch: list[str]) -> list[tuple[float, ...]]:
@@ -161,17 +170,28 @@ class OpenAICompatibleModelGateway:
                     max_attempts=self._max_retries + 1,
                     provider_detail=detail,
                     retry_after_seconds=retry_after,
+                    quota_exhausted=_is_quota_detail(detail),
                 )
                 if attempt < self._max_retries:
                     if response.status_code == 429:
                         await self._pause_all(retry_after)
                     await self._backoff(attempt, retry_after)
                     continue
+                if _is_quota_detail(detail):
+                    raise DomainError(
+                        DomainFailure(
+                            "EMBEDDING_QUOTA_EXCEEDED",
+                            "embedding provider quota is exhausted "
+                            f"(status={response.status_code} code={detail or 'unknown'})",
+                            retryable=True,
+                        )
+                    )
                 raise self._unavailable(
                     f"status={response.status_code}",
                     detail=detail,
                 )
             if response.status_code == 400 and len(texts) > 1:
+                self._remember_batch_limit(response)
                 midpoint = len(texts) // 2
                 left = await self._embed_batch(texts[:midpoint])
                 right = await self._embed_batch(texts[midpoint:])
@@ -187,6 +207,33 @@ class OpenAICompatibleModelGateway:
             return self._parse_response(response, len(texts))
 
         raise RuntimeError("embedding retry loop terminated unexpectedly")
+
+    # 在提供方声明单请求输入上限时收紧后续批次大小，避免每个批次都先撞一次 400。
+    def _remember_batch_limit(self, response: httpx.Response) -> None:
+        try:
+            payload = response.json()
+        except ValueError:
+            return
+        if not isinstance(payload, Mapping):
+            return
+        error = payload.get("error")
+        message = error.get("message") if isinstance(error, Mapping) else payload.get("message")
+        if not isinstance(message, str):
+            return
+        match = _BATCH_LIMIT.search(message)
+        if match is None:
+            return
+        limit = int(match.group(1))
+        if limit < 1:
+            return
+        previous = self._learned_batch_size
+        if previous is None or limit < previous:
+            self._learned_batch_size = limit
+            _LOGGER.info(
+                "embedding_batch_limit_learned",
+                configured_batch_size=self._batch_size,
+                learned_batch_size=limit,
+            )
 
     # 内部辅助：完成 backoff 所需的局部转换或校验。
     async def _backoff(self, attempt: int, retry_after: float | None) -> None:
@@ -324,6 +371,16 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
     if not math.isfinite(seconds) or seconds < 0:
         return None
     return seconds
+
+
+# 判断提供方错误码是否属于额度/计费类问题。注意 `Throttling.RateQuota`
+# 表示限速（可退避恢复），而 `insufficient_quota`、`AllocationQuota`、
+# `insufficient_balance` 表示额度或计费问题，两者的处置完全不同。
+def _is_quota_detail(detail: str) -> bool:
+    lowered = detail.casefold()
+    if not lowered or "rate" in lowered:
+        return False
+    return any(marker in lowered for marker in _QUOTA_CODES)
 
 
 # 只提取提供方的错误码，避免把请求正文、输入文本或凭据回显到日志与失败信息。
