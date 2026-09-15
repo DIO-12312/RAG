@@ -61,3 +61,7 @@ func (s *Server) ensureConversation(ctx context.Context, user, conversationID, d
 	}
 	return nil
 }
+
+// emptyKnowledgeBaseAnswer 是空知识库（没有任何文档）时的固定回答：它必须明确说明
+// 原因与下一步动作，且不产生任何引用，避免用户以为模型“查不到”是检索质量问题。
+const emptyKnowledgeBaseAnswer = "这个知识库还没有文档，暂时无法回答。请先上传资料并等待索引完成后再提问。"

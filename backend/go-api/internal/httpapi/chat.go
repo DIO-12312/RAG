@@ -81,6 +81,27 @@ func (s *Server) chat(c *gin.Context) {
 		fail(c, 503, "SAVE_FAILED", "会话保存失败。")
 		return
 	}
+	// 空知识库短路：没有任何文档时不可能检索到证据，直接给出结论，
+	// 不再消耗 SCA/重写与多轮检索（生产实测空库提问会烧 7 次模型调用 + 5 次检索）。
+	// 判据只取「文档数为 0」，避免把「文档都在处理中/失败」误判成空库。
+	if docs, derr := s.Store.List(ctx, uid(c), "document", p.DatasetID); derr != nil {
+		fail(c, 503, "LOAD_FAILED", "文档列表读取失败。")
+		return
+	} else if len(docs) == 0 {
+		answer := emptyKnowledgeBaseAnswer
+		if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,dataset_id,role,content,citations_json) VALUES(?,?,'assistant',?,'[]')", p.ConversationID, p.DatasetID, answer); e != nil {
+			fail(c, 503, "SAVE_FAILED", "会话保存失败。")
+			return
+		}
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("X-Accel-Buffering", "no")
+		c.Header("Cache-Control", "no-cache")
+		c.Status(200)
+		payload, _ := json.Marshal(gin.H{"answer": answer, "citations": []any{}, "conversationId": p.ConversationID})
+		_, _ = fmt.Fprintf(c.Writer, "event: final\ndata: %s\n\n", payload)
+		c.Writer.Flush()
+		return
+	}
 	rows, e := s.Store.DB.QueryContext(ctx, "SELECT role,content FROM (SELECT id,role,content FROM conversation_messages WHERE conversation_id=? AND dataset_id=? ORDER BY id DESC LIMIT 12) recent ORDER BY id", p.ConversationID, p.DatasetID)
 	if e != nil {
 		fail(c, 503, "LOAD_FAILED", "会话读取失败。")
