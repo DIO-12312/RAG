@@ -173,8 +173,14 @@ func probeRerank(ctx context.Context, base, key, name string, allowLocal bool) (
 	return fmt.Sprintf("Rerank 接口返回 %d 条排序结果", len(response.Results)), nil
 }
 
+// embedEndpoint 与 Python 侧适配器保持同一规范化规则：baseUrl 已经以 /embeddings
+// 结尾时不再重复拼接，否则同一份配置会在摄取正常的情况下被探测判为失败。
 func embedEndpoint(base string) string {
-	return strings.TrimRight(base, "/") + "/embeddings"
+	trimmed := strings.TrimRight(base, "/")
+	if strings.HasSuffix(trimmed, "/embeddings") {
+		return trimmed
+	}
+	return trimmed + "/embeddings"
 }
 
 func rerankEndpoint(base string) string {
