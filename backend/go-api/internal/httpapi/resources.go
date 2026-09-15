@@ -15,6 +15,21 @@ import (
 	"time"
 )
 
+// uploadFailure 把上传失败映射为 HTTP 语义：超过上限（客户端流式上限或 RAG 侧
+// UPLOAD_TOO_LARGE）返回 413，其余返回 502。上限在三处独立存在（Go 客户端流式上限、
+// RAG_MAX_UPLOAD_BYTES、边缘请求体上限），这里保证用户看到的语义一致。
+func uploadFailure(err error) (int, string, string) {
+	var business *ragclient.BusinessError
+	// 服务端在流中途拒绝超限上传时，客户端看到的是流中断的 gRPC 错误，
+	// 因此除了类型化错误与业务错误码，再按错误文本兜底识别稳定码。
+	if errors.Is(err, ragclient.ErrUploadTooLarge) ||
+		(errors.As(err, &business) && business.Code == "UPLOAD_TOO_LARGE") ||
+		(err != nil && strings.Contains(err.Error(), "UPLOAD_TOO_LARGE")) {
+		return 413, "UPLOAD_TOO_LARGE", "文件超过服务端大小上限，请压缩或拆分后重试。"
+	}
+	return 502, "UPLOAD_FAILED", "上传失败，请保留请求键重试。"
+}
+
 // jobFailureMessages 把 RAG 侧的稳定错误码映射为面向用户的中文说明；
 // 未收录的码回退到原始 message，避免出现无法解释的空文案。
 var jobFailureMessages = map[string]string{
@@ -244,12 +259,8 @@ func (s *Server) upload(c *gin.Context) {
 	defer cancel()
 	result, e := s.RAG.Upload(ctx, r.ID, name, uid(c)+"-"+key(c), buffered)
 	if e != nil || result == nil {
-		var business *ragclient.BusinessError
-		if errors.As(e, &business) && business.Code == "UPLOAD_TOO_LARGE" {
-			fail(c, 413, "UPLOAD_TOO_LARGE", "文件超过服务端大小上限，请压缩或拆分后重试。")
-			return
-		}
-		fail(c, 502, "UPLOAD_FAILED", "上传失败，请保留请求键重试。")
+		status, code, message := uploadFailure(e)
+		fail(c, status, code, message)
 		return
 	}
 	doc := storage.Resource{ID: result.DocumentId, UserID: uid(c), DatasetID: r.ID, Kind: "document", Name: name, JobID: result.JobId}

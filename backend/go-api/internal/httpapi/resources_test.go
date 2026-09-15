@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"rag-mvp/backend/go-api/internal/ragclient"
+
 	pb "rag-mvp/backend/go-api/internal/ragpb"
 )
 
@@ -57,5 +59,23 @@ func TestJobFailureMessageMapsStableCodes(t *testing.T) {
 	}
 	if got := jobFailureMessage(&pb.JobResult{}); got != "" {
 		t.Fatalf("无失败信息时必须为空，实际 %q", got)
+	}
+}
+
+func TestUploadFailureMapsLimitsTo413(t *testing.T) {
+	if status, code, _ := uploadFailure(ragclient.ErrUploadTooLarge); status != 413 || code != "UPLOAD_TOO_LARGE" {
+		t.Fatalf("客户端流式上限必须映射为 413，实际 %d %s", status, code)
+	}
+	if status, code, _ := uploadFailure(&ragclient.BusinessError{Code: "UPLOAD_TOO_LARGE", Message: "upload exceeds configured byte limit"}); status != 413 || code != "UPLOAD_TOO_LARGE" {
+		t.Fatalf("RAG 侧超限必须映射为 413，实际 %d %s", status, code)
+	}
+	if status, code, _ := uploadFailure(errors.New("rpc error: code = Unknown desc = UPLOAD_TOO_LARGE: upload exceeds configured byte limit")); status != 413 || code != "UPLOAD_TOO_LARGE" {
+		t.Fatalf("流中途拒绝必须按错误码兜底映射为 413，实际 %d %s", status, code)
+	}
+	if status, code, _ := uploadFailure(&ragclient.BusinessError{Code: "DATASET_NOT_FOUND"}); status != 502 || code != "UPLOAD_FAILED" {
+		t.Fatalf("其它业务错误仍为 502，实际 %d %s", status, code)
+	}
+	if status, _, _ := uploadFailure(errors.New("boom")); status != 502 {
+		t.Fatalf("未知错误仍为 502，实际 %d", status)
 	}
 }

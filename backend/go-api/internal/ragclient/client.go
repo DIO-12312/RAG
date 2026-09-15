@@ -2,6 +2,7 @@ package ragclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -38,6 +39,10 @@ func New(target string) (*Client, error) {
 func Context(key string) *pb.RequestContext {
 	return &pb.RequestContext{RequestId: security.ID(), IdempotencyKey: key}
 }
+
+// ErrUploadTooLarge 表示流式上传在客户端侧就超过了硬上限：继续传输只会被服务端整体拒绝，
+// 因此提前终止，并让调用方与 RAG 侧 UPLOAD_TOO_LARGE 一样映射为 413。
+var ErrUploadTooLarge = errors.New("upload exceeds client-side streaming limit")
 
 // BusinessError 保留 RAG 侧的稳定错误码，使调用方能按码映射 HTTP 语义
 // （例如把 UPLOAD_TOO_LARGE 映射为 413 而不是笼统的 502）。
@@ -128,7 +133,7 @@ func (c *Client) Upload(ctx context.Context, dataset, name, key string, file io.
 		if n > 0 {
 			total += n
 			if total > 64*1024*1024 {
-				return nil, fmt.Errorf("upload exceeds 64 MB")
+				return nil, ErrUploadTooLarge
 			}
 			if e = stream.Send(&pb.UploadDocumentRequest{Payload: &pb.UploadDocumentRequest_Data{Data: buf[:n]}}); e != nil {
 				return nil, e
