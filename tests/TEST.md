@@ -32,7 +32,7 @@ apps/web/tests/rerank-settings.spec.ts
 
 | 文件 | 用例 / 职责 | 运行边界 |
 |---|---|---|
-| `tests/unit/adapters/test_rerank_profile.py` | `test_rerank_profile_validates_scores_and_scope`：真实 AES-GCM 解密、Dataset AAD 隔离、输入顺序恢复、重复/缺失/非法分数、认证与服务故障、空候选不调用，错误不泄露密钥；`test_rerank_supports_dashscope_compatible_reranks_endpoint` 与 `test_rerank_supports_dashscope_native_request_and_response`：验证百炼复数 `/reranks`、原生嵌套请求及 `output.results` 响应 | pytest + httpx MockTransport，仅替代外部模型 HTTP |
+| `tests/unit/adapters/test_rerank_profile.py` | `test_rerank_profile_validates_scores_and_scope`：真实 AES-GCM 解密、Dataset AAD 隔离、输入顺序恢复、重复/缺失/非法分数、认证与服务故障、空候选不调用，错误不泄露密钥 | pytest + httpx MockTransport，仅替代外部模型 HTTP |
 | `tests/unit/application/test_retrieval_service.py` | `test_request_rerank_changes_evidence_order_only_when_enabled`、`ScopedRerankModel`：开关控制排序与分数，关闭时忽略配置；保留已有降级测试 | Fake metadata/search/model，真实检索编排，不替代 ES 验收 |
 | `tests/contract/test_proto_contract.py` | 现有请求契约测试增加字段 8 的加密 Rerank profile 类型和编号检查 | 离线 protobuf 描述符 |
 | `backend/go-api/internal/ragclient/rerank_test.go` | `TestRequestScopedRerankDoesNotMutateSharedClient`、`rerankRPC`：请求级 Top-N、密文、enable 转发与分数返回，不污染共享客户端 | Go 离线 RPC 替身 |
