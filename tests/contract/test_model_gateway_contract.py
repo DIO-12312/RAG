@@ -35,6 +35,7 @@ async def test_unconfigured_rerank_is_explicitly_retryable_unavailable() -> None
         3,
         8,
         0,
+        1,
     )
     try:
         with pytest.raises(DomainError) as error:

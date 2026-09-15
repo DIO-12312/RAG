@@ -68,6 +68,17 @@ class RetryJobCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class ReindexDocumentCommand:
+    request_id: str
+    idempotency_key: str
+    document_id: str
+    parser_version: str
+    chunk_size: int
+    chunk_overlap: int
+    now: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class DeleteDocumentCommand:
     request_id: str
     idempotency_key: str

@@ -1161,6 +1161,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pdfminer-six"
+version = "20260107"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "charset-normalizer" },
+    { name = "cryptography" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/34/a4/5cec1112009f0439a5ca6afa8ace321f0ab2f48da3255b7a1c8953014670/pdfminer_six-20260107.tar.gz", hash = "sha256:96bfd431e3577a55a0efd25676968ca4ce8fd5b53f14565f85716ff363889602", size = 8512094, upload-time = "2026-01-07T13:29:12.937Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/8b/28c4eaec9d6b036a52cb44720408f26b1a143ca9bce76cc19e8f5de00ab4/pdfminer_six-20260107-py3-none-any.whl", hash = "sha256:366585ba97e80dffa8f00cebe303d2f381884d8637af4ce422f1df3ef38111a9", size = 6592252, upload-time = "2026-01-07T13:29:10.742Z" },
+]
+
+[[package]]
 name = "pillow"
 version = "12.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1582,6 +1595,7 @@ dependencies = [
     { name = "grpcio-reflection" },
     { name = "httpx" },
     { name = "nats-py" },
+    { name = "pdfminer-six" },
     { name = "protobuf" },
     { name = "pydantic-settings" },
     { name = "pypdf" },
@@ -1615,6 +1629,7 @@ requires-dist = [
     { name = "grpcio-reflection", specifier = ">=1.74.0,<2.0.0" },
     { name = "httpx", specifier = ">=0.28.1,<1.0.0" },
     { name = "nats-py", specifier = ">=2.11.0,<3.0.0" },
+    { name = "pdfminer-six", specifier = ">=20250506,<20270000" },
     { name = "protobuf", specifier = ">=6.31.0,<7.0.0" },
     { name = "pydantic-settings", specifier = ">=2.10.0,<3.0.0" },
     { name = "pypdf", specifier = ">=6.0.0,<7.0.0" },

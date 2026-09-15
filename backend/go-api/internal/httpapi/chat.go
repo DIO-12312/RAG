@@ -5,32 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"log/slog"
 	"net/http"
 	"rag-mvp/backend/go-api/internal/agent"
 	"rag-mvp/backend/go-api/internal/security"
 	"time"
 )
-
-func chatErrorResponse(err error) (string, string) {
-	switch agent.ErrorClassOf(err) {
-	case agent.ErrorClassModel:
-		return "MODEL_FAILED", "对话模型调用失败，请检查模型配置和连通性。"
-	case agent.ErrorClassTool:
-		return "TOOL_FAILED", "工具调用失败，请检查工具参数和知识库配置。"
-	case agent.ErrorClassRetrieval:
-		return "RETRIEVAL_FAILED", "知识库检索失败，请检查知识库状态。"
-	case agent.ErrorClassContext:
-		return "CONTEXT_LIMIT", "当前对话上下文过长，请开始新的对话。"
-	case agent.ErrorClassCitation:
-		return "CITATION_FAILED", "回答引用处理失败，请重试。"
-	case agent.ErrorClassCancelled:
-		return "CHAT_CANCELLED", "回答生成已取消。"
-	case agent.ErrorClassConvergence:
-		return "AGENT_CONVERGENCE", "智能体未能在规定轮次内完成回答，请重试。"
-	default:
-		return "CHAT_FAILED", "问答未完成，请检查模型连通性、工具调用支持及知识库状态。"
-	}
-}
 
 func (s *Server) chat(c *gin.Context) {
 	var p struct {
@@ -156,10 +136,23 @@ func (s *Server) chat(c *gin.Context) {
 	}
 	modelClient := agent.ModelClient(s.AllowLocalModels)
 	defer modelClient.CloseIdleConnections()
-	h := agent.Harness{Model: agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}, Tool: retriever, MaxRounds: 6, TopK: int(top), Streaming: true}
+	// 同一个受限 adapter 同时承担回答与充分性判断，避免第二套凭据或授权路径；
+	// Assess 与受限回答共用同一份默认上下文预算；模型调用次数仅记录，不设硬上限。
+	model := agent.OpenAI{BaseURL: base, Key: apiKey, Name: name, Timeout: time.Duration(timeout) * time.Second, Thinking: thinking, Client: modelClient}
+	budget := agent.DefaultContextBudget()
+	h := agent.Harness{
+		Model:     model,
+		Tool:      retriever,
+		TopK:      int(top),
+		Streaming: true,
+		Assessor:  agent.ModelSufficiencyAssessor{Model: model, Budget: &budget},
+		Rewriter:  agent.ModelQueryRewriter{Model: model, Budget: &budget},
+		Observer:  agent.JSONLogObserver{Logger: slog.Default()},
+		RunID:     agent.NewRunID(),
+	}
 	answer, citations, e := h.Run(ctx, p.DatasetID, p.Question, history, emit)
 	if e != nil {
-		code, message := chatErrorResponse(e)
+		code, message := agent.FailureHint(e)
 		_ = emit("error", gin.H{"code": code, "message": message})
 		return
 	}

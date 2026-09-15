@@ -82,12 +82,18 @@ class DatasetProfileGateway:
         rerank_dataset_id: str = "",
         *,
         allow_local_models: bool = False,
+        batch_size: int = 32,
+        max_retries: int = 2,
+        max_concurrency: int = 4,
     ) -> None:
         self._key_file = key_file
         self._dataset = dataset
         self._rerank_profile = rerank_profile
         self._rerank_dataset_id = rerank_dataset_id
         self._allow_local_models = allow_local_models
+        self._batch_size = batch_size
+        self._max_retries = max_retries
+        self._max_concurrency = max_concurrency
 
     def for_rerank(self, encrypted_profile: str, dataset_id: str) -> ModelGateway:
         return DatasetProfileGateway(
@@ -96,13 +102,21 @@ class DatasetProfileGateway:
             encrypted_profile,
             dataset_id,
             allow_local_models=self._allow_local_models,
+            batch_size=self._batch_size,
+            max_retries=self._max_retries,
+            max_concurrency=self._max_concurrency,
         )
 
     def for_dataset(self, dataset: Dataset) -> ModelGateway:
         return DatasetProfileGateway(
             self._key_file,
             dataset,
+            self._rerank_profile,
+            self._rerank_dataset_id,
             allow_local_models=self._allow_local_models,
+            batch_size=self._batch_size,
+            max_retries=self._max_retries,
+            max_concurrency=self._max_concurrency,
         )
 
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
@@ -152,7 +166,13 @@ class DatasetProfileGateway:
             trust_env=False,
         ) as client:
             model = OpenAICompatibleModelGateway(
-                client, endpoint, dataset.embedding_model, dataset.embedding_dimension, 32, 2
+                client,
+                endpoint,
+                dataset.embedding_model,
+                dataset.embedding_dimension,
+                self._batch_size,
+                self._max_retries,
+                self._max_concurrency,
             )
             return await model.embed(texts)
 

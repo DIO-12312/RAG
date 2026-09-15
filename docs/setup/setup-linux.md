@@ -123,7 +123,7 @@ make ci
 ## 7. 启动真实 Docker 拓扑
 
 ```bash
-make docker-up
+make run
 ```
 
 该命令会校验 Compose、生成开发期 Search Guard 材料、构建镜像、执行 MySQL migration，并等待 MySQL、受 HTTPS/Basic 保护的 Elasticsearch、NATS、gRPC Server、Worker 和 Outbox 达到健康条件。默认只有 gRPC 对宿主机开放：
@@ -144,7 +144,7 @@ docker compose -f docker-compose.yml -f docker-compose.debug.yml ps elasticsearc
 
 ## 8. 生产迁移 Search Guard
 
-这是一次**全量重启**迁移，不可把已有 `elasticsearch-data` 卷原地改造成带插件的集群。`docker-compose.yml` 与 `make docker-up` 是 development/test 材料生成拓扑：其中 `rag-security-materials` 会生成本地开发材料，绝不可直接作为 production 部署。生产必须使用独立的 **production manifest/编排**，从密钥管理系统注入外部 CA、node、admin 和 client Secret；先在隔离维护网络中演练，并由能校验证书的集群内运维客户端执行管理 API，不要为了执行迁移临时开放 9200。
+这是一次**全量重启**迁移，不可把已有 `elasticsearch-data` 卷原地改造成带插件的集群。`docker-compose.yml` 与 `make run` 是 development/test 材料生成拓扑：其中 `rag-security-materials` 会生成本地开发材料，绝不可直接作为 production 部署。生产必须使用独立的 **production manifest/编排**，从密钥管理系统注入外部 CA、node、admin 和 client Secret；先在隔离维护网络中演练，并由能校验证书的集群内运维客户端执行管理 API，不要为了执行迁移临时开放 9200。
 
 1. 建立维护窗口，暂停文档上传、摄取与检索流量；使用现有受控身份创建 Elasticsearch snapshot，并在独立环境实际恢复或读取后标记为“已验证”。记录旧镜像 digest、插件版本、索引清单和 snapshot 位置。
 2. 在仍受保护的运维通道禁用 shard allocation，随后停止**所有** ES 节点和依赖 RAG 服务；确认没有节点继续写入。备份 Elasticsearch data volume，备份不替代已验证 snapshot。
@@ -170,10 +170,10 @@ make docker-test SUITE=eval
 只需要一次完整验收时使用 `SUITE=all`。测试失败时先保留容器查看日志；确认问题后再停止：
 
 ```bash
-make docker-down
+make down
 ```
 
-`make docker-down`会先扫描日志中的模型密钥，再停止容器并保留命名卷。普通 `docker compose down` 同样保留命名卷，包括 Search Guard node/client 材料；安全 bootstrap、证书或密码故障不得以删卷“修复”，应保留材料并按 fail closed 诊断。
+`make down` 会停止两套开发 Compose 栈、删除本地构建镜像并保留命名卷。普通 `docker compose down` 同样保留命名卷，包括 Search Guard node/client 材料；安全 bootstrap、证书或密码故障不得以删卷“修复”，应保留材料并按 fail closed 诊断。
 
 ## 10. 本机 gRPC 调试
 
@@ -205,4 +205,4 @@ Earthly 本身不是第二个容器运行时；确认 `docker version`在同一�
 
 ### 想重新开始但保留镜像
 
-运行 `make docker-down` 后再次 `make docker-up`。如确有数据销毁或环境重建需求，应仅在隔离演练环境执行经审批的卷回收流程；不得通过删除包括 Search Guard 材料在内的命名卷来“修复”安全故障。
+运行 `make down` 后再次 `make run`。如确有数据销毁或环境重建需求，应仅在隔离演练环境执行经审批的卷回收流程；不得通过删除包括 Search Guard 材料在内的命名卷来“修复”安全故障。

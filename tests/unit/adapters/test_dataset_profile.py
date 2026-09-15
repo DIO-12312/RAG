@@ -136,9 +136,7 @@ async def test_local_model_mode_allows_http_endpoint(
     path = tmp_path / "key"
     path.write_text(base64.b64encode(key).decode())
 
-    async def send(
-        self: httpx.AsyncHTTPTransport, request: httpx.Request
-    ) -> httpx.Response:
+    async def send(self: httpx.AsyncHTTPTransport, request: httpx.Request) -> httpx.Response:
         assert request.url.scheme == "http"
         assert request.url.host == "host.docker.internal"
         return httpx.Response(
@@ -158,10 +156,7 @@ async def test_local_model_mode_allows_http_endpoint(
     }
     nonce = bytes([7]) * 12
     sealed = base64.b64encode(
-        nonce
-        + AESGCM(key).encrypt(
-            nonce, json.dumps(config).encode(), b"rag/embedding-profile/v1"
-        )
+        nonce + AESGCM(key).encrypt(nonce, json.dumps(config).encode(), b"rag/embedding-profile/v1")
     ).decode()
 
     dataset = Dataset(
@@ -208,10 +203,7 @@ async def test_default_mode_still_uses_public_endpoint_transport(
     }
     nonce = bytes([8]) * 12
     sealed = base64.b64encode(
-        nonce
-        + AESGCM(key).encrypt(
-            nonce, json.dumps(config).encode(), b"rag/embedding-profile/v1"
-        )
+        nonce + AESGCM(key).encrypt(nonce, json.dumps(config).encode(), b"rag/embedding-profile/v1")
     ).decode()
 
     dataset = Dataset(

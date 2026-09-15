@@ -1,4 +1,6 @@
 import type {
+  ModelKind,
+  ModelProbeResult,
   SettingsResponse,
   UpdateAgentSettingsRequest,
   UpdateChatModelConfigRequest,
@@ -9,6 +11,10 @@ import { request } from "./http";
 
 export function getSettings(): Promise<SettingsResponse> {
   return request<SettingsResponse>("/settings");
+}
+
+export function testModel(kind: ModelKind): Promise<ModelProbeResult> {
+  return request<ModelProbeResult>(`/settings/models/${kind}/test`, { method: "POST" });
 }
 
 export function updateChatSettings(payload: UpdateChatModelConfigRequest): Promise<SettingsResponse> {

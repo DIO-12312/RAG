@@ -10,6 +10,7 @@ from rag_mvp.adapters.parsers.code import CodeParser
 from rag_mvp.adapters.parsers.markdown import MarkdownParser
 from rag_mvp.adapters.parsers.pdf import PdfParser
 from rag_mvp.adapters.parsers.router import SourceParserRouter
+from rag_mvp.adapters.parsers.text import TextParser
 from rag_mvp.domain.errors import DomainError
 from rag_mvp.ports.parser import PdfParserMode
 
@@ -43,6 +44,19 @@ async def test_code_parser_preserves_language_symbols_and_lines() -> None:
         (5, 6),
     ]
     assert all(segment.metadata["source_type"] == "code" for segment in segments)
+
+
+@pytest.mark.asyncio
+async def test_non_pdf_formats_do_not_fabricate_printed_page_numbers() -> None:
+    parsed = (
+        *(await TextParser().parse("guide.txt", b"plain text")),
+        *(await MarkdownParser().parse("guide.md", b"# Heading\nbody")),
+        *(await CodeParser().parse("main.py", b"def run():\n    return 1")),
+    )
+
+    assert parsed
+    assert all(segment.locator.page_number is None for segment in parsed)
+    assert all("printed_page_number" not in segment.locator.metadata for segment in parsed)
 
 
 def _text_pdf() -> bytes:

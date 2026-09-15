@@ -34,6 +34,7 @@ def _real_gateway() -> tuple[OpenAICompatibleModelGateway, int]:
             profile.dimension,
             min(profile.batch_size, 2),
             profile.max_retries,
+            min(profile.max_concurrency, 2),
         ),
         profile.dimension,
     )

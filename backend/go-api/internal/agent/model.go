@@ -20,39 +20,14 @@ type OpenAI struct {
 	Client             *http.Client
 }
 
-func (m OpenAI) Complete(ctx context.Context, messages []Message, force bool) (Message, error) {
+func (m OpenAI) Complete(ctx context.Context, messages []Message, policy ToolPolicy) (Message, error) {
 	ctx, cancel := context.WithTimeout(ctx, m.Timeout)
 	defer cancel()
-	choice := any("auto")
 	endpoint, _ := url.Parse(m.BaseURL)
 	deepseek := strings.HasPrefix(strings.ToLower(m.Name), "deepseek-") || (endpoint != nil && endpoint.Hostname() == "api.deepseek.com")
-
-	registry := NewToolRegistry()
-	if force && !(deepseek && m.Thinking) {
-		choice = map[string]any{
-			"type":     "function",
-			"function": map[string]string{"name": ragRetrieveToolName},
-		}
-	}
-
-	payload := map[string]any{
-		"model":       m.Name,
-		"messages":    messages,
-		"stream":      false,
-		"tool_choice": choice,
-		"tools":       registry.OpenAITools(),
-		"max_tokens":  4096,
-	}
-	// Common OpenAI-compatible providers expose this optional extension.
-	if deepseek {
-		mode := "disabled"
-		if m.Thinking {
-			mode = "enabled"
-		}
-		payload["thinking"] = map[string]string{"type": mode}
-	} else if m.Thinking {
-		payload["enable_thinking"] = true
-	}
+	payload := map[string]any{"model": m.Name, "messages": messages, "stream": false, "max_tokens": 4096}
+	applyThinkingPolicy(payload, deepseek, m.Thinking)
+	applyToolPolicy(payload, policy, deepseek, m.Thinking)
 	b, _ := json.Marshal(payload)
 	req, e := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(m.BaseURL, "/")+"/chat/completions", bytes.NewReader(b))
 	if e != nil {
@@ -91,52 +66,25 @@ func (m OpenAI) Complete(ctx context.Context, messages []Message, force bool) (M
 func (m OpenAI) Stream(
 	ctx context.Context,
 	messages []Message,
-	force bool,
+	policy ToolPolicy,
 	onDelta func(string) error,
 	onToolCall func(ToolCall) error,
 ) error {
 	ctx, cancel := context.WithTimeout(ctx, m.Timeout)
 	defer cancel()
 
-	choice := any("auto")
 	endpoint, _ := url.Parse(m.BaseURL)
 	deepseek := strings.HasPrefix(strings.ToLower(m.Name), "deepseek-") || (endpoint != nil && endpoint.Hostname() == "api.deepseek.com")
-	if force && !(deepseek && m.Thinking) {
-		choice = map[string]any{"type": "function", "function": map[string]string{"name": "rag_retrieve"}}
-	}
 
 	payload := map[string]any{
-		"model":       m.Name,
-		"messages":    messages,
-		"stream":      true,
-		"tool_choice": choice,
-		"tools": []any{map[string]any{
-			"type": "function",
-			"function": map[string]any{
-				"name":        "rag_retrieve",
-				"description": "Search the user's selected knowledge base. Returns evidence with citation numbers.",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"query": map[string]string{"type": "string"},
-					},
-					"required":             []string{"query"},
-					"additionalProperties": false,
-				},
-			},
-		}},
+		"model":      m.Name,
+		"messages":   messages,
+		"stream":     true,
 		"max_tokens": 4096,
 	}
 
-	if deepseek {
-		mode := "disabled"
-		if m.Thinking {
-			mode = "enabled"
-		}
-		payload["thinking"] = map[string]string{"type": mode}
-	} else if m.Thinking {
-		payload["enable_thinking"] = true
-	}
+	applyThinkingPolicy(payload, deepseek, m.Thinking)
+	applyToolPolicy(payload, policy, deepseek, m.Thinking)
 
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -268,4 +216,57 @@ func (m OpenAI) Stream(
 			return nil
 		}
 	}
+}
+
+// retrieveToolSchema 是 rag_retrieve 的唯一 schema 来源，Complete 与 Stream 共用。
+func retrieveToolSchema() map[string]any {
+	return map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name":        "rag_retrieve",
+			"description": "Search the user's selected knowledge base. Returns evidence with citation numbers.",
+			"parameters": map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{"query": map[string]string{"type": "string"}},
+				"required":             []string{"query"},
+				"additionalProperties": false,
+			},
+		},
+	}
+}
+
+// applyThinkingPolicy 保留各供应商的 thinking 兼容开关。
+func applyThinkingPolicy(payload map[string]any, deepseek, thinking bool) {
+	if deepseek {
+		mode := "disabled"
+		if thinking {
+			mode = "enabled"
+		}
+		payload["thinking"] = map[string]string{"type": mode}
+		return
+	}
+	if thinking {
+		payload["enable_thinking"] = true
+	}
+}
+
+// applyToolPolicy 把 ToolPolicy 映射为 provider payload。
+//
+// ToolNone 必须在任何供应商下都完全不暴露 tools 与 tool_choice：只让 Harness
+// 事后忽略 ToolCall 不足以阻止 provider 强制检索。
+func applyToolPolicy(payload map[string]any, policy ToolPolicy, deepseek, thinking bool) {
+	switch policy.Mode {
+	case ToolAuto, ToolRequired:
+		payload["tools"] = []any{retrieveToolSchema()}
+	default:
+		delete(payload, "tools")
+		delete(payload, "tool_choice")
+		return
+	}
+
+	if policy.Mode == ToolRequired && !(deepseek && thinking) {
+		payload["tool_choice"] = map[string]any{"type": "function", "function": map[string]string{"name": policy.RequiredName}}
+		return
+	}
+	payload["tool_choice"] = "auto"
 }

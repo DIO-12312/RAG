@@ -17,6 +17,7 @@ from rag_mvp.dev.cli import UPLOAD_FRAME_BYTES, _parser, _upload_requests
         ("submit-document", ["--dataset-id", "dataset-1", "--file", "guide.md"]),
         ("retry-job", ["--job-id", "job-1"]),
         ("cancel-job", ["--job-id", "job-1"]),
+        ("reindex-document", ["--document-id", "document-1"]),
         ("delete-document", ["--document-id", "document-1"]),
         ("delete-dataset", ["--dataset-id", "dataset-1"]),
     ],

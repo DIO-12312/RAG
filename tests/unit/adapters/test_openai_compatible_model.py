@@ -30,6 +30,7 @@ def _gateway(
     dimension: int = 3,
     batch_size: int = 2,
     max_retries: int = 2,
+    max_concurrency: int = 2,
 ) -> OpenAICompatibleModelGateway:
     """构造本测试所需的输入、替身或运行环境。"""
     return OpenAICompatibleModelGateway(
@@ -39,6 +40,7 @@ def _gateway(
         dimension,
         batch_size,
         max_retries,
+        max_concurrency,
     )
 
 
@@ -147,6 +149,42 @@ async def test_embed_empty_input_does_not_call_provider() -> None:
         assert await gateway.embed([]) == []
     finally:
         await gateway.close()
+
+
+@pytest.mark.asyncio
+async def test_embed_limits_batch_concurrency_and_preserves_order() -> None:
+    """并发批次不得超过配置上限，返回顺序仍与输入完全一致。"""
+
+    active = 0
+    maximum_active = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active, maximum_active
+        payload = json.loads(request.read())
+        active += 1
+        maximum_active = max(maximum_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return httpx.Response(
+            200,
+            json={
+                "object": "list",
+                "data": [
+                    {"index": index, "embedding": [float(value), 1.0, 2.0]}
+                    for index, value in enumerate(payload["input"])
+                ],
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    gateway = _gateway(client, batch_size=1, max_concurrency=2)
+    try:
+        vectors = await gateway.embed(["1", "2", "3", "4", "5"])
+    finally:
+        await gateway.close()
+
+    assert maximum_active == 2
+    assert [vector[0] for vector in vectors] == [1.0, 2.0, 3.0, 4.0, 5.0]
 
 
 @pytest.mark.parametrize(

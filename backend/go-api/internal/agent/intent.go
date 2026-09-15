@@ -1,6 +1,9 @@
 package agent
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 type IntentResult struct {
 	Intent                string
@@ -9,11 +12,60 @@ type IntentResult struct {
 	ClarificationQuestion string
 }
 
+// ordinaryReplyPrefixes 是有限的寒暄/致谢/告别前缀；规范化仅处理标点、空白与
+// 常见语气词，不引入新的分类模型。
+var ordinaryReplyPrefixes = []string{
+	"你好", "您好", "谢谢", "感谢", "多谢", "再见", "拜拜", "辛苦了", "早上好", "晚上好", "哈喽", "hello", "hi",
+}
+
+// ordinaryReplyTailLimit 限制社交后缀长度，避免 "hi, how do I configure ..." 这类
+// 英文问题被误判为普通交流。
+const ordinaryReplyTailLimit = 8
+
+// knowledgeMarkerPattern 标识知识问句或新增事实需求；命中即不得因问候前缀跳过检索。
+var knowledgeMarkerPattern = regexp.MustCompile(`(怎么|如何|什么|啥|哪|多少|为什么|是否|另外|还有|顺便|告诉我|帮我|查一下|配置|参数|最大值|最小值|版本|超时|timeout)`)
+
+// normalizeOrdinaryMessage 只做稳定且可解释的规范化：去空白与常见标点，再去掉末尾语气词。
+func normalizeOrdinaryMessage(text string) string {
+	trimmed := strings.TrimSpace(text)
+	trimmed = strings.Map(func(r rune) rune {
+		if strings.ContainsRune(" \t\r\n，。！？!?.,;；、~～…:：", r) {
+			return -1
+		}
+		return r
+	}, trimmed)
+	trimmed = strings.TrimRight(trimmed, "啊呀吧哦呢哈嘛啦喔哟吗")
+	return strings.TrimSpace(trimmed)
+}
+
+// isOrdinaryReply 判断整条消息是否只表达普通交流。
+func isOrdinaryReply(text string) bool {
+	normalized := normalizeOrdinaryMessage(text)
+	if normalized == "" {
+		return false
+	}
+	if knowledgeMarkerPattern.MatchString(normalized) {
+		// 同一消息混有知识问句或新增事实标记时，必须继续检索。
+		return false
+	}
+	lowered := strings.ToLower(normalized)
+	for _, prefix := range ordinaryReplyPrefixes {
+		if !strings.HasPrefix(lowered, prefix) {
+			continue
+		}
+		tail := []rune(strings.TrimSpace(strings.TrimPrefix(lowered, prefix)))
+		if len(tail) <= ordinaryReplyTailLimit {
+			return true
+		}
+	}
+	return false
+}
+
 func RouteIntent(question string, history []Message) IntentResult {
 	q := strings.TrimSpace(question)
 
-	// 普通交流
-	if q == "你好" || q == "您好" || q == "谢谢" || q == "感谢" {
+	// 普通交流（规范化末尾语气词与标点；混合事实问题不会命中整条匹配）
+	if isOrdinaryReply(q) {
 		return IntentResult{
 			Intent: "ordinary",
 			Action: "reply",

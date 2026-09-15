@@ -130,6 +130,8 @@ async def test_chm_parser_orders_topics_and_preserves_heading_provenance() -> No
     ]
     assert segments[1].locator.symbol == "Overview"
     assert segments[1].locator.language == "html"
+    assert segments[1].locator.page_number is None
+    assert "printed_page_number" not in segments[1].locator.metadata
     assert segments[1].locator.metadata["anchor"] == "intro"
     assert segments[2].locator.start_line > segments[1].locator.end_line
     assert segments[1].metadata["logical_document_type"] == "chm_topic"
@@ -238,6 +240,8 @@ async def test_chi_parser_extracts_keyword_records_with_sidecar_provenance() -> 
     assert segments[0].metadata["logical_document_type"] == "chm_index"
     assert segments[0].metadata["associated_chm_source_name"] == "ZRDDS_C_UserManual.chm"
     assert segments[0].locator.language == "chi"
+    assert segments[0].locator.page_number is None
+    assert "printed_page_number" not in segments[0].locator.metadata
     assert segments[0].locator.metadata["chi_stream"] == "$WWKeywordLinks/BTree"
     assert segments[0].locator.symbol == "DDS_WaitSet_wait"
 

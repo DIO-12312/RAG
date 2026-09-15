@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from rag_mvp.adapters.metadata.mysql import MySQLMetadataRepository
 from rag_mvp.domain.errors import DomainError
 from rag_mvp.domain.models import Dataset
-from rag_mvp.ports.metadata import SubmitIngestion
+from rag_mvp.ports.metadata import ReindexDocumentRequest, SubmitIngestion
 
 
 def _dataset(now: datetime) -> Dataset:
@@ -193,3 +193,52 @@ async def test_same_idempotency_key_replays_result_and_rejects_changed_command(
     assert counts["tasks"] == 1
     assert counts["outbox_events"] == 1
     assert counts["idempotency_records"] == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_indexed_document_reindex_creates_ready_new_version_without_hiding_active(
+    mysql_repository: tuple[MySQLMetadataRepository, AsyncEngine],
+) -> None:
+    """主动重建复用正式对象并创建 READY Outbox，旧 active_version 在完成前不变。"""
+
+    repository, engine = mysql_repository
+    now = datetime.now(UTC)
+    await repository.create_dataset(_dataset(now))
+    submitted = await repository.submit_ingestion(
+        _submission(idempotency_key="submit", staging_key="staging/a", now=now)
+    )
+    waiting = await repository.list_waiting_outbox(10)
+    event_row = next(event for event in waiting if event.task_id == submitted.task_id)
+    assert await repository.mark_object_ready(event_row.id, "objects/guide.txt", now)
+    assert await repository.claim_task(submitted.task_id, 1, now) is not None
+    assert await repository.complete_ingestion(submitted.task_id, (), now)
+
+    first = await repository.reindex_document(
+        ReindexDocumentRequest("reindex", submitted.document_id, "c" * 64, now)
+    )
+    repeated = await repository.reindex_document(
+        ReindexDocumentRequest("reindex", submitted.document_id, "c" * 64, now)
+    )
+    with pytest.raises(DomainError) as conflict:
+        await repository.reindex_document(
+            ReindexDocumentRequest("reindex", submitted.document_id, "d" * 64, now)
+        )
+
+    assert repeated.job_id == first.job_id
+    assert repeated.task_id == first.task_id
+    assert repeated.reused is True
+    assert conflict.value.failure.code == "IDEMPOTENCY_KEY_REUSED"
+    rebuilt = await repository.get_job(first.job_id)
+    document = await repository.get_document(submitted.document_id)
+    assert rebuilt is not None and rebuilt.index_version == 2
+    assert document is not None and document.active_version == 1
+    assert document.next_index_version == 3
+    ready = await repository.list_ready_outbox(10)
+    assert any(event.task_id == first.task_id for event in ready)
+    counts = await _counts(engine)
+    assert counts["jobs"] == 2
+    assert counts["tasks"] == 2
+    assert counts["outbox_events"] == 2
+    assert counts["index_builds"] == 2
+    assert counts["idempotency_records"] == 2

@@ -53,6 +53,13 @@ export function retryJob(jobId: string): Promise<Job> {
   return request<Job>(`/jobs/${jobId}/retry`, { method: "POST" });
 }
 
+export function reindexDocument(documentId: string, key = randomUUID()): Promise<Job> {
+  return request<Job>(`/documents/${documentId}/reindex`, {
+    method: "POST",
+    headers: { "Idempotency-Key": key },
+  });
+}
+
 export function deleteDocument(documentId: string): Promise<void> {
   return request<void>(`/documents/${documentId}`, { method: "DELETE" });
 }

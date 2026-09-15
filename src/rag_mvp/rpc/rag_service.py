@@ -14,6 +14,7 @@ from rag_mvp.application.dto import (
     GetJobQuery,
     GetSourceTopicQuery,
     JobView,
+    ReindexDocumentCommand,
     RetrieveQuery,
     RetryJobCommand,
     SubmitDocumentCommand,
@@ -194,7 +195,7 @@ class RagService:
         retrieval: RetrievalService | None = None,
         sources: SourceService | None = None,
         now: Callable[[], datetime] | None = None,
-        parser_version: str = "source-router-v7",
+        parser_version: str = "source-router-v8",
         chunk_size: int = 800,
         chunk_overlap: int = 120,
         embedding_model: str | None = None,
@@ -412,6 +413,36 @@ class RagService:
             return rag_service_pb2.RetryJobResponse(result=_job_result(view))
         except Exception as error:
             return rag_service_pb2.RetryJobResponse(
+                error=_unexpected(error, request.context.request_id)
+            )
+
+    async def ReindexDocument(
+        self,
+        request: rag_service_pb2.ReindexDocumentRequest,
+        context: object,
+    ) -> rag_service_pb2.ReindexDocumentResponse:
+        """Create a new full index version from the document's finalized source object."""
+
+        del context
+        if self._jobs is None:
+            return rag_service_pb2.ReindexDocumentResponse(
+                error=_unavailable(request.context.request_id)
+            )
+        try:
+            view = await self._jobs.reindex_document(
+                ReindexDocumentCommand(
+                    request_id=request.context.request_id,
+                    idempotency_key=request.context.idempotency_key,
+                    document_id=request.document_id,
+                    parser_version=self._parser_version,
+                    chunk_size=self._chunk_size,
+                    chunk_overlap=self._chunk_overlap,
+                    now=self._now(),
+                )
+            )
+            return rag_service_pb2.ReindexDocumentResponse(result=_job_result(view))
+        except Exception as error:
+            return rag_service_pb2.ReindexDocumentResponse(
                 error=_unexpected(error, request.context.request_id)
             )
 

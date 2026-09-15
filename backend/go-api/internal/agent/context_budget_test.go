@@ -220,7 +220,7 @@ type captureModel struct {
 	calls    int
 }
 
-func (m *captureModel) Complete(ctx context.Context, messages []Message, _ bool) (Message, error) {
+func (m *captureModel) Complete(ctx context.Context, messages []Message, _ ToolPolicy) (Message, error) {
 	m.messages = append([]Message(nil), messages...)
 	m.history = append(m.history, append([]Message(nil), messages...))
 	m.calls++
@@ -267,11 +267,10 @@ func TestHarnessAppliesContextBudget(t *testing.T) {
 	}
 
 	h := Harness{
-		Model:     model,
-		MaxRounds: 2,
-		TopK:      6,
-		Tool:      captureRetriever{},
-		Budget:    &budget,
+		Model:  model,
+		TopK:   6,
+		Tool:   captureRetriever{},
+		Budget: &budget,
 	}
 
 	_, _, err := h.Run(

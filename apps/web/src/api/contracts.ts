@@ -11,12 +11,14 @@ export const rootRoutes = [
   "/datasets/:id/jobs",
   "/jobs/:id/cancel",
   "/jobs/:id/retry",
+  "/documents/:id/reindex",
   "/documents/:id",
   "/documents/:id/source-topic",
   "/settings",
   "/settings/models/chat",
   "/settings/models/embedding",
   "/settings/models/rerank",
+  "/settings/models/:kind/test",
   "/settings/agent",
   "/chat/stream",
 ] as const;
@@ -51,6 +53,8 @@ export interface DocumentSummary {
   id: string;
   name: string;
   status: "INDEXED" | "PROCESSING" | "FAILED";
+  jobId?: string;
+  stale?: boolean;
 }
 
 export interface CreateDatasetRequest {
@@ -139,6 +143,7 @@ export interface ChatRequest {
 export type ChatEvent =
   | { type: "retrieval"; hits: Evidence[] }
   | { type: "token"; text: string }
+  | { type: "context"; estimatedTokens: number; usableTokens: number; budgetTokens: number; evidenceCount: number; evidenceLimit: number }
   | { type: "final"; answer: string; citations: Citation[]; conversationId?: string }
   | { type: "error"; code: string; message: string };
 
@@ -172,4 +177,10 @@ export interface SettingsResponse {
   embedding: EmbeddingModelConfigResponse;
   rerank: RerankModelConfigResponse;
   rerankEnabled: boolean;
+}
+
+export interface ModelProbeResult {
+  ok: boolean;
+  latencyMs: number;
+  detail: string;
 }

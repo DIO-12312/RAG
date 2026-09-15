@@ -9,6 +9,7 @@ service RagService {
   rpc SubmitDocument(stream UploadDocumentRequest) returns (SubmitDocumentResponse);
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
   rpc RetryJob(RetryJobRequest) returns (RetryJobResponse);
+  rpc ReindexDocument(ReindexDocumentRequest) returns (ReindexDocumentResponse);
   rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
   rpc Retrieve(RetrieveRequest) returns (RetrieveResponse);
   rpc GetSourceTopic(GetSourceTopicRequest) returns (GetSourceTopicResponse);
@@ -185,6 +186,18 @@ message RetryJobRequest {
 }
 
 message RetryJobResponse {
+  oneof outcome {
+    JobResult result = 1;
+    BusinessError error = 2;
+  }
+}
+
+message ReindexDocumentRequest {
+  RequestContext context = 1;
+  string document_id = 2;
+}
+
+message ReindexDocumentResponse {
   oneof outcome {
     JobResult result = 1;
     BusinessError error = 2;

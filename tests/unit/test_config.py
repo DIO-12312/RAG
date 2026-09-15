@@ -57,7 +57,7 @@ def test_settings_can_be_constructed_explicitly_for_tests(tmp_path: Path) -> Non
     assert settings.object_root == tmp_path
     assert settings.migrations_root == Path(".")
     assert settings.grpc_address == "127.0.0.1:50052"
-    assert settings.parser_version == "source-router-v7"
+    assert settings.parser_version == "source-router-v8"
     assert settings.pdf_parser_mode.value == "auto"
     assert settings.pdf_native_text_min_chars_per_page == 40
     assert settings.pdf_ocr_language == "chi_sim+eng"
@@ -83,6 +83,7 @@ def test_settings_builds_a_normalized_secret_embedding_profile() -> None:
     assert profile.endpoint == "https://model.example/v1/embeddings"
     assert profile.model == "embedding-model"
     assert profile.dimension == 1024
+    assert profile.max_concurrency == 4
     assert profile.api_key.get_secret_value() == api_key
     assert api_key not in repr(settings)
     assert api_key not in repr(profile)

@@ -133,21 +133,21 @@ make ci
 ## 7. 启动 Docker 服务并验收
 
 ```bash
-make docker-up
+make run
 docker compose ps
 make docker-test SUITE=integration
 make docker-test SUITE=resilience
 make docker-test SUITE=eval
-make docker-down
+make down
 ```
 
-`make docker-up` 会通过 Earthly 构建并启动 MySQL、受 Search Guard TLS/Basic 保护的 Elasticsearch、NATS、gRPC Server、Worker 和 Outbox。gRPC 服务从 Windows 主机访问时使用 `localhost:50051`；默认不发布 ES、MySQL 或 NATS 端口。需要本机排障 ES 时只能在 WSL 中显式使用 `docker-compose.debug.yml` 的 `127.0.0.1:9200:9200` override，且仍必须使用 CA 与 `rag_mvp` 凭据；不得将 9200 发布到 Windows 局域网或公网。
+`make run` 会通过 Earthly 构建并启动 MySQL、受 Search Guard TLS/Basic 保护的 Elasticsearch、NATS、gRPC Server、Worker、Outbox、产品 API 和容器化 Web。gRPC 服务从 Windows 主机访问时使用 `localhost:50051`；默认不发布 ES、MySQL 或 NATS 端口。需要本机排障 ES 时只能在 WSL 中显式使用 `docker-compose.debug.yml` 的 `127.0.0.1:9200:9200` override，且仍必须使用 CA 与 `rag_mvp` 凭据；不得将 9200 发布到 Windows 局域网或公网。
 
 默认 Elasticsearch 不供浏览器、`curl` 或 Kibana 直连；Kibana 不在本项目 Compose 范围内。排障 override 只用于 WSL 内的短时诊断，不得加入 CI、shell profile 或生产 Compose；严禁 `curl -k`、HTTP 回退或关闭 Search Guard。
 
 ## 8. 生产迁移 Search Guard
 
-生产迁移必须在 Linux/WSL 运维终端配合 Docker daemon 完成，不能从 PowerShell 直接绕过 Make/Earthly 或把 9200 映射到 Windows 网卡。这是全量重启迁移，不能原地复用未迁移的 `elasticsearch-data` 卷。`docker-compose.yml` 与 `make docker-up` 仅是 development/test 材料生成拓扑，其中 `rag-security-materials` 生成本地材料；production 必须使用独立的 **production manifest/编排**，从密钥管理系统注入外部 CA、node、admin 和 client Secret。
+生产迁移必须在 Linux/WSL 运维终端配合 Docker daemon 完成，不能从 PowerShell 直接绕过 Make/Earthly 或把 9200 映射到 Windows 网卡。这是全量重启迁移，不能原地复用未迁移的 `elasticsearch-data` 卷。`docker-compose.yml` 与 `make run` 仅是 development/test 材料生成拓扑，其中 `rag-security-materials` 生成本地材料；production 必须使用独立的 **production manifest/编排**，从密钥管理系统注入外部 CA、node、admin 和 client Secret。
 
 1. 预约维护窗口，暂停上传、摄取和检索；在受控网络通过已配置 CA 与管理员身份创建 Elasticsearch snapshot，并在独立恢复或读取演练中验证。记录 snapshot、旧镜像 digest、插件版本和索引清单。
 2. 通过受保护运维通道禁用 shard allocation，停止所有 ES 节点及依赖 RAG 服务，确认没有写入后备份 data volume。备份不是 snapshot 验证的替代物。
@@ -187,7 +187,7 @@ wsl --shutdown
 
 ### Earthly 报 `mkdir /C::` 或路径转换错误
 
-这是从原生 Windows shell 启动 Linux Earthly 的典型现象。关闭 PowerShell 中的 Earthly 进程，进入 Ubuntu，使用 Linux 路径重新执行 `make docker-up`。
+这是从原生 Windows shell 启动 Linux Earthly 的典型现象。关闭 PowerShell 中的 Earthly 进程，进入 Ubuntu，使用 Linux 路径重新执行 `make run`。
 
 ### Compose 找不到 `.env`
 
@@ -203,4 +203,4 @@ docker compose logs --tail=200 elasticsearch
 
 ### 想清空本地卷
 
-普通停止使用 `make docker-down`，它保留命名卷；普通 `docker compose down` 也保留 MySQL、ES、NATS、对象和 Search Guard node/client 材料卷。不得把删卷当作 bootstrap、证书或密码故障的修复方法，应保留材料并按 fail closed 流程诊断。
+普通停止使用 `make down`，它清理两套开发栈的容器、网络和本地构建镜像但保留命名卷；普通 `docker compose down` 也保留 MySQL、ES、NATS、对象和 Search Guard node/client 材料卷。不得把删卷当作 bootstrap、证书或密码故障的修复方法，应保留材料并按 fail closed 流程诊断。

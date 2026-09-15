@@ -17,6 +17,8 @@ from statistics import median
 from tempfile import TemporaryDirectory
 from typing import Any, Protocol
 
+from pdfminer.high_level import extract_pages
+from pdfminer.layout import LTChar, LTContainer, LTPage
 from pypdf import PdfReader
 
 from rag_mvp.domain.errors import DomainError, DomainFailure
@@ -45,6 +47,7 @@ class PdfLayoutLine:
     bold: bool = False
     confidence: float | None = None
     extraction_method: str = "native"
+    column_starts: tuple[float, ...] = ()
 
 
 class PdfOcrEngine(Protocol):
@@ -257,10 +260,12 @@ class PdfParser:
         reader: PdfReader,
     ) -> tuple[ParsedSegment, ...]:
         pages: list[_PageLayout] = []
-        for page_number, page in enumerate(reader.pages, start=1):
-            width = float(page.mediabox.width)
-            height = float(page.mediabox.height)
-            native_lines = _extract_native_lines(page, width, height)
+        native_pages = extract_pages(BytesIO(content))
+        for page_number, _page in enumerate(reader.pages, start=1):
+            native_page = next(native_pages)
+            width = float(native_page.width)
+            height = float(native_page.height)
+            native_lines = _extract_native_lines(native_page, width, height)
             native_chars = sum(len(line.text.replace("\t", "")) for line in native_lines)
             lines = native_lines
             if native_chars < self._native_text_min_chars:
@@ -313,6 +318,10 @@ class PdfParser:
                     body_size=body_size,
                 )
                 not in repeated
+                and not (
+                    line.bottom >= layout_page.height * (1 - self._margin_ratio)
+                    and re.search(r"(?:\bPage\s+\d+|\d+\s*/\s*\d+)\s*$", line.text, re.I)
+                )
             )
             page_segments, heading_stack = _page_segments(
                 layout_page,
@@ -335,54 +344,34 @@ def _document_title(reader: PdfReader, source_name: str) -> str:
 
 
 def _extract_native_lines(
-    page: Any, page_width: float, page_height: float
+    page: LTPage, page_width: float, page_height: float
 ) -> tuple[PdfLayoutLine, ...]:
     del page_width
     fragments: list[_TextFragment] = []
 
-    def visit_text(
-        text: str,
-        current_matrix: Sequence[float],
-        text_matrix: Sequence[float],
-        font_dictionary: dict[str, Any] | None,
-        font_size: float,
-    ) -> None:
-        cleaned_lines = [" ".join(line.split()) for line in text.splitlines() if line.strip()]
-        if not cleaned_lines:
-            return
-        size = max(float(font_size or 0.0), 1.0)
-        x, baseline = _transform_point(text_matrix, current_matrix)
-        font_name = str((font_dictionary or {}).get("/BaseFont", "")).casefold()
-        bold = "bold" in font_name or "black" in font_name
-        for offset, cleaned in enumerate(cleaned_lines):
-            top = max(0.0, page_height - baseline - size + offset * size * 1.2)
-            estimated_width = max(size * 0.45 * len(cleaned), size)
+    def visit(item: Any) -> None:
+        if isinstance(item, LTChar):
+            text = item.get_text()
+            if not text:
+                return
+            name = item.fontname.casefold()
             fragments.append(
                 _TextFragment(
-                    text=cleaned,
-                    x0=max(0.0, x),
-                    top=top,
-                    x1=max(0.0, x) + estimated_width,
-                    bottom=min(page_height, top + size * 1.25),
-                    font_size=size,
-                    bold=bold,
+                    text=text,
+                    x0=float(item.x0),
+                    top=page_height - float(item.y1),
+                    x1=float(item.x1),
+                    bottom=page_height - float(item.y0),
+                    font_size=max(float(item.size), 1.0),
+                    bold="bold" in name or "black" in name,
                 )
             )
+        elif isinstance(item, LTContainer):
+            for child in item:
+                visit(child)
 
-    page.extract_text(visitor_text=visit_text)
+    visit(page)
     return _group_fragments(fragments)
-
-
-def _transform_point(
-    text_matrix: Sequence[float], current_matrix: Sequence[float]
-) -> tuple[float, float]:
-    if len(text_matrix) < 6 or len(current_matrix) < 6:
-        return 0.0, 0.0
-    x = text_matrix[4] * current_matrix[0] + text_matrix[5] * current_matrix[2]
-    x += current_matrix[4]
-    y = text_matrix[4] * current_matrix[1] + text_matrix[5] * current_matrix[3]
-    y += current_matrix[5]
-    return float(x), float(y)
 
 
 def _group_fragments(fragments: Iterable[_TextFragment]) -> tuple[PdfLayoutLine, ...]:
@@ -393,7 +382,14 @@ def _group_fragments(fragments: Iterable[_TextFragment]) -> tuple[PdfLayoutLine,
             (
                 candidate
                 for candidate in reversed(rows[-4:])
-                if abs(median(item.top for item in candidate) - fragment.top) <= tolerance
+                if (
+                    abs(median(item.top for item in candidate) - fragment.top) <= tolerance
+                    or (
+                        fragment.font_size < max(item.font_size for item in candidate) * 0.85
+                        and fragment.top < median(item.bottom for item in candidate)
+                        and fragment.bottom <= max(item.bottom for item in candidate) + tolerance
+                    )
+                )
             ),
             None,
         )
@@ -407,13 +403,19 @@ def _group_fragments(fragments: Iterable[_TextFragment]) -> tuple[PdfLayoutLine,
         ordered = sorted(row, key=lambda item: item.x0)
         text = ordered[0].text
         wide_gaps = 0
+        column_starts = [ordered[0].x0]
         previous = ordered[0]
         for fragment in ordered[1:]:
             gap = fragment.x0 - previous.x1
             if gap > max(18.0, max(previous.font_size, fragment.font_size) * 2.5):
                 separator = "\t"
                 wide_gaps += 1
-            elif _needs_space(previous.text, fragment.text, gap):
+                column_starts.append(fragment.x0)
+            elif (
+                gap > max(0.5, min(previous.font_size, fragment.font_size) * 0.12)
+                and fragment.font_size >= previous.font_size * 0.85
+                and _needs_space(previous.text, fragment.text, gap)
+            ):
                 separator = " "
             else:
                 separator = ""
@@ -429,7 +431,8 @@ def _group_fragments(fragments: Iterable[_TextFragment]) -> tuple[PdfLayoutLine,
                 font_size=median(item.font_size for item in ordered),
                 order=order,
                 column_count=wide_gaps + 1,
-                bold=any(item.bold for item in ordered),
+                bold=all(item.bold for item in ordered if item.text.strip()),
+                column_starts=tuple(column_starts),
             )
         )
     return tuple(line for line in lines if line.text)
@@ -495,6 +498,7 @@ def _renumber(lines: Sequence[PdfLayoutLine]) -> tuple[PdfLayoutLine, ...]:
             bold=line.bold,
             confidence=line.confidence,
             extraction_method=line.extraction_method,
+            column_starts=line.column_starts,
         )
         for index, line in enumerate(lines, start=1)
     )
@@ -603,15 +607,16 @@ def _page_segments(
         buffered = []
 
     for line in lines:
-        heading_level = _heading_level(line, body_size)
+        heading_level = None if line.order in table_orders else _heading_level(line, body_size)
         if heading_level is not None:
+            if line is lines[0] and line.top < page.height * 0.2:
+                heading_level = 1
             flush()
             stack = {level: title for level, title in stack.items() if level < heading_level}
             stack[heading_level] = line.text
             continue
         layout_type = "table" if line.order in table_orders else _body_type(line)
-        gap = line.top - buffered[-1].bottom if buffered else 0.0
-        if buffered and (layout_type != buffered_type or gap > max(18.0, body_size * 1.8)):
+        if buffered and ((layout_type == "table") != (buffered_type == "table")):
             flush()
         buffered_type = layout_type
         buffered.append(line)
@@ -632,6 +637,8 @@ def _heading_level(line: PdfLayoutLine, body_size: float) -> int | None:
         or _DOT_LEADER.search(text)
         or _TRIVIAL_HEADING.fullmatch(text)
         or _SENTENCE_END.search(text)
+        or _LIST_PREFIX.match(text)
+        or re.fullmatch(r"[A-Z0-9:]{1,5}", text)
     ):
         return None
     ratio = line.font_size / max(body_size, 1.0)
@@ -641,7 +648,7 @@ def _heading_level(line: PdfLayoutLine, body_size: float) -> int | None:
         return 2
     if ratio >= 1.28:
         return 3
-    if ratio >= 1.12 or line.bold:
+    if ratio >= 1.12:
         return 4
     return None
 
@@ -650,12 +657,27 @@ def _table_line_orders(lines: Sequence[PdfLayoutLine]) -> frozenset[int]:
     orders: set[int] = set()
     run: list[PdfLayoutLine] = []
     for line in lines:
-        if line.column_count >= 2:
+        eligible = (
+            line.column_count >= 2
+            and bool(line.column_starts)
+            and not _LIST_PREFIX.match(line.text)
+        )
+        aligned = (
+            eligible
+            and run
+            and len(line.column_starts) == len(run[0].column_starts)
+            and all(
+                abs(left - right) <= max(3.0, line.font_size * 0.5)
+                for left, right in zip(line.column_starts, run[0].column_starts, strict=True)
+            )
+            and line.top - run[-1].bottom <= max(18.0, line.font_size * 2)
+        )
+        if not aligned:
+            if len(run) >= 2:
+                orders.update(item.order for item in run)
+            run = []
+        if eligible:
             run.append(line)
-            continue
-        if len(run) >= 2:
-            orders.update(item.order for item in run)
-        run = []
     if len(run) >= 2:
         orders.update(item.order for item in run)
     return frozenset(orders)

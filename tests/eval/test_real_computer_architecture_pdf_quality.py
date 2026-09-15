@@ -472,6 +472,7 @@ async def test_real_computer_architecture_pdf_quality(
                 embedding_runtime.dimension,
                 int(os.getenv("RAG_EMBEDDING_BATCH_SIZE", "32")),
                 int(os.getenv("RAG_EMBEDDING_MAX_RETRIES", "3")),
+                int(os.getenv("RAG_EMBEDDING_MAX_CONCURRENCY", "4")),
             )
             # 每题同时捕获查询向量和 gRPC 召回结果，便于失败后复盘。
             for case in cases:

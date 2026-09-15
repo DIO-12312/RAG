@@ -31,10 +31,10 @@ production-deploy:
 production-recover:
 	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +production-recover
 
-.PHONY: all proto lint test ci docker-up docker-test docker-down run production-run web-restart clear help
+.PHONY: all proto lint test ci docker-test down run production-run web-restart clear help
 
 # 默认所有的检验与启动
-all: proto lint test docker-up docker-test
+all: proto lint test run
 
 # 重新生成并校验 protobuf
 proto:
@@ -52,17 +52,13 @@ test:
 ci:
 	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +ci
 
-# 启动所有的docker容器
-docker-up:
-	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +docker-up
-
 # 全部容器启动后的在线测试
 docker-test:
 	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +docker-test --SUITE=$(SUITE) --EVAL_FIXTURE=$(EVAL_FIXTURE)
 
-# 关闭所有的docker容器
-docker-down:
-	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +docker-down
+# 关闭开发环境并删除本地镜像，但保留数据卷
+down:
+	$(EARTHLY) --env-file-path $(EARTHLY_ENV_FILE) $(EARTHLY_FLAGS) +down
 
 # 一键启动 RAG、Go 产品后端、产品 MySQL 与 Vue 前端容器
 run:
@@ -87,17 +83,16 @@ help:
 	@echo make production-baseline RELEASE_SHA=SHA - 记录现有生产回退基线
 	@echo make production-deploy RELEASE_SHA=SHA RELEASE_SEQUENCE=N - 从 release.json 部署应用
 	@echo make production-recover - 恢复中断的应用切换
-	@echo make all    - 运行 proto、lint、test、docker-up 和 docker-test，必须得在uv的虚拟环境下运行
+	@echo make all    - 运行 proto、lint、test 和 run，必须得在uv的虚拟环境下运行
 	@echo make proto  - 重新生成并校验 protobuf 代码
 	@echo make lint   - 运行 Ruff、格式化、mypy 和 protobuf 检查，必须得在uv的虚拟环境下运行
 	@echo make test   - 运行所有确定性的离线测试及覆盖率检查，必须得在uv的虚拟环境下运行
 	@echo make ci     - 运行完整的免密钥质量门禁
-	@echo make docker-up                  - 校验、构建并启动所有服务
 	@echo make run                        - 一键启动 RAG、Go 后端、产品 MySQL 和 Vue 前端容器
 	@echo make production-run             - 校验材料、构建并启动生产栈（默认公网 IP HTTP 入口）
 	@echo make production-run PUBLIC_MODE=domain - 域名与 HTTPS 配置就绪后启动生产入口
 	@echo make web-restart                - 重新构建并仅重启 Vue 前端容器
 	@echo make docker-test SUITE=VALUE EVAL_FIXTURE=original	实际评估数据集选择器
-	@echo make docker-down                - 扫描日志并停止服务（不删除数据卷）
+	@echo make down                      - 关闭开发环境并删除本地镜像（不删除数据卷）
 	@echo make clear                      - 删除 tests/**/log 目录下的文件
 	@echo make help   - 显示此命令列表

@@ -37,6 +37,8 @@ from rag_mvp.ports.metadata import (
     DeleteDatasetResult,
     DeleteDocumentRequest,
     DeleteDocumentResult,
+    ReindexDocumentRequest,
+    ReindexDocumentResult,
     RetryJobRequest,
     RetryJobResult,
     SubmitIngestion,
@@ -65,6 +67,8 @@ class FakeMetadataRepository:
         self.chunk_manifests: dict[tuple[str, int], tuple[Chunk, ...]] = {}
         self._idempotency: dict[str, SubmitResult] = {}
         self._retry_idempotency: dict[str, RetryJobResult] = {}
+        self._reindex_idempotency: dict[str, ReindexDocumentResult] = {}
+        self._reindex_configs: dict[str, str] = {}
         self._delete_idempotency: dict[str, DeleteDocumentResult] = {}
         self._dataset_delete_idempotency: dict[str, DeleteDatasetResult] = {}
         self._cancel_idempotency: dict[str, CancelJobResult] = {}
@@ -630,6 +634,90 @@ class FakeMetadataRepository:
             self._retry_idempotency[request.idempotency_key] = result
             return result
 
+    async def reindex_document(self, request: ReindexDocumentRequest) -> ReindexDocumentResult:
+        """从已完成文档的正式对象创建一个新的完整索引版本。"""
+
+        async with self._lock:
+            repeated = self._reindex_idempotency.get(request.idempotency_key)
+            if repeated is not None:
+                if self._reindex_configs[request.idempotency_key] != request.config_digest:
+                    raise DomainError(
+                        DomainFailure(
+                            "IDEMPOTENCY_KEY_REUSED",
+                            "idempotency key was already used for another command",
+                        )
+                    )
+                return replace(repeated, reused=True)
+            document = self.documents.get(request.document_id)
+            if document is None or document.status is DocumentStatus.DELETED:
+                raise DomainError(DomainFailure("DOCUMENT_NOT_FOUND", "document does not exist"))
+            if document.status is not DocumentStatus.READY or document.active_version is None:
+                raise DomainError(
+                    DomainFailure(
+                        "DOCUMENT_NOT_INDEXED",
+                        "document must have an active index before it can be reindexed",
+                    )
+                )
+            if document.object_key is None:
+                raise DomainError(
+                    DomainFailure(
+                        "REINDEX_OBJECT_MISSING",
+                        "reindex requires a finalized source object",
+                    )
+                )
+            dataset = self.datasets.get(document.dataset_id)
+            if dataset is None or dataset.status is not DatasetStatus.ACTIVE:
+                raise DomainError(DomainFailure("DATASET_DELETING", "dataset is being deleted"))
+            index_version = document.next_index_version
+            job = Job(
+                id=new_id(),
+                type=JobType.INGEST_DOCUMENT,
+                document_id=document.id,
+                config_digest=request.config_digest,
+                index_version=index_version,
+                document_generation=document.lifecycle_generation,
+                status=JobStatus.PENDING,
+                progress=0.0,
+                created_at=request.now,
+                dataset_id=document.dataset_id,
+            )
+            task = Task(
+                id=new_id(),
+                job_id=job.id,
+                type=TaskType.INGEST_DOCUMENT,
+                status=TaskStatus.PENDING,
+                attempt=0,
+                last_delivery_sequence=None,
+                checkpoint=None,
+                created_at=request.now,
+            )
+            event = OutboxEvent(
+                id=new_id(),
+                task_id=task.id,
+                status=OutboxStatus.READY_TO_PUBLISH,
+                attempt=0,
+                staging_key=None,
+                created_at=request.now,
+            )
+            self.documents[document.id] = replace(
+                document,
+                next_index_version=index_version + 1,
+            )
+            self.jobs[job.id] = job
+            self.tasks[task.id] = task
+            self.outbox[event.id] = event
+            self.index_builds[(document.id, index_version)] = IndexBuild(
+                document_id=document.id,
+                index_version=index_version,
+                job_id=job.id,
+                status=IndexBuildStatus.BUILDING,
+                created_at=request.now,
+            )
+            result = ReindexDocumentResult(document.id, job.id, task.id, reused=False)
+            self._reindex_idempotency[request.idempotency_key] = result
+            self._reindex_configs[request.idempotency_key] = request.config_digest
+            return result
+
     async def cancel_job(self, request: CancelJobRequest) -> CancelJobResult:
         """按摄取 Job 的当前状态模拟撤销或取消请求。"""
         async with self._lock:
@@ -989,6 +1077,16 @@ class FakeMetadataRepository:
                 key: result
                 for key, result in self._retry_idempotency.items()
                 if result.job_id not in job_ids
+            }
+            self._reindex_idempotency = {
+                key: result
+                for key, result in self._reindex_idempotency.items()
+                if result.document_id not in document_ids
+            }
+            self._reindex_configs = {
+                key: config
+                for key, config in self._reindex_configs.items()
+                if key in self._reindex_idempotency
             }
             self._delete_idempotency = {
                 key: result

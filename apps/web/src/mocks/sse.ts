@@ -24,6 +24,8 @@ export function createMockChatStream(): MockChatStream {
     if (cancelled) return;
     yield { type: "retrieval", hits: [evidence] };
     if (cancelled) return;
+    yield { type: "context", estimatedTokens: 9600, usableTokens: 28672, budgetTokens: 32768, evidenceCount: 6, evidenceLimit: 40 };
+    if (cancelled) return;
     yield { type: "token", text: "主要兼容性变更是旧字段将被移除，" };
     if (cancelled) return;
     yield { type: "token", text: "迁移窗口截至 2026 年 12 月 31 日。" };
