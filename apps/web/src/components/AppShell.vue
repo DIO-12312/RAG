@@ -9,6 +9,13 @@ import { buildCommit, shortCommit } from "@/utils/version";
 const locale = useLocaleStore();
 const auth = useAuthStore();
 const version = shortCommit();
+async function switchAccount(): Promise<void> {
+  await auth.logout();
+  window.location.href = "/login";
+}
+
+
+
 </script>
 
 <template>
@@ -47,8 +54,21 @@ const version = shortCommit();
         <AppIcon name="shield" /><p>{{ locale.value === 'zh-CN' ? '你的知识，你的空间' : 'Your knowledge. Your space.' }}<small>{{ locale.value === 'zh-CN' ? '让每一个答案，都有据可循。' : 'Answers grounded in your sources.' }}</small></p>
       </div>
       <footer class="sidebar-account">
-        <span class="account-avatar">{{ auth.user?.email?.[0]?.toUpperCase() || 'U' }}</span><span class="account-copy"><strong>{{ locale.value === 'zh-CN' ? '个人账号' : 'Personal account' }}</strong><small>{{ auth.user?.email || 'RAG Workspace' }}</small></span><LocaleSwitcher />
+        <span class="account-avatar">{{ auth.user?.email?.[0]?.toUpperCase() || 'U' }}</span>
+        <span class="account-copy">
+          <strong>{{ locale.value === 'zh-CN' ? '个人账号' : 'Personal account' }}</strong>
+          <small>{{ auth.user?.email || 'RAG Workspace' }}</small>
+        </span>
+        <button
+          type="button"
+          class="account-switch"
+          @click="switchAccount"
+        >
+          {{ locale.value === 'zh-CN' ? '切换账号' : 'Switch account' }}
+        </button>
+        <LocaleSwitcher />
       </footer>
+      
       <p
         class="build-version"
         :title="`${locale.value === 'zh-CN' ? '构建版本' : 'Build revision'} ${buildCommit}`"
