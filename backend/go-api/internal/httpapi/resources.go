@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"path/filepath"
@@ -13,9 +15,32 @@ import (
 	"time"
 )
 
+// jobFailureMessages 把 RAG 侧的稳定错误码映射为面向用户的中文说明；
+// 未收录的码回退到原始 message，避免出现无法解释的空文案。
+var jobFailureMessages = map[string]string{
+	"EMBEDDING_AUTH_FAILED":        "Embedding 模型鉴权失败：请在设置中更新 API Key 后重试",
+	"EMBEDDING_UNAVAILABLE":        "Embedding 服务不可用，请检查模型地址与网络",
+	"EMBEDDING_DIMENSION_MISMATCH": "Embedding 维度与该知识库不一致，请使用相同维度的模型",
+	"EMPTY_DOCUMENT":               "文档没有可索引的文本内容",
+	"UPLOAD_TOO_LARGE":             "文件超过服务端大小上限",
+	"PDF_OCR_UNAVAILABLE":          "扫描件需要 OCR，但服务端未启用 OCR",
+	"INVALID_PDF":                  "文件不是可解析的 PDF",
+}
+
+func jobFailureMessage(j *pb.JobResult) string {
+	failure := j.GetFailure()
+	if failure == nil {
+		return ""
+	}
+	if mapped, ok := jobFailureMessages[failure.GetCode()]; ok {
+		return mapped
+	}
+	return failure.GetMessage()
+}
+
 func jobDTO(j *pb.JobResult, name string) gin.H {
 	status := strings.TrimPrefix(j.Status.String(), "JOB_STATUS_")
-	return gin.H{"id": j.JobId, "datasetId": j.DatasetId, "sourceName": name, "status": status, "progress": j.Progress * 100, "retryable": j.Retryable, "errorMessage": j.GetFailure().GetMessage(), "cancelRequested": j.CancelRequested, "type": strings.TrimPrefix(j.Type.String(), "JOB_TYPE_")}
+	return gin.H{"id": j.JobId, "datasetId": j.DatasetId, "sourceName": name, "status": status, "progress": j.Progress * 100, "retryable": j.Retryable, "errorMessage": jobFailureMessage(j), "cancelRequested": j.CancelRequested, "type": strings.TrimPrefix(j.Type.String(), "JOB_TYPE_")}
 }
 
 // documentState 把 RAG 任务状态映射为产品文档状态。任务在 RAG 服务中查不到（例如 RAG
@@ -202,6 +227,13 @@ func (s *Server) upload(c *gin.Context) {
 		return
 	}
 	defer part.Close()
+	// 空文件没有任何可索引内容：在建立 Job/Document 之前就拒绝，
+	// 避免用户拿到一个注定 FAILED(EMPTY_DOCUMENT) 的文档。
+	buffered := bufio.NewReader(part)
+	if _, e = buffered.Peek(1); e != nil {
+		fail(c, 400, "EMPTY_FILE", "文件内容为空，请重新选择。")
+		return
+	}
 	name := filepath.Base(part.FileName())
 	ext := strings.ToLower(filepath.Ext(name))
 	if !strings.Contains("|.pdf|.pptx|.md|.txt|.py|.go|.js|.ts|.java|.chm|.chi|", "|"+ext+"|") {
@@ -210,8 +242,13 @@ func (s *Server) upload(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Minute)
 	defer cancel()
-	result, e := s.RAG.Upload(ctx, r.ID, name, uid(c)+"-"+key(c), part)
+	result, e := s.RAG.Upload(ctx, r.ID, name, uid(c)+"-"+key(c), buffered)
 	if e != nil || result == nil {
+		var business *ragclient.BusinessError
+		if errors.As(e, &business) && business.Code == "UPLOAD_TOO_LARGE" {
+			fail(c, 413, "UPLOAD_TOO_LARGE", "文件超过服务端大小上限，请压缩或拆分后重试。")
+			return
+		}
 		fail(c, 502, "UPLOAD_FAILED", "上传失败，请保留请求键重试。")
 		return
 	}

@@ -38,11 +38,23 @@ func New(target string) (*Client, error) {
 func Context(key string) *pb.RequestContext {
 	return &pb.RequestContext{RequestId: security.ID(), IdempotencyKey: key}
 }
+
+// BusinessError 保留 RAG 侧的稳定错误码，使调用方能按码映射 HTTP 语义
+// （例如把 UPLOAD_TOO_LARGE 映射为 413 而不是笼统的 502）。
+type BusinessError struct {
+	Code    string
+	Message string
+}
+
+func (e *BusinessError) Error() string {
+	return fmt.Sprintf("RAG %s: %s", e.Code, e.Message)
+}
+
 func Error(e *pb.BusinessError) error {
 	if e == nil {
 		return nil
 	}
-	return fmt.Errorf("RAG %s: %s", e.Code, e.Message)
+	return &BusinessError{Code: e.Code, Message: e.Message}
 }
 func (c *Client) Create(ctx context.Context, name, model string, dim uint32, key string, profiles ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
