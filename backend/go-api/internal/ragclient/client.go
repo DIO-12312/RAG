@@ -115,8 +115,8 @@ func (c *Client) Upload(ctx context.Context, dataset, name, key string, file io.
 		n, err := file.Read(buf)
 		if n > 0 {
 			total += n
-			if total > 32*1024*1024 {
-				return nil, fmt.Errorf("upload exceeds 32 MB")
+			if total > 64*1024*1024 {
+				return nil, fmt.Errorf("upload exceeds 64 MB")
 			}
 			if e = stream.Send(&pb.UploadDocumentRequest{Payload: &pb.UploadDocumentRequest_Data{Data: buf[:n]}}); e != nil {
 				return nil, e

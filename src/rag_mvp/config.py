@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     nats_max_deliver: int = Field(default=3, ge=1)
     object_root: Path = Path("data/objects")
 
-    max_upload_bytes: int = Field(default=16 * 1024 * 1024, ge=1)
+    max_upload_bytes: int = Field(default=64 * 1024 * 1024, ge=1)
     parser_version: str = "source-router-v10"
     chunk_size: int = Field(default=800, ge=1)
     chunk_overlap: int = Field(default=120, ge=0)

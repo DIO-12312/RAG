@@ -15,6 +15,11 @@ _DRAWING_NS = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
 _OFFICE_REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _PACKAGE_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 _PRESENTATION_NS = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+_MAX_ARCHIVE_FILES = 4096
+_MAX_ARCHIVE_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
+_MAX_ARCHIVE_ENTRY_BYTES = 32 * 1024 * 1024
+_MAX_COMPRESSION_RATIO = 100
+_MAX_XML_BYTES = 16 * 1024 * 1024
 
 
 class PptxParser:
@@ -27,6 +32,7 @@ class PptxParser:
         del source_name
         try:
             with ZipFile(BytesIO(content)) as archive:
+                self._validate_archive(archive)
                 slide_names = self._slide_names(archive)
                 if not slide_names:
                     raise ValueError("presentation has no slides")
@@ -34,7 +40,7 @@ class PptxParser:
                     raise ValueError("presentation exceeds slide limit")
                 segments = tuple(
                     ParsedSegment(
-                        text=self._slide_text(archive.read(name)),
+                        text=self._slide_text(self._read_xml(archive, name)),
                         locator=Locator(page_number=index),
                         metadata={"source_type": "pptx", "parser_mode": "slides"},
                     )
@@ -48,10 +54,12 @@ class PptxParser:
 
     @staticmethod
     def _slide_names(archive: ZipFile) -> tuple[str, ...]:
-        presentation = ElementTree.fromstring(archive.read("ppt/presentation.xml"))
-        relationships = ElementTree.fromstring(archive.read("ppt/_rels/presentation.xml.rels"))
+        presentation = ElementTree.fromstring(PptxParser._read_xml(archive, "ppt/presentation.xml"))
+        relationships = ElementTree.fromstring(
+            PptxParser._read_xml(archive, "ppt/_rels/presentation.xml.rels")
+        )
         targets = {
-            relation.attrib["Id"]: str(PurePosixPath("ppt") / relation.attrib["Target"])
+            relation.attrib["Id"]: PptxParser._slide_target(relation.attrib["Target"])
             for relation in relationships.findall(f"{_PACKAGE_REL_NS}Relationship")
             if relation.attrib.get("Type", "").endswith("/slide")
         }
@@ -60,6 +68,46 @@ class PptxParser:
             for slide in presentation.findall(f".//{_PRESENTATION_NS}sldId")
             if slide.attrib.get(f"{_OFFICE_REL_NS}id") in targets
         )
+
+    @staticmethod
+    def _validate_archive(archive: ZipFile) -> None:
+        entries = archive.infolist()
+        if len(entries) > _MAX_ARCHIVE_FILES:
+            raise ValueError("presentation contains too many files")
+        total = 0
+        for entry in entries:
+            if entry.is_dir():
+                continue
+            if entry.file_size > _MAX_ARCHIVE_ENTRY_BYTES:
+                raise ValueError("presentation entry exceeds size limit")
+            if entry.file_size and (
+                entry.compress_size == 0
+                or entry.file_size > entry.compress_size * _MAX_COMPRESSION_RATIO
+            ):
+                raise ValueError("presentation compression ratio exceeds limit")
+            total += entry.file_size
+            if total > _MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                raise ValueError("presentation exceeds uncompressed size limit")
+
+    @staticmethod
+    def _read_xml(archive: ZipFile, name: str) -> bytes:
+        info = archive.getinfo(name)
+        if info.file_size > _MAX_XML_BYTES:
+            raise ValueError("presentation XML exceeds size limit")
+        xml = archive.read(info)
+        if b"<!DOCTYPE" in xml.upper() or b"<!ENTITY" in xml.upper():
+            raise ValueError("presentation XML declarations are not supported")
+        return xml
+
+    @staticmethod
+    def _slide_target(target: str) -> str:
+        path = PurePosixPath(target)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError("presentation slide target is unsafe")
+        resolved = PurePosixPath("ppt") / path
+        if not str(resolved).startswith("ppt/slides/"):
+            raise ValueError("presentation slide target is invalid")
+        return str(resolved)
 
     @staticmethod
     def _slide_text(xml: bytes) -> str:

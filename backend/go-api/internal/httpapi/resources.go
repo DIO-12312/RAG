@@ -265,6 +265,11 @@ func (s *Server) jobAction(c *gin.Context) {
 			return
 		}
 	case "retry":
+		// Retry 重新进入摄取链路前同步最新 embedding profile，避免 Dataset
+		// 使用首次绑定时的旧密钥。
+		if !s.bindEmbedding(c, r.DatasetID) {
+			return
+		}
 		resp, e := s.RAG.RPC.RetryJob(ctx, &pb.RetryJobRequest{Context: ragclient.Context(uid(c) + "-" + key(c)), JobId: r.ID})
 		if e != nil || ragclient.Error(resp.GetError()) != nil || resp.GetResult() == nil {
 			fail(c, 409, "RETRY_FAILED", "此任务不可重试。")

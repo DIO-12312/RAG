@@ -11,7 +11,7 @@
 {$RAG_PUBLIC_SITE_ADDRESS} {
 	encode zstd gzip
 	request_body {
-		max_size 34MB
+		max_size 70MB
 	}
 	header {
 		X-Content-Type-Options nosniff

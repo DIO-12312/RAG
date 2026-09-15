@@ -11,7 +11,7 @@ x-rag-environment: &rag-environment
   RAG_ELASTICSEARCH_CA_CERT: /run/secrets/ca.pem
   RAG_NATS_URL: nats://nats:4222
   RAG_OBJECT_ROOT: /app/data/objects
-  RAG_MAX_UPLOAD_BYTES: ${RAG_MAX_UPLOAD_BYTES:-33554432}
+  RAG_MAX_UPLOAD_BYTES: ${RAG_MAX_UPLOAD_BYTES:-67108864}
   RAG_MODEL_ENCRYPTION_KEY_FILE: /run/model-keys/encryption.key
 
 x-search-guard-node-secrets: &search-guard-node-secrets

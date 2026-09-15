@@ -473,7 +473,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界；lint/test/ci 聚合复用非空工作区基底，并复制生产 Compose/Caddy 契约输入，避免测试工作区遗漏部署文件。 |
 | 同上 | `test_docker_entrypoints_validate_suites_and_preserve_volumes` | Docker 公共入口复用 Function；run 统一由 Earthfile 顺序准备共享卷、等待 RAG、启动产品服务与容器化 Vue 前端；验证 suite、静默校验 Compose、关闭两套开发栈、清理本地镜像和持久卷保护。eval 同时收集既有 30 问与 PDF 五十问。此离线静态契约不替代 Windows/WSL/Linux 的实际启动验收。 |
 | 同上 | `test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths` | Docker 入口构建安全材料/ES/bootstrap 服务，并仅向测试容器传递 ES password file 与 CA path。 |
-| 同上 | `test_containerized_web_upload_limits_match_supported_rag_sources` | 前端与 Go 白名单一致接纳 PDF、CHM/CHI、Markdown、文本和代码；Nginx 为 32 MiB 文件及 multipart 开销设置 34 MiB 请求上限。 |
+| 同上 | `test_containerized_web_upload_limits_match_supported_rag_sources` | 前端与 Go 白名单一致接纳 PDF、PPTX、CHM/CHI、Markdown、文本和代码；Nginx 为 64 MiB 文件及 multipart 开销设置 70 MiB 请求上限。 |
 | 同上 | `test_containerized_web_proxies_product_health_checks` | 容器化 Nginx 必须将 `/healthz`、`/readyz` 转发到 Go API，防止 SPA fallback 返回 HTML 造成公网健康假阳性。 |
 | 同上 | `test_web_lockfile_is_complete_and_single_toolchain` | 前端 `package-lock.json` 必须为完整 npm v3 锁（npmjs 条目均带 integrity，且含 Linux rollup/esbuild 原生包），不得并存 pnpm 锁或 pnpm 专属 `.npmrc`，并核对 Dockerfile/Earthfile 使用 `npm ci`；静态契约，不执行安装。 |
 | `test_container_artifacts.py` | `test_package_and_container_use_canonical_root_readme` | GitHub 首页、Python package、Docker 镜像与 Earthly 依赖安装统一使用仓库根 README，禁止保留重复入口。 |

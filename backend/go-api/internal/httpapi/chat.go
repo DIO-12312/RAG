@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
@@ -54,24 +55,6 @@ func (s *Server) chat(c *gin.Context) {
 	if p.ConversationID == "" {
 		p.ConversationID = security.ID()
 	}
-	var dataset string
-	e = s.Store.DB.QueryRowContext(ctx, "SELECT dataset_id FROM conversations WHERE id=? AND user_id=?", p.ConversationID, uid(c)).Scan(&dataset)
-	if e != nil {
-		_, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversations(id,user_id,dataset_id,title) VALUES(?,?,?,?)", p.ConversationID, uid(c), p.DatasetID, string(title))
-	} else if dataset != p.DatasetID {
-		// 会话只保存最近一次选择，不能把知识库当作不可变外键。这样已删除知识库
-		// 的历史会话仍可切换到一个可用知识库继续进行。
-		_, e = s.Store.DB.ExecContext(ctx, "UPDATE conversations SET dataset_id=? WHERE id=? AND user_id=?", p.DatasetID, p.ConversationID, uid(c))
-	}
-	if e != nil {
-		fail(c, 503, "SAVE_FAILED", "会话创建失败。")
-		return
-	}
-	// 立即持久化用户提问：即使回答流尚未完成，历史记录也能完整恢复该会话。
-	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,role,content,citations_json) VALUES(?,'user',?,'[]')", p.ConversationID, p.Question); e != nil {
-		fail(c, 503, "SAVE_FAILED", "会话保存失败。")
-		return
-	}
 	s.mu.Lock()
 	busy := s.runs[p.ConversationID]
 	if !busy {
@@ -83,7 +66,28 @@ func (s *Server) chat(c *gin.Context) {
 		return
 	}
 	defer func() { s.mu.Lock(); delete(s.runs, p.ConversationID); s.mu.Unlock() }()
-	rows, e := s.Store.DB.QueryContext(ctx, "SELECT role,content FROM (SELECT id,role,content FROM conversation_messages WHERE conversation_id=? ORDER BY id DESC LIMIT 12) recent ORDER BY id", p.ConversationID)
+	var dataset string
+	e = s.Store.DB.QueryRowContext(ctx, "SELECT dataset_id FROM conversations WHERE id=? AND user_id=?", p.ConversationID, uid(c)).Scan(&dataset)
+	if e == sql.ErrNoRows {
+		_, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversations(id,user_id,dataset_id,title) VALUES(?,?,?,?)", p.ConversationID, uid(c), p.DatasetID, string(title))
+	} else if e != nil {
+		fail(c, 503, "LOAD_FAILED", "会话读取失败。")
+		return
+	} else if dataset != p.DatasetID {
+		// 会话只保存最近一次选择，不能把知识库当作不可变外键。这样已删除知识库
+		// 的历史会话仍可切换到一个可用知识库继续进行。
+		_, e = s.Store.DB.ExecContext(ctx, "UPDATE conversations SET dataset_id=? WHERE id=? AND user_id=?", p.DatasetID, p.ConversationID, uid(c))
+	}
+	if e != nil {
+		fail(c, 503, "SAVE_FAILED", "会话创建失败。")
+		return
+	}
+	// 一个会话可切换知识库，但模型上下文只能使用当前知识库下的消息。
+	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,dataset_id,role,content,citations_json) VALUES(?,?,'user',?,'[]')", p.ConversationID, p.DatasetID, p.Question); e != nil {
+		fail(c, 503, "SAVE_FAILED", "会话保存失败。")
+		return
+	}
+	rows, e := s.Store.DB.QueryContext(ctx, "SELECT role,content FROM (SELECT id,role,content FROM conversation_messages WHERE conversation_id=? AND dataset_id=? ORDER BY id DESC LIMIT 12) recent ORDER BY id", p.ConversationID, p.DatasetID)
 	if e != nil {
 		fail(c, 503, "LOAD_FAILED", "会话读取失败。")
 		return
@@ -158,7 +162,7 @@ func (s *Server) chat(c *gin.Context) {
 		return
 	}
 	b, _ := json.Marshal(citations)
-	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,role,content,citations_json) VALUES(?,'assistant',?,?)", p.ConversationID, answer, b); e != nil {
+	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,dataset_id,role,content,citations_json) VALUES(?,?,'assistant',?,?)", p.ConversationID, p.DatasetID, answer, b); e != nil {
 		_ = emit("error", gin.H{"code": "SAVE_FAILED", "message": "回答生成成功，但会话保存失败。"})
 		return
 	}
@@ -188,13 +192,19 @@ func (s *Server) conversations(c *gin.Context) {
 	c.JSON(200, out)
 }
 func (s *Server) messages(c *gin.Context) {
-	var exists int
-	e := s.Store.DB.QueryRowContext(c.Request.Context(), "SELECT COUNT(*) FROM conversations WHERE id=? AND user_id=?", c.Param("id"), uid(c)).Scan(&exists)
-	if e != nil || exists != 1 {
+	var dataset string
+	e := s.Store.DB.QueryRowContext(c.Request.Context(), "SELECT dataset_id FROM conversations WHERE id=? AND user_id=?", c.Param("id"), uid(c)).Scan(&dataset)
+	if e != nil {
 		fail(c, 404, "NOT_FOUND", "会话不存在。")
 		return
 	}
-	rows, e := s.Store.DB.QueryContext(c.Request.Context(), "SELECT role,content,citations_json FROM conversation_messages WHERE conversation_id=? ORDER BY id LIMIT 200", c.Param("id"))
+	if requested := c.Query("datasetId"); requested != "" {
+		if _, ok := s.owned(c, requested, "dataset"); !ok {
+			return
+		}
+		dataset = requested
+	}
+	rows, e := s.Store.DB.QueryContext(c.Request.Context(), "SELECT role,content,citations_json FROM conversation_messages WHERE conversation_id=? AND dataset_id=? ORDER BY id LIMIT 200", c.Param("id"), dataset)
 	if e != nil {
 		fail(c, 503, "LOAD_FAILED", "消息加载失败。")
 		return
