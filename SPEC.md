@@ -793,6 +793,8 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 
 2026-09-14 产品 Go 的事件与配置契约扩展：Chat SSE 在每次将要调用模型前增加可选 `context` 事件（包括 `modelPhase` 的工具选择轮与 `finalizePhase` 生成最终回答的那一轮，后者必须带检索后的证据数，否则占用告警只会看到检索前的估算），即 `{"event":"context","data":{"estimatedTokens":N,"usableTokens":N,"budgetTokens":N,"evidenceCount":N,"evidenceLimit":N}}`，其中用量由既有的 `ContextBudget.UsedTokens` 估算且 `usableTokens = maxTokens - reserveTokens`；同一 Run 内用量与证据数都不变时不得重复发送。该事件只服务于前端"上下文接近预算"告警，不改变回答、引用、裁剪或停止语义，也不得携带问题原文、Evidence 正文或模型私有推理。设置页新增 `POST /settings/models/:kind/test`（`kind` 为 `chat`/`embedding`/`rerank`）：服务端用已保存配置发起一次最小探测——chat 为不带 `tools` 的单轮补全，embedding 校验返回向量维度与索引维度一致，rerank 按 `/rerank` 协议校验返回条数与结果下标——探测总时长上限 30 秒。未配置 Key 返回 `MODEL_NOT_CONFIGURED`，密钥解密失败返回 `KEY_UNAVAILABLE`，供应商错误以 HTTP 200 加 `{"ok":false,"latencyMs":N,"detail":"..."}` 返回且回显必须截断；API Key 与完整供应商响应不得进入响应体、日志或前端存储。
 
+2026-09-16 产品 Go 的会话并发语义：会话 id 由客户端生成，服务端必须把它当作不可信输入。写会话行使用幂等 upsert（`ON DUPLICATE KEY UPDATE`）后按 `(id, user_id)` 读回，读不到即视为该 id 被其他用户占用并返回 404 `NOT_FOUND`，禁止把主键冲突暴露成 5xx——否则并发首条消息与使用他人会话 id 都会得到 503，且响应差异构成跨租户存在性探针。会话的并发运行锁必须按「用户 + 会话」隔离，只按会话 id 加锁会让不同用户互相阻塞。会话行只保存最近一次选择的知识库，历史会话可切换到任一可用知识库继续。
+
 2026-09-14 产品 Go 的降级语义：产品库（`resource_index`）与 RAG 元数据可能失配（例如 RAG MySQL 被重置后产品库仍保留文档与任务引用）。此时 `GET /datasets`、`GET /datasets/:id` 必须仍然返回 200：单个文档在 RAG 侧查不到任务时，文档标记 `stale=true` 且 `status=FAILED`，任务列表给出等价的合成条目，禁止因为一条陈旧引用就让整个知识库列表返回 502——否则用户会完全看不到并无法清理自己的知识库。stale 文档不纳入批量重试，用户应删除后重新上传；产品库与 RAG 的真实一致性仍由重新上传与删除流程恢复。
 
 同一失配下删除路径必须仍然可用：RAG 返回 `DOCUMENT_NOT_FOUND`/`DATASET_NOT_FOUND` 时，`DELETE /documents/:id` 与 `DELETE /datasets/:id` 必须完成产品侧引用清理（分别返回 204 与 202），否则用户既删不掉陈旧记录也无法重建知识库。只有非 NOT_FOUND 的业务错误与传输错误才按失败处理，避免在 RAG 仍有数据时丢掉产品库引用。向 RAG 侧已不存在的知识库上传时，`BindEmbeddingProfile` 必须返回 `DATASET_STALE` 并提示删除后重建，而不是误报 Embedding 配置问题。

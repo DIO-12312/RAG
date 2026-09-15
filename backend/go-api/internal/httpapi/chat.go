@@ -2,8 +2,8 @@ package httpapi
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"log/slog"
@@ -55,30 +55,24 @@ func (s *Server) chat(c *gin.Context) {
 	if p.ConversationID == "" {
 		p.ConversationID = security.ID()
 	}
+	// 并发锁按「用户 + 会话」隔离：客户端可以构造任意会话 id，只用 id 会让不同用户互相阻塞。
+	lockKey := runKey(uid(c), p.ConversationID)
 	s.mu.Lock()
-	busy := s.runs[p.ConversationID]
+	busy := s.runs[lockKey]
 	if !busy {
-		s.runs[p.ConversationID] = true
+		s.runs[lockKey] = true
 	}
 	s.mu.Unlock()
 	if busy {
 		fail(c, 409, "CHAT_BUSY", "当前会话正在生成回答。")
 		return
 	}
-	defer func() { s.mu.Lock(); delete(s.runs, p.ConversationID); s.mu.Unlock() }()
-	var dataset string
-	e = s.Store.DB.QueryRowContext(ctx, "SELECT dataset_id FROM conversations WHERE id=? AND user_id=?", p.ConversationID, uid(c)).Scan(&dataset)
-	if e == sql.ErrNoRows {
-		_, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversations(id,user_id,dataset_id,title) VALUES(?,?,?,?)", p.ConversationID, uid(c), p.DatasetID, string(title))
-	} else if e != nil {
-		fail(c, 503, "LOAD_FAILED", "会话读取失败。")
-		return
-	} else if dataset != p.DatasetID {
-		// 会话只保存最近一次选择，不能把知识库当作不可变外键。这样已删除知识库
-		// 的历史会话仍可切换到一个可用知识库继续进行。
-		_, e = s.Store.DB.ExecContext(ctx, "UPDATE conversations SET dataset_id=? WHERE id=? AND user_id=?", p.DatasetID, p.ConversationID, uid(c))
-	}
-	if e != nil {
+	defer func() { s.mu.Lock(); delete(s.runs, lockKey); s.mu.Unlock() }()
+	if e = s.ensureConversation(ctx, uid(c), p.ConversationID, p.DatasetID, string(title)); e != nil {
+		if errors.Is(e, errConversationTaken) {
+			fail(c, 404, "NOT_FOUND", "会话不存在或知识库不匹配。")
+			return
+		}
 		fail(c, 503, "SAVE_FAILED", "会话创建失败。")
 		return
 	}
