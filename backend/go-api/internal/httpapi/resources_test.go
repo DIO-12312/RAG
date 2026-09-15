@@ -86,3 +86,23 @@ func TestUploadFailureMapsLimitsTo413(t *testing.T) {
 		t.Fatalf("未知错误仍为 502，实际 %d", status)
 	}
 }
+
+func TestUploadLimitsShareOneSource(t *testing.T) {
+	t.Setenv("PRODUCT_MAX_UPLOAD_BYTES", "")
+	file := ragclient.MaxUploadBytes()
+	if file != 64<<20 {
+		t.Fatalf("默认单文件上限应为 64 MiB，实际 %d", file)
+	}
+	// 入口请求体上限必须严格大于文件上限，为 multipart 边界留余量；
+	// 否则会出现「界面允许 64 MB、入口按更小值拒绝」的体验缺陷。
+	if body := bodyLimitBytes(); body <= file {
+		t.Fatalf("请求体上限必须大于文件上限：body=%d file=%d", body, file)
+	}
+	t.Setenv("PRODUCT_MAX_UPLOAD_BYTES", "1048576")
+	if got := ragclient.MaxUploadBytes(); got != 1048576 {
+		t.Fatalf("环境变量必须覆盖默认上限，实际 %d", got)
+	}
+	if body := bodyLimitBytes(); body != 1048576+(1<<20) {
+		t.Fatalf("请求体上限应随文件上限变化，实际 %d", body)
+	}
+}

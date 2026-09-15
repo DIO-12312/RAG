@@ -8,7 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/mail"
-	"os"
 	"rag-mvp/backend/go-api/internal/ragclient"
 	"rag-mvp/backend/go-api/internal/security"
 	"rag-mvp/backend/go-api/internal/storage"
@@ -40,16 +39,11 @@ func fail(c *gin.Context, status int, code, message string) {
 	c.AbortWithStatusJSON(status, gin.H{"code": code, "message": message})
 }
 
-// bodyLimitBytes 返回请求体上限。默认 33 MiB：略高于 RAG 侧默认上限，为 multipart
-// 边界与字段留出余量；生产环境应以 PRODUCT_MAX_UPLOAD_BYTES 与 RAG_MAX_UPLOAD_BYTES
-// 成对配置，避免出现「入口比服务端更严」或反之的隐性不一致。
+// bodyLimitBytes 返回请求体上限：单文件上限之上留 1 MiB 给 multipart 边界与字段。
+// 入口上限必须严格大于文件上限，否则用户会在"界面允许、入口拒绝"之间踩坑；
+// 该值随 ragclient.MaxUploadBytes() 一起生效，前端展示的也是同一个文件上限。
 func bodyLimitBytes() int64 {
-	if raw := os.Getenv("PRODUCT_MAX_UPLOAD_BYTES"); raw != "" {
-		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
-			return parsed
-		}
-	}
-	return 33 << 20
+	return ragclient.MaxUploadBytes() + 1<<20
 }
 
 // uid 返回认证中间件写入的用户标识。
@@ -91,7 +85,8 @@ func (s *Server) Router() *gin.Engine {
 			fail(c, 401, "AUTH_EXPIRED", "请重新登录。")
 			return
 		}
-		c.JSON(200, u)
+		// 前端据此展示并校验单文件上限，避免界面承诺值与服务端实际限制漂移。
+		c.JSON(200, gin.H{"id": u.ID, "email": u.Email, "language": u.Language, "maxUploadBytes": ragclient.MaxUploadBytes()})
 	})
 	a.POST("/auth/logout", s.logout)
 	a.GET("/settings", s.settings)

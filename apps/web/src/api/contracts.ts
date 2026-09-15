@@ -27,6 +27,8 @@ export interface CurrentUser {
   id: string;
   email: string;
   language: "zh-CN" | "en-US";
+  /** 服务端允许的单文件上限（字节），用于展示与选择前的本地校验。 */
+  maxUploadBytes?: number;
 }
 
 export interface LoginRequest {

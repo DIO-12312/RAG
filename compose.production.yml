@@ -302,6 +302,9 @@ services:
     entrypoint: ["/bin/sh", "-ec", "export PRODUCT_MYSQL_DSN=\"$$(cat /run/secrets/product_mysql_dsn)\"; exec product"]
     environment:
       PRODUCT_HTTP_ADDR: 0.0.0.0:8080
+      # 单文件上限的唯一来源：必须与 RAG_MAX_UPLOAD_BYTES 一致，且入口会额外留 1 MiB
+      # multipart 余量。前端通过 /me 展示并校验同一数值。
+      PRODUCT_MAX_UPLOAD_BYTES: ${PRODUCT_MAX_UPLOAD_BYTES:-67108864}
       PRODUCT_ORIGIN: ${RAG_PUBLIC_ORIGIN:-http://49.235.110.118}
       PRODUCT_RAG_TARGET: rag-server:50051
       PRODUCT_KEY_DIR: /run/model-keys

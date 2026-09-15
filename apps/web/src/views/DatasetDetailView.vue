@@ -8,8 +8,9 @@ import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import UploadPanel from "@/components/UploadPanel.vue"; import JobTable from "@/components/JobTable.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import { useDatasetStore } from "@/stores/datasets";
+import { useAuthStore } from "@/stores/auth";
 import { randomUUID } from "@/utils/id";
-const route=useRoute(); const router=useRouter(); const datasets=useDatasetStore(); const dataset=ref<DatasetDetail>(); const jobs=ref<Job[]>([]); const error=ref("");
+const route=useRoute(); const router=useRouter(); const datasets=useDatasetStore(); const auth=useAuthStore(); const dataset=ref<DatasetDetail>(); const jobs=ref<Job[]>([]); const error=ref("");
 const deleteDialogOpen=ref(false); const deleting=ref(false); let deleteRequestKey=randomUUID();
 const selected=ref<string[]>([]); const busyBatch=ref(false); const batchNotice=ref("");
 const documents=computed(()=>dataset.value?.documents??[]);
@@ -87,6 +88,7 @@ onMounted(()=>void load());onBeforeUnmount(()=>{disposed=true;if(timer)clearTime
       </button>
     </p><UploadPanel
       :upload-file="upload"
+      :max-upload-bytes="auth.user?.maxUploadBytes"
       @changed="load"
     /><h2>文档</h2><div
       v-if="documents.length"
