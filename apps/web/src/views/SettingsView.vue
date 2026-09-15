@@ -169,7 +169,7 @@ async function logout():Promise<void>{try{await auth.logout();await router.push(
           v-if="rerankVisible"
           @submit.prevent="save('rerank')"
         >
-          <p>{{ settings.rerankEnabled ? "已启用" : "尚未生效：保存配置后启用" }}。支持标准 /rerank、百炼 /compatible-api/v1（自动补 /reranks）及百炼原生完整地址。</p>
+          <p>{{ settings.rerankEnabled ? "已启用" : "尚未生效：保存配置后启用" }}。使用专用 /rerank 接口，Base URL 可填写到 /v1 或完整 /rerank 地址。</p>
           <label>Base URL<input
             v-model="settings.rerank.baseUrl"
             type="url"

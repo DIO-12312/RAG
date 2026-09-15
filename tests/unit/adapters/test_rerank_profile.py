@@ -11,7 +11,6 @@ import pytest
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from rag_mvp.adapters.model import dataset_profile
-from rag_mvp.adapters.model.rerank import rerank_passages
 from rag_mvp.domain.errors import DomainError
 
 
@@ -99,85 +98,3 @@ async def test_rerank_profile_validates_scores_and_scope(
         )
     if mode in {"wrong_dataset", "empty"}:
         assert not requests
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("endpoint", "expected_url"),
-    [
-        (
-            "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-api/v1",
-            "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-api/v1/reranks",
-        ),
-        (
-            "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-api/v1/reranks",
-            "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-api/v1/reranks",
-        ),
-    ],
-)
-async def test_rerank_supports_dashscope_compatible_reranks_endpoint(
-    endpoint: str, expected_url: str
-) -> None:
-    requests: list[httpx.Request] = []
-
-    def respond(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        assert str(request.url) == expected_url
-        assert json.loads(request.content) == {
-            "model": "qwen3-rerank",
-            "query": "DDS QoS",
-            "documents": ["first", "second"],
-            "top_n": 2,
-            "return_documents": False,
-        }
-        return httpx.Response(
-            200,
-            json={
-                "results": [
-                    {"index": 1, "relevance_score": 0.9},
-                    {"index": 0, "relevance_score": 0.3},
-                ]
-            },
-        )
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        scores = await rerank_passages(
-            client, endpoint, "qwen3-rerank", "DDS QoS", ["first", "second"]
-        )
-
-    assert scores == [0.3, 0.9]
-    assert len(requests) == 1
-
-
-@pytest.mark.asyncio
-async def test_rerank_supports_dashscope_native_request_and_response() -> None:
-    endpoint = (
-        "https://workspace.cn-beijing.maas.aliyuncs.com"
-        "/api/v1/services/rerank/text-rerank/text-rerank"
-    )
-
-    def respond(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == endpoint
-        assert json.loads(request.content) == {
-            "model": "qwen3.7-text-rerank",
-            "input": {"query": "DDS QoS", "documents": ["first", "second"]},
-            "parameters": {"top_n": 2, "return_documents": False},
-        }
-        return httpx.Response(
-            200,
-            json={
-                "output": {
-                    "results": [
-                        {"index": 1, "relevance_score": 0.8},
-                        {"index": 0, "relevance_score": 0.2},
-                    ]
-                }
-            },
-        )
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        scores = await rerank_passages(
-            client, endpoint, "qwen3.7-text-rerank", "DDS QoS", ["first", "second"]
-        )
-
-    assert scores == [0.2, 0.8]
