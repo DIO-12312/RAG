@@ -4,6 +4,16 @@
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
 
+### 2026-09-16 演示文稿截图文字进入检索
+
+| 文件 / 用例 | 职责与运行边界 |
+|---|---|
+| `tests/unit/ingestion/test_multiformat_parsers.py::test_pptx_parser_merges_slide_image_text_with_slide_provenance` | 幻灯片引用的点阵图片文字并入该页来源段并保留页码；同一素材跨页复用只识别一次。Fake OCR 引擎，不依赖真实 Tesseract。 |
+| 同上 `::test_pptx_parser_skips_vector_images_and_failed_ocr` | EMF 等矢量目标不送 OCR；识别抛错时仍按幻灯片正文成功入库且不写入图片来源标记。 |
+| 同上 `::test_pptx_parser_honours_image_limits_without_ocr_engine` | 未配置引擎、`max_images=0` 或单图超限时都不产生额外文字。 |
+| 同上 `::test_normalize_image_text_drops_layout_noise` | OCR 结果去除排版空白与无意义符号行，保留可检索文字。 |
+| `src/rag_mvp/adapters/parsers/image_ocr.py` | 复用 Tesseract 的图片识别边界；识别不可用、超时或非零退出都返回空字符串，由调用方保证软失败。 |
+
 ### 2026-09-16 会话正文文字颜色一致性
 
 ```text

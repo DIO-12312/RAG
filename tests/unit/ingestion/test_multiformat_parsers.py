@@ -215,3 +215,141 @@ def _pptx_with_media(payload: bytes, stored: bool = False) -> bytes:
             target.writestr(info, source.read(info))
         target.writestr("ppt/media/image1.png", payload, compress_type=ZIP_STORED)
     return buffer.getvalue()
+
+
+class _RecordingImageOcr:
+    """记录调用参数的图片 OCR 替身，避免测试依赖真实 Tesseract。"""
+
+    def __init__(self, texts: dict[bytes, str] | None = None) -> None:
+        self.calls: list[tuple[bytes, str, str]] = []
+        self._texts = texts or {}
+
+    def available(self) -> bool:
+        return True
+
+    async def extract(
+        self,
+        content: bytes,
+        *,
+        suffix: str,
+        language: str,
+        timeout_seconds: float,
+    ) -> str:
+        del timeout_seconds
+        self.calls.append((content, suffix, language))
+        return self._texts.get(content, f"识别文本 {len(content)}")
+
+
+def _pptx_with_slide_images(*entries: tuple[str, bytes, str]) -> bytes:
+    """构造带幻灯片图片关系的演示文稿：条目为 (媒体路径, 字节, 关系目标)。"""
+
+    from io import BytesIO
+    from zipfile import ZIP_STORED, ZipFile
+
+    base = _text_pptx()
+    buffer = BytesIO()
+    with ZipFile(BytesIO(base)) as source, ZipFile(buffer, "w", ZIP_STORED) as target:
+        for info in source.infolist():
+            target.writestr(info, source.read(info))
+        for media, payload, _target in entries:
+            target.writestr(media, payload)
+        for number in (1, 2):
+            relations = "".join(
+                f'<Relationship Id="rId{index}" Type="http://schemas.openxmlformats.org/'
+                f'officeDocument/2006/relationships/image" Target="{target}"/>'
+                for index, (_media, _payload, target) in enumerate(entries, start=1)
+            )
+            target.writestr(
+                f"ppt/slides/_rels/slide{number}.xml.rels",
+                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/'
+                f'relationships">{relations}</Relationships>',
+            )
+    return buffer.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_pptx_parser_merges_slide_image_text_with_slide_provenance() -> None:
+    """截图文字必须并入所在幻灯片，并保留该页的页码来源。"""
+
+    payload = b"png-bytes"
+    ocr = _RecordingImageOcr({payload: "监控工具：报文统计信息，统计各实体的数据收发数量"})
+    parser = PptxParser(image_ocr=ocr, ocr_language="chi_sim+eng")
+
+    segments = await parser.parse(
+        "deck.pptx",
+        _pptx_with_slide_images(("ppt/media/image1.png", payload, "../media/image1.png")),
+    )
+
+    assert [segment.locator.page_number for segment in segments] == [1, 2]
+    # 夹具刻意让声明顺序与文档顺序不同：第 1 页是 "First declared slide"。
+    assert "First declared slide" in segments[0].text
+    assert "图片文字：" in segments[0].text
+    assert "报文统计信息" in segments[0].text
+    assert segments[0].metadata["slide_image_text"] == "true"
+    # 同一张截图被两页复用，只识别一次。
+    assert len(ocr.calls) == 1 and ocr.calls[0][1] == ".png"
+    assert "图片文字：" in segments[1].text
+
+
+@pytest.mark.asyncio
+async def test_pptx_parser_skips_vector_images_and_failed_ocr() -> None:
+    """矢量素材不送 OCR，识别异常也不能让整份演示文稿摄取失败。"""
+
+    class _BrokenOcr(_RecordingImageOcr):
+        async def extract(
+            self,
+            content: bytes,
+            *,
+            suffix: str,
+            language: str,
+            timeout_seconds: float,
+        ) -> str:
+            del content, suffix, language, timeout_seconds
+            raise RuntimeError("tesseract crashed")
+
+    parser = PptxParser(image_ocr=_BrokenOcr())
+    source = _pptx_with_slide_images(
+        ("ppt/media/image1.emf", b"emf-bytes", "../media/image1.emf"),
+        ("ppt/media/image2.png", b"png-bytes", "../media/image2.png"),
+    )
+
+    try:
+        segments = await parser.parse("deck.pptx", source)
+    except RuntimeError as error:  # pragma: no cover - 识别失败必须被吞掉
+        pytest.fail(f"图片识别失败不应中断摄取：{error}")
+
+    assert [segment.text for segment in segments] == [
+        "First declared slide",
+        "Second declared slide",
+    ]
+    assert all("slide_image_text" not in segment.metadata for segment in segments)
+
+
+@pytest.mark.asyncio
+async def test_pptx_parser_honours_image_limits_without_ocr_engine() -> None:
+    """未启用引擎或关闭图片识别时不产生额外文字。"""
+
+    payload = b"png-bytes"
+    source = _pptx_with_slide_images(("ppt/media/image1.png", payload, "../media/image1.png"))
+
+    without_engine = await PptxParser().parse("deck.pptx", source)
+    assert all("图片文字：" not in segment.text for segment in without_engine)
+
+    limited = PptxParser(image_ocr=_RecordingImageOcr(), ocr_max_images_per_slide=0)
+    disabled = await limited.parse("deck.pptx", source)
+    assert all("图片文字：" not in segment.text for segment in disabled)
+
+    oversized = PptxParser(image_ocr=_RecordingImageOcr(), ocr_max_image_bytes=4)
+    assert all(
+        "图片文字：" not in segment.text for segment in await oversized.parse("deck.pptx", source)
+    )
+
+
+def test_normalize_image_text_drops_layout_noise() -> None:
+    """OCR 结果去掉排版空白与纯符号行，保留可检索文字。"""
+
+    from rag_mvp.adapters.parsers.image_ocr import normalize_image_text
+
+    assert normalize_image_text("  报文   统计信息  \n\n\n---\n\n<>\n统计项  INFO_REPLY\n") == (
+        "报文 统计信息\n统计项 INFO_REPLY"
+    )

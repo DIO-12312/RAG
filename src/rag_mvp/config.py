@@ -15,7 +15,7 @@ from rag_mvp.ports.parser import PdfParserMode
 
 # 解析/切块行为变化时必须同步提升该版本号：它参与 config_digest，
 # 决定同一份文件在重新索引时是否产生新的索引版本。
-DEFAULT_PARSER_VERSION = "source-router-v11"
+DEFAULT_PARSER_VERSION = "source-router-v12"
 
 DEFAULT_MYSQL_DSN = "mysql+asyncmy://rag:rag@mysql:3306/rag"
 
@@ -139,6 +139,14 @@ class Settings(BaseSettings):
         gt=0,
         validation_alias="EMBEDDING_MODEL_DIMENSION",
     )
+    # 演示文稿的实质内容常以截图形式出现：默认用 Tesseract 识别点阵图片，
+    # 让这些页面能被检索；EMF/SVG 等矢量素材不参与识别。
+    pptx_ocr_enabled: bool = True
+    pptx_ocr_language: str = "chi_sim+eng"
+    pptx_ocr_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
+    pptx_ocr_max_images_per_slide: int = Field(default=8, ge=0, le=64)
+    pptx_ocr_max_image_bytes: int = Field(default=8 * 1024 * 1024, ge=1)
+
     embedding_batch_size: int = Field(default=20, ge=1, le=256)
     embedding_max_concurrency: int = Field(default=4, ge=1, le=32)
     # 提供方按窗口限制输入量：不节流时大文档会以突发流量反复触发 429。
@@ -169,6 +177,8 @@ class Settings(BaseSettings):
                 f"ocr={self.pdf_ocr_language}@{self.pdf_ocr_dpi}",
                 f"margin={self.pdf_header_footer_margin_ratio}",
                 f"repeat-min={self.pdf_repeated_margin_min_pages}",
+                f"pptx-ocr={self.pptx_ocr_enabled}@{self.pptx_ocr_language}",
+                f"pptx-ocr-max-images={self.pptx_ocr_max_images_per_slide}",
             )
         )
 

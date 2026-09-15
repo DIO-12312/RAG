@@ -73,7 +73,7 @@ Python MVP 的唯一入口是 gRPC；本地调试也调用同一 gRPC 服务。P
   → 返回带来源、分数和上下文预算建议的 evidence
 ```
 
-必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java`、PDF、`.pptx`、`.chm` 与 `.chi`。PDF 默认使用 `auto` 路由：优先读取原生文字和坐标，原生文字不足的页面才经 Poppler 渲染并使用 Tesseract OCR；输出标题路径、阅读顺序、段落/列表/表格型文本、页码与矩形坐标。OCR 只识别文字，不负责图片语义和公式结构理解。PPTX 按演示文稿中的幻灯片顺序提取 OOXML 文本，每张幻灯片作为带物理 `page_number` 的独立来源段进入同一切块/检索链路，提供与 PDF 相同的页码引用体验；不执行宏、嵌入对象或外部链接，也不识别图片语义。
+必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java`、PDF、`.pptx`、`.chm` 与 `.chi`。PDF 默认使用 `auto` 路由：优先读取原生文字和坐标，原生文字不足的页面才经 Poppler 渲染并使用 Tesseract OCR；输出标题路径、阅读顺序、段落/列表/表格型文本、页码与矩形坐标。OCR 只识别文字，不负责图片语义和公式结构理解。PPTX 按演示文稿中的幻灯片顺序提取 OOXML 文本，每张幻灯片作为带物理 `page_number` 的独立来源段进入同一切块/检索链路，提供与 PDF 相同的页码引用体验；不执行宏、嵌入对象或外部链接。PPTX 还必须识别幻灯片引用的点阵图片（PNG/JPEG/BMP/GIF/TIFF/WebP）中的文字，因为讲稿的实质内容常以截图形式出现：OCR 文本并入该幻灯片的来源段（保留页码来源，不新增定位维度），同一素材在一份文档内只识别一次，矢量素材（EMF/WMF/SVG）与识别失败都不参与且不得中断摄取；OCR 是尽力而为的增强，单个文档仍以幻灯片正文为下限成功入库。
 
 自 `source-router-v9` 起，PDF `auto/deepdoc` 恢复经 CHM3 实际知识库验证的 pdfplumber 词级坐标路径：先按页面提取词块，再按纵向容差恢复物理行和横向间距；连续多列行可形成 Markdown 表格，段落、列表、表格、标题与明显纵向间距共同构成 segment 边界，长段仍由既有 `chunk_size/overlap` 切块。原生文本不足时继续按页降级到 Poppler + Tesseract OCR；重复页眉页脚仍按跨页统计移除。页脚印刷页码作为 `printed_page_number` 来源元数据保留并从正文剔除，物理页码继续保存在 locator，前端可同时展示两者。该回退仅改变 PDF 解析和索引正文，不改变 CHM/CHI、Embedding、ES schema 或查询流程；已有 PDF 必须通过新版本重建后才生效。
 
@@ -501,7 +501,7 @@ Go 是唯一公网入口和 Agent 决策者；Python 是私网 RAG 服务。Go �
 
 Web 文件选择器与 Go 上传入口必须共同放行 Python RAG 已支持的 `.pdf`、`.pptx`、`.md`、`.txt`、`.py`、`.go`、`.js`、`.ts`、`.java`、`.chm` 和 `.chi`，避免产品入口与计算服务能力不一致。文件夹选择器必须同时绑定 `webkitdirectory` 与 `directory` 属性，不能退化为普通文件选择。`RAG_MAX_UPLOAD_BYTES` 默认是 64 MiB；文件大小的权威业务上限由产品前端、Go 上传入口与 Python RAG 服务共同执行。反向代理的请求体上限必须更高，为 multipart framing 预留开销。
 
-PPTX 只作为受限 OOXML 文本来源处理：解析器必须在解压前限制 ZIP 条目数量（≤ 4096）、单条展开字节（≤ 64 MiB，与单文件上限对齐，避免出现比入口更严的隐性限制）、总展开字节（≤ 256 MiB）与压缩比（≤ 100），并限制 XML 输入；含 DTD 或实体声明、越界关系目标、损坏或超限的文件一律以 `INVALID_PPTX` 拒绝。解析器不得执行宏、嵌入对象或外部关系。
+PPTX 只作为受限 OOXML 文本来源处理：解析器必须在解压前限制 ZIP 条目数量（≤ 4096）、单条展开字节（≤ 64 MiB，与单文件上限对齐，避免出现比入口更严的隐性限制）、总展开字节（≤ 256 MiB）与压缩比（≤ 100），并限制 XML 输入；含 DTD 或实体声明、越界关系目标、损坏或超限的文件一律以 `INVALID_PPTX` 拒绝。解析器不得执行宏、嵌入对象或外部关系。图片识别按 `RAG_PPTX_OCR_ENABLED`、`RAG_PPTX_OCR_LANGUAGE`、`RAG_PPTX_OCR_TIMEOUT_SECONDS`、`RAG_PPTX_OCR_MAX_IMAGES_PER_SLIDE` 与单图 8 MiB 上限执行，超限图片直接跳过。
 
 Go 产品层允许一个会话切换到任意当前可用的知识库，以避免已删除知识库让历史会话不可用。每条会话消息必须记录其创建时的 `dataset_id`；加载历史和传入模型的历史都只能包含当前选中知识库的消息，绝不能跨知识库混入上下文。并发生成锁必须在持久化用户消息前获得，返回 `CHAT_BUSY` 的请求不得写入消息。
 
