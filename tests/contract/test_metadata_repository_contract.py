@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 
 from rag_mvp.domain.enums import JobStatus, OutboxStatus, TaskStatus
-from rag_mvp.domain.errors import DomainFailure
+from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.models import Chunk, Dataset, Locator
 from rag_mvp.ports.metadata import DeleteDatasetRequest, MetadataRepository, SubmitIngestion
 from tests.fakes.metadata import FakeMetadataRepository, InjectedRepositoryFailure
@@ -103,6 +103,21 @@ async def test_submit_failure_does_not_leave_partial_metadata() -> None:
         "outbox": 0,
         "index_builds": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_embedding_key_refresh_keeps_existing_model_and_dimension() -> None:
+    """同一向量空间允许刷新密钥快照，不接受模型或维度变更。"""
+    repository = FakeMetadataRepository()
+    await repository.create_dataset(_dataset(datetime.now(UTC)))
+
+    await repository.bind_embedding_profile("dataset-1", "fake-embedding", 8, "old-key")
+    refreshed = await repository.bind_embedding_profile("dataset-1", "fake-embedding", 8, "new-key")
+
+    assert refreshed.encrypted_embedding_profile == "new-key"
+    with pytest.raises(DomainError) as mismatch:
+        await repository.bind_embedding_profile("dataset-1", "other-embedding", 8, "wrong")
+    assert mismatch.value.failure.code == "EMBEDDING_CONFIG_MISMATCH"
 
 
 @pytest.mark.asyncio

@@ -30,3 +30,6 @@ class TaskQueue(Protocol):
 
     # 实现 nak 对应的局部职责。
     async def nak(self, delivery: Delivery, delay_seconds: float, error: DomainFailure) -> None: ...
+
+    # 长耗时执行期间续约投递，避免 ack_wait 到期触发重复投递。
+    async def in_progress(self, delivery: Delivery) -> None: ...

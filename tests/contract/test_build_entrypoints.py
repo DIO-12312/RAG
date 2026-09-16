@@ -344,18 +344,34 @@ def test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths() -> N
 
 
 def test_containerized_web_upload_limits_match_supported_rag_sources() -> None:
-    """Web、Nginx 与 Go 上传入口必须共同接纳 32 MiB 的 CHM/CHI 等 RAG 文件。"""
+    """Web、API 入口、RAG 与边缘必须对单文件上限给出同一个 64 MiB 承诺。
+
+    上限只有一个来源（Go 的 `defaultMaxUploadBytes` / `PRODUCT_MAX_UPLOAD_BYTES`）：
+    前端展示并校验它（回退 64 MiB），API 入口在其上留 multipart 余量，边缘比应用上限更宽。
+    此前入口硬编码 33 MiB、界面写 64 MB，41 MB 的 PPTX 在界面上可选中却必然失败。
+    """
 
     upload_panel = _text("apps/web/src/components/UploadPanel.vue")
     nginx = _text("apps/web/nginx.conf")
     resources = _text("backend/go-api/internal/httpapi/resources.go")
+    server = _text("backend/go-api/internal/httpapi/server.go")
+    client = _text("backend/go-api/internal/ragclient/client.go")
+    production = _text("compose.production.yml")
 
-    expected_extensions = ("pdf", "md", "txt", "py", "go", "js", "ts", "java", "chm", "chi")
+    expected_extensions = ("pdf", "pptx", "md", "txt", "py", "go", "js", "ts", "java", "chm", "chi")
     for extension in expected_extensions:
         assert f".{extension}" in upload_panel
         assert f".{extension}" in resources
-    assert "file.size > 32*1024*1024" in upload_panel
-    assert "client_max_body_size 34m;" in nginx
+    # 单一来源与派生关系
+    assert "defaultMaxUploadBytes = 64 << 20" in client
+    assert "FALLBACK_MAX_UPLOAD_BYTES = 64 * 1024 * 1024" in upload_panel
+    assert "maxUploadBytes" in upload_panel
+    assert "MaxUploadBytes() + 1<<20" in server
+    # 生产配置里文件上限与 RAG 上限一致
+    assert "PRODUCT_MAX_UPLOAD_BYTES: ${PRODUCT_MAX_UPLOAD_BYTES:-67108864}" in production
+    assert "RAG_MAX_UPLOAD_BYTES: ${RAG_MAX_UPLOAD_BYTES:-67108864}" in production
+    # 边缘必须比应用上限更宽
+    assert "client_max_body_size 70m;" in nginx
 
 
 def test_containerized_web_proxies_product_health_checks() -> None:
@@ -450,3 +466,29 @@ def test_web_restart_only_rebuilds_web_through_earthly(tmp_path: Path) -> None:
             "web",
         ],
     ]
+
+
+def test_production_compose_pins_every_network_subnet() -> None:
+    """生产栈的每个网络都必须固定子网，否则恢复入口会因网段重叠失败。
+
+    只给 `edge` 写固定 IPAM 时，Docker 会按创建顺序把 172.19.0.0/16 先分配给
+    `egress`/`backend`，随后 `edge` 创建失败；`deploy/production/boot-start.sh`
+    正是「容器全停后按发布记录恢复」的唯一入口，因此必须保证恢复可重复。
+    """
+
+    production = yaml.safe_load(_text("compose.production.yml"))
+    networks = production["networks"]
+    assert set(networks) == {"edge", "egress", "backend"}
+    subnets = {}
+    for name, definition in networks.items():
+        config = (definition or {}).get("ipam", {}).get("config", [])
+        assert config, f"{name} 必须固定子网"
+        subnet = config[0].get("subnet")
+        assert re.fullmatch(r"\d+\.\d+\.0\.0/16", str(subnet)), f"{name} 子网格式异常：{subnet}"
+        subnets[name] = subnet
+    assert len(set(subnets.values())) == len(subnets), f"子网重复：{subnets}"
+    assert networks["backend"]["internal"] is True
+    # 恢复入口按固定顺序拉起，不得依赖自动分配
+    boot = _text("deploy/production/boot-start.sh")
+    assert "--pull never" in boot
+    assert "active.json" in boot

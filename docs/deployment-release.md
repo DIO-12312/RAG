@@ -75,6 +75,21 @@ docker pull ghcr.io/dio-12312/rag-rag:<sha>      # 单镜像应在 30s 量级完
 `rag-public-return-route.service` 保证 `172.19.0.0/16` 中源端口 80/443 的回包走主路由，
 是公网入口正常的前提；它与 `clash-tui.service` 都不得随意停用。
 
+## 部署被拒排障
+
+`make production-deploy` 会在切换任何容器之前做三项检查，任一不通过都会立刻退出
+（几秒内返回非零，且不写 `pending.json`、不生成 `<sequence>-<sha>.compose.json`）：
+
+| 报错 | 原因 | 处置 |
+|---|---|---|
+| `persistent schema/infrastructure changed: maintenance deployment required` | 维护敏感文件（compose 的 volumes/ports/secrets、migrations、Go API storage、Caddyfile）相对 `active.json` 记录的版本有变化 | 按维护升级流程备份/验收后归档 `/var/lib/rag-deploy` 的 active/previous 并重建基线 |
+| `running images drifted from deployment state` | 当前运行的容器镜像与 `active.json` 指向的配置不一致，通常是在基线之后手工执行了 `make production-run` | 确认新镜像健康后重建基线：归档 `active.json` 再 `make production-baseline RELEASE_SHA=<要发布的 sha>`，随后重新触发发布 |
+| `production service not healthy` / API/web 探针失败 | 部署前健康检查未通过（服务正在重启、代理或依赖异常） | 先恢复服务健康，再重新触发发布 |
+| `network <name> subnet drift: live=… declared=…` | 运行中的网络子网与目标配置声明的固定子网不一致（例如改了 Compose 的 IPAM 之后没有重建网络） | 这是**需要停机**的维护动作：`docker compose -p rag-production -f <active config> down`（不加 `-v`，保留数据卷）→ 按新声明 `docker network create` 三个网络（带 `com.docker.compose.project=rag-production` 与 `com.docker.compose.network=<名字>` 标签）→ `deploy/production/boot-start.sh` 恢复 → 重新触发发布 |
+
+重建基线只读取当前运行栈并写回状态文件：不重启容器、不执行迁移、不触碰任何数据卷。
+任何手工 `make production-run` 之后都应按上表重建基线，否则下一次自动发布会被漂移检查拒绝。
+
 ## 回退与限制
 
 /var/lib/rag-deploy/active.json 记录成功版本；previous.json 记录上一次成功版本；
@@ -89,7 +104,9 @@ make production-recover
 也会优先恢复 pending。保留所有 release 配置及镜像，不自动 prune；磁盘回收需先确认不涉及
 active/previous/pending 引用。不执行 down -v，不恢复/覆盖用户数据库。
 
-兼容性摘要变化（schema、migration、RPC、生产拓扑、Search Guard 等）会提前阻断自动发布。
+兼容性摘要变化（schema、migration、RPC、生产拓扑、Search Guard 等）会提前阻断自动发布。Compose 参与摘要时只保留持久基础设施部分（`volumes`/`ports`/`secrets`/`networks`/`configs`/`command`/`entrypoint`/`healthcheck` 等），
+`build`、`environment`、`env_file`、`labels` 属于「重建容器即替换」的启动参数，改动它们不需要维护窗口；
+schema、migration、Go API 内置初始化与 Caddyfile 变化仍然整体参与摘要。
 维护升级需按生产 runbook 备份/验收，确认新版本健康后将旧状态目录归档，再建立新基线。
 Go API 内置初始化不会因为自动发布而被关闭，因此 storage/启动代码变化也列入阻断范围。
 基线记录的 Compose 配置固定，主机 env/Secret 路径修改需维护验收后重建基线。

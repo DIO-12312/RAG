@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -283,6 +284,14 @@ func TestRouteIntent(t *testing.T) {
 	}
 }
 func TestRouteIntentBoundaries(t *testing.T) {
+	t.Run("selected knowledge base overview must retrieve without history", func(t *testing.T) {
+		got := RouteIntent("这个知识库的内容是什么？", nil)
+
+		if got.Intent != "knowledge" || got.Action != "retrieve" || got.StandaloneQuery == "" {
+			t.Fatalf("selected knowledge base overview routed incorrectly: %+v", got)
+		}
+	})
+
 	t.Run("greeting plus factual question must retrieve", func(t *testing.T) {
 		got := RouteIntent("你好，文档里怎么配置超时？", nil)
 
@@ -304,6 +313,18 @@ func TestRouteIntentBoundaries(t *testing.T) {
 			t.Fatal("clarification question is empty")
 		}
 	})
+}
+
+func TestSystemPromptGuidesEvidenceBoundariesWithoutConfidenceScores(t *testing.T) {
+	for _, required := range []string{
+		"summarize retrieved scope, not clarify",
+		"answer supported facts then the exact gap",
+		"Never invent facts, sources, citations, or confidence scores",
+	} {
+		if !strings.Contains(systemPrompt, required) {
+			t.Fatalf("system prompt must contain %q", required)
+		}
+	}
 }
 func TestRouteIntentTransformationWithNewFact(t *testing.T) {
 	history := []Message{

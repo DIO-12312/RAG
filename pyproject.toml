@@ -24,7 +24,7 @@ dependencies = [
     "SQLAlchemy[asyncio]>=2.0.43,<3.0.0",
     "structlog>=25.4.0,<26.0.0",
     "xxhash>=3.5.0,<4.0.0",
-    "pdfminer-six>=20250506,<20270000",
+    "pdfplumber>=0.11.10,<0.12.0",
 ]
 
 [project.scripts]

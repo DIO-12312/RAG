@@ -13,6 +13,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from rag_mvp.ports.parser import PdfParserMode
 
+# 解析/切块行为变化时必须同步提升该版本号：它参与 config_digest，
+# 决定同一份文件在重新索引时是否产生新的索引版本。
+DEFAULT_PARSER_VERSION = "source-router-v12"
+
 DEFAULT_MYSQL_DSN = "mysql+asyncmy://rag:rag@mysql:3306/rag"
 
 
@@ -36,6 +40,7 @@ class EmbeddingProfile:
     timeout_seconds: float
     max_retries: int
     max_concurrency: int
+    max_chars_per_minute: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,10 +86,14 @@ class Settings(BaseSettings):
     nats_subject: str = "rag.tasks"
     nats_ack_wait_seconds: float = Field(default=60.0, gt=0)
     nats_max_deliver: int = Field(default=3, ge=1)
+    # 失败重投不再立即回队：限流窗口内的连续重试只会把可恢复失败放大成终态失败。
+    nats_retry_backoff_seconds: float = Field(default=15.0, ge=0.0, le=600.0)
+    # 单文档摄取可能跑满数分钟，必须在 ack_wait 到期前续约投递。
+    worker_keepalive_seconds: float = Field(default=15.0, gt=0.0, le=300.0)
     object_root: Path = Path("data/objects")
 
-    max_upload_bytes: int = Field(default=16 * 1024 * 1024, ge=1)
-    parser_version: str = "source-router-v8"
+    max_upload_bytes: int = Field(default=64 * 1024 * 1024, ge=1)
+    parser_version: str = DEFAULT_PARSER_VERSION
     chunk_size: int = Field(default=800, ge=1)
     chunk_overlap: int = Field(default=120, ge=0)
     pdf_parser_mode: PdfParserMode = PdfParserMode.AUTO
@@ -130,8 +139,19 @@ class Settings(BaseSettings):
         gt=0,
         validation_alias="EMBEDDING_MODEL_DIMENSION",
     )
-    embedding_batch_size: int = Field(default=32, ge=1, le=256)
+    # 演示文稿的实质内容常以截图形式出现：默认用 Tesseract 识别点阵图片，
+    # 让这些页面能被检索；EMF/SVG 等矢量素材不参与识别。
+    pptx_ocr_enabled: bool = True
+    pptx_ocr_language: str = "chi_sim+eng"
+    pptx_ocr_timeout_seconds: float = Field(default=60.0, gt=0, le=300)
+    pptx_ocr_max_images_per_slide: int = Field(default=8, ge=0, le=64)
+    pptx_ocr_max_image_bytes: int = Field(default=8 * 1024 * 1024, ge=1)
+
+    embedding_batch_size: int = Field(default=20, ge=1, le=256)
     embedding_max_concurrency: int = Field(default=4, ge=1, le=32)
+    # 提供方按窗口限制输入量：不节流时大文档会以突发流量反复触发 429。
+    # 取值单位为字符/分钟，0 表示不限制；实测该账号窗口容量约 32 万字符/10 秒。
+    embedding_max_chars_per_minute: int = Field(default=250_000, ge=0, le=200_000_000)
     embedding_timeout_seconds: float = Field(default=30.0, gt=0)
     embedding_max_retries: int = Field(default=3, ge=0, le=10)
 
@@ -157,6 +177,8 @@ class Settings(BaseSettings):
                 f"ocr={self.pdf_ocr_language}@{self.pdf_ocr_dpi}",
                 f"margin={self.pdf_header_footer_margin_ratio}",
                 f"repeat-min={self.pdf_repeated_margin_min_pages}",
+                f"pptx-ocr={self.pptx_ocr_enabled}@{self.pptx_ocr_language}",
+                f"pptx-ocr-max-images={self.pptx_ocr_max_images_per_slide}",
             )
         )
 
@@ -190,6 +212,7 @@ class Settings(BaseSettings):
             timeout_seconds=self.embedding_timeout_seconds,
             max_retries=self.embedding_max_retries,
             max_concurrency=self.embedding_max_concurrency,
+            max_chars_per_minute=self.embedding_max_chars_per_minute,
         )
 
     # 实现 require_elasticsearch_profile 对应的局部职责。

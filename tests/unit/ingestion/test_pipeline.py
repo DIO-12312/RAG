@@ -167,3 +167,59 @@ async def test_pipeline_collapses_duplicate_chunk_ids_before_embedding() -> None
     )
     assert json.loads(wire.metadata["page_numbers"]) == [5, 9]
     assert (await pipeline.execute(claim)) == chunks
+
+
+@pytest.mark.asyncio
+async def test_pipeline_reports_monotonic_progress_during_embedding() -> None:
+    """长文档摄取必须上报单调递增的进度，而不是停在初始值。"""
+
+    now = datetime.now(UTC)
+    repository = FakeMetadataRepository()
+    storage = FakeObjectStorage()
+    model = FakeModelGateway(dimension=8)
+    search = FakeSearchEngine()
+    documents = DocumentService(repository, storage, max_upload_bytes=1 << 20)
+    await documents.create_dataset(
+        CreateDatasetCommand("trace", "create", "Docs", "fake", 8, now, "dataset-1")
+    )
+    body = "\n\n".join(f"第 {index} 段内容，用于验证进度上报。" for index in range(400))
+    await documents.submit_document(
+        SubmitDocumentCommand(
+            "trace",
+            "submit",
+            "dataset-1",
+            "guide.txt",
+            body.encode(),
+            None,
+            None,
+            "text-v1",
+            200,
+            40,
+            "fake",
+            now,
+        )
+    )
+    await finalize_once(repository, storage, now, limit=10)
+    task = next(iter(repository.tasks.values()))
+    claim = await repository.claim_task(task.id, delivery_sequence=1, now=now)
+    assert claim is not None
+    pipeline = IngestionPipeline(
+        storage=storage,
+        parser=TextParser(),
+        chunker=RecursiveChunker(chunk_size=200, overlap=40),
+        model=model,
+        search=search,
+    )
+    reported: list[float] = []
+
+    async def report(progress: float) -> None:
+        reported.append(progress)
+
+    chunks = await pipeline.execute(claim, on_progress=report)
+
+    assert chunks
+    assert len(reported) >= 3
+    assert reported == sorted(reported)
+    assert reported[0] == pytest.approx(0.05)
+    assert reported[-1] <= 0.95
+    assert reported[-1] > 0.5

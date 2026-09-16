@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from rag_mvp import __version__
-from rag_mvp.config import Environment, Settings
+from rag_mvp.config import DEFAULT_PARSER_VERSION, Environment, Settings
 
 
 def test_package_import_has_no_runtime_side_effects() -> None:
@@ -57,7 +57,8 @@ def test_settings_can_be_constructed_explicitly_for_tests(tmp_path: Path) -> Non
     assert settings.object_root == tmp_path
     assert settings.migrations_root == Path(".")
     assert settings.grpc_address == "127.0.0.1:50052"
-    assert settings.parser_version == "source-router-v8"
+    assert settings.parser_version == DEFAULT_PARSER_VERSION
+    assert settings.parser_version == "source-router-v12"
     assert settings.pdf_parser_mode.value == "auto"
     assert settings.pdf_native_text_min_chars_per_page == 40
     assert settings.pdf_ocr_language == "chi_sim+eng"

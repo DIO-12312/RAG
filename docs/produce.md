@@ -25,7 +25,7 @@ RAGFlow 在这些“外壳”上已经完备，但它的复杂度（双语言后
 RAGFlow 有完整 nginx 层：`docker/nginx/nginx.conf`、`proxy.conf`、`ragflow.https.conf`，包含：
 
 - TLS 终止（`ssl_certificate` + 80→443 重定向）。
-- `client_max_body_size 1024M`（大文件上传必需，当前 `RAG_MAX_UPLOAD_BYTES` 仅 16MB，但默认 nginx 1M 限制会先截断）。
+- `client_max_body_size` 必须高于 64 MiB 的 `RAG_MAX_UPLOAD_BYTES`，为 multipart 请求体预留开销。
 - `proxy_read_timeout 3600s` + `proxy_buffering off`（SSE 长连接必需，未来 Go SSE 接口会直接踩坑）。
 - `X-Forwarded-*` 头、gzip、静态资源 `expires 10y` 缓存。
 

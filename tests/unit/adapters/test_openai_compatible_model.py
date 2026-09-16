@@ -31,6 +31,9 @@ def _gateway(
     batch_size: int = 2,
     max_retries: int = 2,
     max_concurrency: int = 2,
+    jitter: Callable[[], float] | None = None,
+    clock: FakeClock | None = None,
+    max_chars_per_minute: int = 0,
 ) -> OpenAICompatibleModelGateway:
     """构造本测试所需的输入、替身或运行环境。"""
     return OpenAICompatibleModelGateway(
@@ -41,7 +44,29 @@ def _gateway(
         batch_size,
         max_retries,
         max_concurrency,
+        jitter=jitter,
+        sleep=clock.sleep if clock else None,
+        monotonic=clock.monotonic if clock else None,
+        max_chars_per_minute=max_chars_per_minute,
     )
+
+
+class FakeClock:
+    """以确定性时间替代真实等待，让退避断言不依赖 wall clock。"""
+
+    def __init__(self) -> None:
+        """初始化测试时钟状态。"""
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        """返回当前测试时间。"""
+        return self.now
+
+    async def sleep(self, delay: float) -> None:
+        """记录并推进测试时间。"""
+        self.sleeps.append(delay)
+        self.now += delay
 
 
 @pytest.mark.asyncio
@@ -287,9 +312,7 @@ async def test_embed_does_not_duplicate_existing_embeddings_suffix() -> None:
 
 
 @pytest.mark.asyncio
-async def test_transient_statuses_retry_with_a_bound_and_recover(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_transient_statuses_retry_with_a_bound_and_recover() -> None:
     """验证本测试场景的预期行为与边界条件。"""
     statuses = iter((429, 503, 200))
     attempts = 0
@@ -306,22 +329,90 @@ async def test_transient_statuses_retry_with_a_bound_and_recover(
             )
         return httpx.Response(status, text=f"transient {SECRET}")
 
-    sleeps: list[float] = []
-
-    async def fake_sleep(delay: float) -> None:
-        """执行测试所需的辅助操作。"""
-        sleeps.append(delay)
-
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    clock = FakeClock()
     client = _client(handler)
-    gateway = _gateway(client, max_retries=2)
+    gateway = _gateway(client, max_retries=2, jitter=lambda: 1.0, clock=clock)
     try:
         assert await gateway.embed(["a"]) == [(1.0, 2.0, 3.0)]
     finally:
         await gateway.close()
 
     assert attempts == 3
-    assert sleeps == [0.1, 0.2]
+    # 429 让整批暂停 1s，随后的指数退避依次为 1s、2s。
+    assert clock.sleeps == [1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_throttling_honours_retry_after_and_pauses_every_batch() -> None:
+    """429 必须按 Retry-After 退避，并让同文档的其他批次一起放慢。"""
+
+    statuses = iter((429, 429, 200, 200))
+    seen: list[float] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
+        seen.append(1.0)
+        status = next(statuses)
+        if status == 200:
+            payload = {
+                "object": "list",
+                "data": [
+                    {"index": 0, "embedding": [1, 2, 3]},
+                    {"index": 1, "embedding": [4, 5, 6]},
+                ],
+            }
+            return httpx.Response(200, json=payload)
+        return httpx.Response(
+            429,
+            headers={"Retry-After": "7"},
+            json={"error": {"code": "Throttling.RateQuota", "message": "rate limit exceeded"}},
+        )
+
+    clock = FakeClock()
+    client = _client(handler)
+    gateway = _gateway(client, max_retries=3, jitter=lambda: 1.0, clock=clock)
+    try:
+        vectors = await gateway.embed(["a", "b"])
+    finally:
+        await gateway.close()
+
+    assert len(vectors) == 2
+    assert clock.sleeps
+    assert all(delay == 7.0 for delay in clock.sleeps)
+
+
+@pytest.mark.asyncio
+async def test_exhausted_throttling_reports_provider_status_and_code() -> None:
+    """限流耗尽后的失败信息必须包含提供方状态码与错误码，且不得泄露凭据或输入。"""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
+        return httpx.Response(
+            429,
+            headers={"Retry-After": "2"},
+            json={
+                "error": {
+                    "code": "Throttling.RateQuota",
+                    "message": f"requests rate limit exceeded {SECRET}",
+                }
+            },
+        )
+
+    clock = FakeClock()
+    client = _client(handler)
+    gateway = _gateway(client, max_retries=1, jitter=lambda: 1.0, clock=clock)
+    try:
+        with pytest.raises(DomainError) as error:
+            await gateway.embed(["a"])
+    finally:
+        await gateway.close()
+
+    failure = error.value.failure
+    assert failure.code == "EMBEDDING_UNAVAILABLE"
+    assert failure.retryable is True
+    assert "status=429" in failure.message
+    assert "Throttling.RateQuota" in failure.message
+    assert SECRET not in str(error.value)
 
 
 @pytest.mark.asyncio
@@ -354,3 +445,185 @@ async def test_timeout_exhaustion_maps_to_retryable_unavailable(
     assert error.value.failure.code == "EMBEDDING_UNAVAILABLE"
     assert error.value.failure.retryable is True
     assert SECRET not in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_pacer_reserves_within_window_and_reports_remaining_wait() -> None:
+    """节流按字符数限制每分钟输入量，超预算时等待窗口滑出。"""
+
+    clock = FakeClock()
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
+        nonlocal attempts
+        attempts += 1
+        batch = json.loads(request.read())["input"]
+        return httpx.Response(
+            200,
+            json={
+                "object": "list",
+                "data": [{"index": index, "embedding": [1, 2, 3]} for index in range(len(batch))],
+            },
+        )
+
+    client = _client(handler)
+    gateway = _gateway(
+        client, max_retries=0, jitter=lambda: 1.0, clock=clock, max_chars_per_minute=6000
+    )
+    try:
+        # 6000 字符/分钟对应每秒 100 字符、突发容量 1000 字符：
+        # 前两批各 500 字符可立即发送，第三批必须等额度补充。
+        vectors = await gateway.embed(["a" * 500] * 6)
+        assert len(vectors) == 6
+    finally:
+        await gateway.close()
+
+    assert attempts == 3
+    assert clock.sleeps
+
+
+@pytest.mark.asyncio
+async def test_pacing_recovers_budget_after_sustained_success() -> None:
+    """持续成功后小幅恢复预算，避免一次限流让整篇文档停在最低速率。"""
+
+    clock = FakeClock()
+    statuses = iter([429] + [200] * 21)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
+        status = next(statuses)
+        if status == 429:
+            return httpx.Response(
+                429,
+                json={"error": {"code": "Throttling.RateQuota", "message": "too many requests"}},
+            )
+        batch = json.loads(request.read())["input"]
+        return httpx.Response(
+            200,
+            json={
+                "object": "list",
+                "data": [{"index": index, "embedding": [1, 2, 3]} for index in range(len(batch))],
+            },
+        )
+
+    client = _client(handler)
+    gateway = _gateway(
+        client, max_retries=1, jitter=lambda: 1.0, clock=clock, max_chars_per_minute=1000
+    )
+    try:
+        await gateway.embed(["a"])
+        assert gateway.pacing_limit == 500.0
+        for _ in range(20):
+            await gateway.embed(["b"])
+    finally:
+        await gateway.close()
+
+    # 20 次成功后按 1.1 倍恢复，但不越过初始预算。
+    assert gateway.pacing_limit == pytest.approx(550.0)
+
+
+@pytest.mark.asyncio
+async def test_throttling_halves_the_pacing_budget() -> None:
+    """被限流后收紧每分钟字符预算，避免继续以突发流量重试。"""
+
+    clock = FakeClock()
+    statuses = iter((429, 200))
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
+        status = next(statuses)
+        if status == 429:
+            return httpx.Response(
+                429,
+                json={"error": {"code": "Throttling.RateQuota", "message": "too many requests"}},
+            )
+        return httpx.Response(
+            200, json={"object": "list", "data": [{"index": 0, "embedding": [1, 2, 3]}]}
+        )
+
+    client = _client(handler)
+    gateway = _gateway(
+        client, max_retries=1, jitter=lambda: 1.0, clock=clock, max_chars_per_minute=1000
+    )
+    try:
+        assert await gateway.embed(["a"]) == [(1.0, 2.0, 3.0)]
+    finally:
+        await gateway.close()
+
+    assert gateway.pacing_limit == 500.0
+
+
+@pytest.mark.asyncio
+async def test_batch_limit_from_provider_is_learned_and_reused() -> None:
+    """提供方声明单请求上限后，后续批次不再逐个撞 400 再二分。"""
+
+    sizes: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
+        batch = json.loads(request.read())["input"]
+        sizes.append(len(batch))
+        if len(batch) > 3:
+            return httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "code": "InvalidParameter",
+                        "message": "batch size is invalid, it should not be larger than 3.",
+                    }
+                },
+            )
+        payload = {
+            "object": "list",
+            "data": [{"index": index, "embedding": [1, 2, 3]} for index in range(len(batch))],
+        }
+        return httpx.Response(200, json=payload)
+
+    client = _client(handler)
+    gateway = _gateway(client, batch_size=8, max_retries=0, jitter=lambda: 1.0)
+    try:
+        vectors = await gateway.embed([f"t{index}" for index in range(8)])
+    finally:
+        await gateway.close()
+
+    assert len(vectors) == 8
+    # 第一次 8 条被拒后按 4/4 二分，两侧的 4 条再次被拒再各分 2/2，
+    # 之后学习到上限 3，剩余调用不再出现超过 3 条的请求。
+    assert sizes[0] == 8
+    assert len([size for size in sizes if size > 3]) == 3
+    assert all(size <= 4 for size in sizes[1:])
+
+
+@pytest.mark.asyncio
+async def test_quota_exhaustion_is_reported_as_quota_not_transport() -> None:
+    """额度用尽必须返回可区分的错误码，避免被当成地址或网络故障。"""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        """执行测试所需的辅助操作。"""
+        return httpx.Response(
+            429,
+            json={
+                "error": {
+                    "code": "insufficient_quota",
+                    "message": (
+                        "You exceeded your current quota, "
+                        "please check your plan and billing details."
+                    ),
+                }
+            },
+        )
+
+    clock = FakeClock()
+    client = _client(handler)
+    gateway = _gateway(client, max_retries=1, jitter=lambda: 1.0, clock=clock)
+    try:
+        with pytest.raises(DomainError) as error:
+            await gateway.embed(["a"])
+    finally:
+        await gateway.close()
+
+    failure = error.value.failure
+    assert failure.code == "EMBEDDING_QUOTA_EXCEEDED"
+    assert failure.retryable is True
+    assert "insufficient_quota" in failure.message

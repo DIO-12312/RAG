@@ -213,7 +213,7 @@ def test_production_caddy_is_only_public_entrypoint() -> None:
     caddyfile = (ROOT / "deploy" / "production" / "Caddyfile").read_text(encoding="utf-8")
     assert "email {$CADDY_ACME_EMAIL}" not in caddyfile
     assert "{$RAG_PUBLIC_SITE_ADDRESS}" in caddyfile
-    assert "max_size 34MB" in caddyfile
+    assert "max_size 70MB" in caddyfile
     assert "uri strip_prefix /api" in caddyfile
     assert caddyfile.count("flush_interval -1") == 2
 

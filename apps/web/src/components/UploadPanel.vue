@@ -2,7 +2,12 @@
 import { computed, onBeforeUnmount, ref } from "vue";
 import AppIcon from "@/components/AppIcon.vue";
 import { randomUUID } from "@/utils/id";
-const props = defineProps<{ uploadFile: (file: File, key: string) => Promise<void> }>();
+// 单文件上限由父组件从 /me 传入，避免界面承诺值与服务端真实限制漂移
+// （此前界面写 64 MB、API 入口只接受 33 MiB，41 MB 的 PPTX 可选中却必然失败）。
+const FALLBACK_MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
+const props = withDefaults(defineProps<{ uploadFile: (file: File, key: string) => Promise<void>; maxUploadBytes?: number }>(), { maxUploadBytes: FALLBACK_MAX_UPLOAD_BYTES });
+const maxUploadBytes = computed(() => props.maxUploadBytes || FALLBACK_MAX_UPLOAD_BYTES);
+const maxUploadLabel = computed(() => `${Math.round(maxUploadBytes.value / 1024 / 1024)} MB`);
 const emit = defineEmits<{ changed: [] }>();
 type Entry = { id: string; file: File; status: "等待上传" | "上传中" | "已提交" | "上传失败" | "已跳过"; error: string };
 const entries = ref<Entry[]>([]);
@@ -21,7 +26,7 @@ function selected(event: Event): void {
     if (known.has(fingerprint)) continue;
     known.add(fingerprint);
     if (entries.value.length >= 1000) { notice.value = "单批最多选择 1000 个文件，请分批上传。"; break; }
-    const error = !/\.(pdf|md|txt|py|go|js|ts|java|chm|chi)$/i.test(file.name) ? "不支持的文件格式" : file.size > 32*1024*1024 ? "文件超过 32 MB" : file.size === 0 ? "空文件" : "";
+    const error = !/\.(pdf|pptx|md|txt|py|go|js|ts|java|chm|chi)$/i.test(file.name) ? "不支持的文件格式" : file.size > maxUploadBytes.value ? `文件超过 ${maxUploadLabel.value}` : file.size === 0 ? "空文件" : "";
     entries.value.push({ id: randomUUID(), file, status: error ? "已跳过" : "等待上传", error });
   }
   input.value = "";
@@ -54,18 +59,19 @@ function fileIcon(name: string): string {
 </script>
 <template>
   <section class="upload-panel">
-    <span class="icon-tile"><AppIcon name="upload" /></span><h2>把新的知识带进来</h2><p>多选文件或整个文件夹 · 单文件最大 32 MB</p>
+    <span class="icon-tile"><AppIcon name="upload" /></span><h2>把新的知识带进来</h2><p>多选文件或整个文件夹 · 单文件最大 {{ maxUploadLabel }}</p>
     <div class="upload-pickers">
       <label>选择文件<input
         type="file"
         multiple
-        accept=".pdf,.md,.txt,.py,.go,.js,.ts,.java,.chm,.chi"
+        accept=".pdf,.pptx,.md,.txt,.py,.go,.js,.ts,.java,.chm,.chi"
         :disabled="running"
         @change="selected"
       ></label><label>选择文件夹<input
         type="file"
         multiple
-        webkitdirectory
+        :webkitdirectory="true"
+        :directory="true"
         :disabled="running"
         @change="selected"
       ></label>
@@ -112,7 +118,7 @@ function fileIcon(name: string): string {
       </div>
     </template>
     <p v-else>
-      支持 PDF、CHM/CHI、Markdown、文本与代码。不支持的文件将跳过。
+      支持 PDF、PowerPoint、CHM/CHI、Markdown、文本与代码。不支持的文件将跳过。
     </p>
   </section>
 </template>

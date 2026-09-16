@@ -4,14 +4,107 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Mapping
+import random
+import re
+import time
+from collections.abc import Awaitable, Callable, Mapping
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
+import structlog
 
 from rag_mvp.domain.errors import DomainError, DomainFailure
 
-INITIAL_RETRY_DELAY_SECONDS = 0.1
+# 真实模型网关的限流窗口以秒计，0.1s 级别的退避在 429 面前等于没有退避：
+# 大文档（数千 Chunk、上百批次）必然在同一个窗口内反复超限，
+# 最终把「暂时不可用」放大成整个文档摄取失败。
+INITIAL_RETRY_DELAY_SECONDS = 1.0
+MAX_RETRY_DELAY_SECONDS = 30.0
+_PROVIDER_DETAIL_LIMIT = 200
+# 提供方在 400 中声明「单请求输入数不能大于 N」时，从文本里取回该上限。
+_BATCH_LIMIT = re.compile(r"not be larger than\s+(\d+)", re.IGNORECASE)
+# 这些错误码表示额度或计费问题，与网络/上游故障必须区分，否则用户会去查错方向。
+_QUOTA_CODES = ("quota", "balance", "arrearage", "insufficient_quota")
+_LOGGER = structlog.get_logger("rag_mvp.model")
+
+# 提供方按时间窗口限制输入量：以字符数近似输入量并按分钟节流。
+# 用令牌桶而不是「整分钟滑动窗口」：后者允许在开头一次性发满整分钟预算，
+# 正是这种突发会直接打穿提供方的窗口配额，之后再靠重试慢慢恢复。
+_PACING_BURST_SECONDS = 10.0
+_MIN_PACING_FRACTION = 16.0
+# 每累计这么多次成功后小幅提高预算：一次限流不该让整篇文档停留在最低速率。
+_PACING_RECOVERY_SUCCESSES = 20
+_PACING_RECOVERY_FACTOR = 1.1
+
+
+class _CharacterPacer:
+    """Limit outgoing input volume per rolling minute, halving it on throttling."""
+
+    def __init__(
+        self,
+        limit_per_minute: int,
+        clock: Callable[[], float],
+        sleep: Callable[[float], Awaitable[None]],
+    ) -> None:
+        self._initial = float(limit_per_minute)
+        self._floor = max(float(limit_per_minute) / _MIN_PACING_FRACTION, 1.0)
+        self._successes = 0
+        self._clock = clock
+        self._sleep = sleep
+        self._tokens = 0.0
+        self._last = clock()
+        self._apply(float(limit_per_minute))
+        self._tokens = self._capacity
+
+    # 按每分钟字符预算推导每秒补充速率与突发容量（只允许约 10 秒的突发）。
+    def _apply(self, limit_per_minute: float) -> None:
+        self._limit = limit_per_minute
+        self._rate = limit_per_minute / 60.0
+        self._capacity = max(self._rate * _PACING_BURST_SECONDS, self._rate)
+
+    @property
+    def limit(self) -> float:
+        """Return the current per-minute character budget (0 means unlimited)."""
+
+        return self._limit
+
+    # 被限流时按半数收紧，并保证下限，避免退到无法推进的程度。
+    def reduce(self) -> float:
+        """Halve the current budget and return the new one."""
+
+        if self._limit <= 0:
+            return 0.0
+        self._apply(max(self._limit / 2, self._floor))
+        self._tokens = min(self._tokens, self._capacity)
+        return self._limit
+
+    # 成功后按固定间隔小幅恢复预算，避免一次限流把整篇文档压到最低速率。
+    def succeeded(self) -> None:
+        """Raise the budget slowly after sustained success."""
+
+        if self._limit <= 0 or self._initial <= 0 or self._limit >= self._initial:
+            return
+        self._successes += 1
+        if self._successes % _PACING_RECOVERY_SUCCESSES == 0:
+            self._apply(min(self._limit * _PACING_RECOVERY_FACTOR, self._initial))
+
+    # 以令牌桶节流：按秒补充额度，突发容量约 10 秒，避免开头一次性打满整分钟预算。
+    async def reserve(self, chars: int) -> None:
+        """Wait until enough character budget has accumulated for this request."""
+
+        if self._limit <= 0:
+            return
+        while True:
+            now = self._clock()
+            self._tokens = min(self._capacity, self._tokens + (now - self._last) * self._rate)
+            self._last = now
+            # 单次请求本身就超容量时只能放行，否则会永远等待。
+            if self._tokens >= chars or chars > self._capacity:
+                self._tokens = max(0.0, self._tokens - chars)
+                return
+            await self._sleep(min((chars - self._tokens) / self._rate, 60.0))
 
 
 class OpenAICompatibleModelGateway:
@@ -27,6 +120,12 @@ class OpenAICompatibleModelGateway:
         batch_size: int,
         max_retries: int,
         max_concurrency: int,
+        retry_base_delay_seconds: float = INITIAL_RETRY_DELAY_SECONDS,
+        retry_max_delay_seconds: float = MAX_RETRY_DELAY_SECONDS,
+        jitter: Callable[[], float] | None = None,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
+        monotonic: Callable[[], float] | None = None,
+        max_chars_per_minute: int = 0,
     ) -> None:
         normalized_endpoint = endpoint.strip().rstrip("/")
         if not normalized_endpoint:
@@ -43,6 +142,12 @@ class OpenAICompatibleModelGateway:
             raise ValueError("max_retries must not be negative")
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least 1")
+        if retry_base_delay_seconds <= 0:
+            raise ValueError("retry_base_delay_seconds must be positive")
+        if retry_max_delay_seconds < retry_base_delay_seconds:
+            raise ValueError("retry_max_delay_seconds must not be smaller than the base delay")
+        if max_chars_per_minute < 0:
+            raise ValueError("max_chars_per_minute must not be negative")
 
         self._client = client
         self._endpoint = normalized_endpoint
@@ -51,6 +156,23 @@ class OpenAICompatibleModelGateway:
         self._batch_size = batch_size
         self._max_retries = max_retries
         self._max_concurrency = max_concurrency
+        self._retry_base_delay_seconds = retry_base_delay_seconds
+        self._retry_max_delay_seconds = retry_max_delay_seconds
+        self._jitter = jitter or (lambda: random.uniform(0.75, 1.25))
+        self._sleep = sleep or asyncio.sleep
+        self._monotonic = monotonic or time.monotonic
+        # 提供方返回 429 时，整个文档的批次都要一起停下来，
+        # 否则并发中的其他批次会在同一限流窗口里继续触发 429。
+        self._pause_until = 0.0
+        self._pause_lock = asyncio.Lock()
+        self._learned_batch_size: int | None = None
+        self._pacer = _CharacterPacer(max_chars_per_minute, self._monotonic, self._sleep)
+
+    @property
+    def pacing_limit(self) -> float:
+        """Return the current per-minute character budget (0 means unlimited)."""
+
+        return self._pacer.limit
 
     # 返回不暴露敏感配置的调试表示。
     def __repr__(self) -> str:
@@ -64,10 +186,14 @@ class OpenAICompatibleModelGateway:
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
         """Embed inputs in bounded batches while preserving original order."""
 
-        batches = [
-            texts[offset : offset + self._batch_size]
-            for offset in range(0, len(texts), self._batch_size)
-        ]
+        # 提供方可能声明了比配置更小的单请求上限（例如 20），learned_batch_size
+        # 会在收到该声明后收紧后续请求，避免每个批次都用一次 400 换二分。
+        size = (
+            self._batch_size
+            if self._learned_batch_size is None
+            else min(self._batch_size, self._learned_batch_size)
+        )
+        batches = [texts[offset : offset + size] for offset in range(0, len(texts), size)]
         semaphore = asyncio.Semaphore(self._max_concurrency)
 
         async def embed_bounded(batch: list[str]) -> list[tuple[float, ...]]:
@@ -99,7 +225,10 @@ class OpenAICompatibleModelGateway:
 
     # 内部辅助：完成 embed_batch 所需的局部转换或校验。
     async def _embed_batch(self, texts: list[str]) -> list[tuple[float, ...]]:
+        pending = sum(len(text) for text in texts)
         for attempt in range(self._max_retries + 1):
+            await self._pacer.reserve(pending)
+            await self._wait_for_provider_pause()
             try:
                 response = await self._client.post(
                     self._endpoint,
@@ -107,9 +236,9 @@ class OpenAICompatibleModelGateway:
                 )
             except httpx.RequestError as exc:
                 if attempt < self._max_retries:
-                    await self._backoff(attempt)
+                    await self._backoff(attempt, None)
                     continue
-                raise self._unavailable() from exc
+                raise self._unavailable(f"transport_error={type(exc).__name__}") from exc
 
             if response.status_code in {401, 403}:
                 raise DomainError(
@@ -120,11 +249,43 @@ class OpenAICompatibleModelGateway:
                     )
                 )
             if response.status_code == 429 or response.status_code >= 500:
+                retry_after = _retry_after_seconds(response)
+                detail = _provider_detail(response)
+                log = _LOGGER.warning if attempt >= self._max_retries else _LOGGER.info
+                log(
+                    "embedding_request_retry",
+                    status=response.status_code,
+                    attempt=attempt + 1,
+                    max_attempts=self._max_retries + 1,
+                    provider_detail=detail,
+                    retry_after_seconds=retry_after,
+                    quota_exhausted=_is_quota_detail(detail),
+                )
                 if attempt < self._max_retries:
-                    await self._backoff(attempt)
+                    if response.status_code == 429:
+                        if self._pacer.limit > 0:
+                            _LOGGER.info(
+                                "embedding_pacing_reduced",
+                                max_chars_per_minute=self._pacer.reduce(),
+                            )
+                        await self._pause_all(retry_after)
+                    await self._backoff(attempt, retry_after)
                     continue
-                raise self._unavailable()
+                if _is_quota_detail(detail):
+                    raise DomainError(
+                        DomainFailure(
+                            "EMBEDDING_QUOTA_EXCEEDED",
+                            "embedding provider quota is exhausted "
+                            f"(status={response.status_code} code={detail or 'unknown'})",
+                            retryable=True,
+                        )
+                    )
+                raise self._unavailable(
+                    f"status={response.status_code}",
+                    detail=detail,
+                )
             if response.status_code == 400 and len(texts) > 1:
+                self._remember_batch_limit(response)
                 midpoint = len(texts) // 2
                 left = await self._embed_batch(texts[:midpoint])
                 right = await self._embed_batch(texts[midpoint:])
@@ -137,13 +298,65 @@ class OpenAICompatibleModelGateway:
                         retryable=False,
                     )
                 )
-            return self._parse_response(response, len(texts))
+            vectors = self._parse_response(response, len(texts))
+            self._pacer.succeeded()
+            return vectors
 
         raise RuntimeError("embedding retry loop terminated unexpectedly")
 
+    # 在提供方声明单请求输入上限时收紧后续批次大小，避免每个批次都先撞一次 400。
+    def _remember_batch_limit(self, response: httpx.Response) -> None:
+        try:
+            payload = response.json()
+        except ValueError:
+            return
+        if not isinstance(payload, Mapping):
+            return
+        error = payload.get("error")
+        message = error.get("message") if isinstance(error, Mapping) else payload.get("message")
+        if not isinstance(message, str):
+            return
+        match = _BATCH_LIMIT.search(message)
+        if match is None:
+            return
+        limit = int(match.group(1))
+        if limit < 1:
+            return
+        previous = self._learned_batch_size
+        if previous is None or limit < previous:
+            self._learned_batch_size = limit
+            _LOGGER.info(
+                "embedding_batch_limit_learned",
+                configured_batch_size=self._batch_size,
+                learned_batch_size=limit,
+            )
+
     # 内部辅助：完成 backoff 所需的局部转换或校验。
-    async def _backoff(self, attempt: int) -> None:
-        await asyncio.sleep(INITIAL_RETRY_DELAY_SECONDS * (2**attempt))
+    async def _backoff(self, attempt: int, retry_after: float | None) -> None:
+        if retry_after is None:
+            delay = min(
+                self._retry_base_delay_seconds * (2**attempt),
+                self._retry_max_delay_seconds,
+            )
+        else:
+            delay = min(retry_after, self._retry_max_delay_seconds)
+        await self._sleep(delay * self._jitter())
+
+    # 让同一文档内所有并发批次共享提供方给出的节流窗口。
+    async def _pause_all(self, retry_after: float | None) -> None:
+        delay = min(
+            retry_after if retry_after is not None else self._retry_base_delay_seconds,
+            self._retry_max_delay_seconds,
+        )
+        async with self._pause_lock:
+            deadline = self._monotonic() + delay
+            self._pause_until = max(self._pause_until, deadline)
+
+    # 在提供方节流窗口内等待，避免继续加压触发更多 429。
+    async def _wait_for_provider_pause(self) -> None:
+        remaining = self._pause_until - self._monotonic()
+        if remaining > 0:
+            await self._sleep(min(remaining, self._retry_max_delay_seconds))
 
     # 内部辅助：完成 parse_response 所需的局部转换或校验。
     def _parse_response(
@@ -218,11 +431,64 @@ class OpenAICompatibleModelGateway:
 
     @staticmethod
     # 内部辅助：完成 unavailable 所需的局部转换或校验。
-    def _unavailable() -> DomainError:
+    def _unavailable(*facts: str, detail: str = "") -> DomainError:
+        # 失败信息必须带上提供方的状态与错误码，否则运维只能看到
+        # 「服务暂时不可用」，无法区分限流、超时还是配额耗尽。
+        message = " ".join(
+            part for part in ("embedding provider is temporarily unavailable", *facts) if part
+        )
+        if detail:
+            message = f"{message} ({detail})"
         return DomainError(
             DomainFailure(
                 "EMBEDDING_UNAVAILABLE",
-                "embedding provider is temporarily unavailable",
+                message,
                 retryable=True,
             )
         )
+
+
+# 解析提供方给出的 Retry-After（秒数或 HTTP 日期），无法识别时返回 None。
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    raw = response.headers.get("Retry-After")
+    if not raw or not raw.strip():
+        return None
+    candidate = raw.strip()
+    try:
+        seconds = float(candidate)
+    except ValueError:
+        try:
+            moment = parsedate_to_datetime(candidate)
+        except (TypeError, ValueError):
+            return None
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=UTC)
+        seconds = (moment - datetime.now(UTC)).total_seconds()
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return seconds
+
+
+# 判断提供方错误码是否属于额度/计费类问题。注意 `Throttling.RateQuota`
+# 表示限速（可退避恢复），而 `insufficient_quota`、`AllocationQuota`、
+# `insufficient_balance` 表示额度或计费问题，两者的处置完全不同。
+def _is_quota_detail(detail: str) -> bool:
+    lowered = detail.casefold()
+    if not lowered or "rate" in lowered:
+        return False
+    return any(marker in lowered for marker in _QUOTA_CODES)
+
+
+# 只提取提供方的错误码，避免把请求正文、输入文本或凭据回显到日志与失败信息。
+def _provider_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    if not isinstance(payload, Mapping):
+        return ""
+    error = payload.get("error")
+    code = error.get("code") if isinstance(error, Mapping) else payload.get("code")
+    if isinstance(code, str) and code.strip():
+        return code.strip()[:_PROVIDER_DETAIL_LIMIT]
+    return ""

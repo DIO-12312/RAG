@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import replace
+
+import structlog
 
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.domain.ids import chunk_id, content_sha256, es_record_id
@@ -15,6 +19,31 @@ from rag_mvp.ports.model import ModelGateway, model_for_dataset
 from rag_mvp.ports.parser import Parser
 from rag_mvp.ports.search_engine import IndexedChunk, SearchEngine
 from rag_mvp.ports.storage import ObjectStorage
+
+# 进度只用于展示：解析后 5%，Embedding 期间 5%→90%，写入索引后 95%，
+# 终态仍由 Job 状态机在完成事务里写为 100%。
+_PROGRESS_AFTER_PARSE = 0.05
+_PROGRESS_AFTER_EMBEDDING = 0.9
+_PROGRESS_AFTER_INDEX = 0.95
+_PROGRESS_MAX = 0.95
+# 每组 Chunk 数：过小会让进度更新过于频繁，过大则进度条长时间不动。
+_EMBEDDING_PROGRESS_CHUNKS = 128
+
+
+_LOGGER = structlog.get_logger("rag_mvp")
+
+
+# 进度只用于展示：即使写进度失败也不能让已经完成的摄取失败。
+async def _report_progress(
+    on_progress: Callable[[float], Awaitable[None]] | None,
+    progress: float,
+) -> None:
+    if on_progress is None:
+        return
+    with suppress(Exception) as suppressed:
+        await on_progress(min(progress, _PROGRESS_MAX))
+    if suppressed is not None:
+        _LOGGER.info("ingestion_progress_skipped", error=type(suppressed).__name__)
 
 
 class IngestionPipeline:
@@ -38,7 +67,12 @@ class IngestionPipeline:
 
     # 关键语义：先确认正式对象，再按固定顺序构造 Chunk/ES record_id；
     # 失败会交由上层 Task 状态机和 JetStream redelivery 收敛，不在此处确认消息。
-    async def execute(self, claim: TaskClaim) -> tuple[Chunk, ...]:
+    async def execute(
+        self,
+        claim: TaskClaim,
+        *,
+        on_progress: Callable[[float], Awaitable[None]] | None = None,
+    ) -> tuple[Chunk, ...]:
         document = claim.document
         if document is None:
             raise RuntimeError("ingestion claim is missing its document")
@@ -54,6 +88,7 @@ class IngestionPipeline:
 
         source = await self._storage.read(object_key)
         segments = await self._parser.parse(document.source_name, source)
+        await _report_progress(on_progress, _PROGRESS_AFTER_PARSE)
         await self._checkpoint(Checkpoint.AFTER_PARSE)
         drafts = await self._chunker.split(segments)
         if not drafts:
@@ -84,7 +119,19 @@ class IngestionPipeline:
             )
 
         model = model_for_dataset(self._model, claim.dataset)
-        vectors = await model.embed([draft.content_with_weight for draft in unique_drafts.values()])
+        # 按固定分组调用 Embedding：既让长文档的进度可见，也让适配器里的
+        # 节流与批次自适应状态在整篇文档上持续生效。
+        contents = [draft.content_with_weight for draft in unique_drafts.values()]
+        vectors: list[tuple[float, ...]] = []
+        for offset in range(0, len(contents), _EMBEDDING_PROGRESS_CHUNKS):
+            group = contents[offset : offset + _EMBEDDING_PROGRESS_CHUNKS]
+            vectors.extend(await model.embed(group))
+            done = offset + len(group)
+            await _report_progress(
+                on_progress,
+                _PROGRESS_AFTER_PARSE
+                + (_PROGRESS_AFTER_EMBEDDING - _PROGRESS_AFTER_PARSE) * done / len(contents),
+            )
         if len(vectors) != len(unique_drafts):
             raise DomainError(
                 DomainFailure(
@@ -118,6 +165,7 @@ class IngestionPipeline:
             for chunk, vector in zip(chunks, vectors, strict=True)
         )
         await self._search.upsert_chunks(indexed)
+        await _report_progress(on_progress, _PROGRESS_AFTER_INDEX)
         await self._checkpoint(Checkpoint.AFTER_INDEX_WRITE)
         return chunks
 

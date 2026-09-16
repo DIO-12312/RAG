@@ -178,6 +178,16 @@ class NatsJetStreamTaskQueue:
             raise self._unavailable("task delivery could not be negatively acknowledged") from exc
         self._in_flight.pop(delivery.id, None)
 
+    # 续约进行中的投递；消息已不在飞行中时静默返回。
+    async def in_progress(self, delivery: Delivery) -> None:
+        message = self._in_flight.get(delivery.id)
+        if message is None:
+            return
+        try:
+            await message.in_progress()
+        except NatsError as exc:
+            raise self._unavailable("task delivery could not be kept alive") from exc
+
     # 按资源所有权顺序关闭底层连接或句柄。
     async def close(self) -> None:
         self._in_flight.clear()

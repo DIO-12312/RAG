@@ -65,7 +65,7 @@ func (a ModelSufficiencyAssessor) Assess(ctx context.Context, question string, c
 		}
 	}
 
-	msg, err := a.Model.Complete(ctx, messages, ToolPolicy{Mode: ToolNone})
+	msg, err := a.Model.Complete(ctx, messages, DeterministicToolNone())
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return SufficiencyDecision{}, ctxErr

@@ -133,7 +133,7 @@ func TestRunStateStopReasonIsTerminal(t *testing.T) {
 
 func TestDefaultRunLimitsMatchPlan(t *testing.T) {
 	limits := DefaultRunLimits()
-	if limits.MaxRetrievalRounds != 3 ||
+	if limits.MaxRetrievalRounds != 5 ||
 		limits.MaxRewriteRounds != 2 ||
 		limits.MaxToolCallsPerRound != 4 ||
 		limits.MaxEvidence != 40 ||

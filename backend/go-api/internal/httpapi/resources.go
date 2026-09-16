@@ -1,9 +1,13 @@
 package httpapi
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"log/slog"
+	"net/http"
 	"path/filepath"
 	"rag-mvp/backend/go-api/internal/ragclient"
 	pb "rag-mvp/backend/go-api/internal/ragpb"
@@ -13,9 +17,67 @@ import (
 	"time"
 )
 
+// uploadReason 截断上传失败原因，避免把供应商或框架的长响应写入日志。
+func uploadReason(err error) string {
+	if err == nil {
+		return "empty result"
+	}
+	reason := strings.Join(strings.Fields(err.Error()), " ")
+	if len(reason) > 200 {
+		reason = reason[:200] + "…"
+	}
+	return reason
+}
+
+// uploadFailure 把上传失败映射为 HTTP 语义：超过上限（客户端流式上限或 RAG 侧
+// UPLOAD_TOO_LARGE）返回 413，其余返回 502。上限在三处独立存在（Go 客户端流式上限、
+// RAG_MAX_UPLOAD_BYTES、边缘请求体上限），这里保证用户看到的语义一致。
+func uploadFailure(err error) (int, string, string) {
+	var business *ragclient.BusinessError
+	// 服务端在流中途拒绝超限上传时，客户端看到的是流中断的 gRPC 错误，
+	// 因此除了类型化错误与业务错误码，再按错误文本兜底识别稳定码。
+	// 入口中间件的 MaxBytesReader 在读取 multipart 时就会失败（生产实测
+	// 「http: request body too large」被映射成 502），同样属于超限。
+	var tooLarge *http.MaxBytesError
+	if errors.Is(err, ragclient.ErrUploadTooLarge) ||
+		errors.As(err, &tooLarge) ||
+		(errors.As(err, &business) && business.Code == "UPLOAD_TOO_LARGE") ||
+		(err != nil && strings.Contains(err.Error(), "UPLOAD_TOO_LARGE")) ||
+		(err != nil && strings.Contains(err.Error(), "request body too large")) {
+		return 413, "UPLOAD_TOO_LARGE", "文件超过服务端大小上限，请压缩或拆分后重试。"
+	}
+	return 502, "UPLOAD_FAILED", "上传失败，请保留请求键重试。"
+}
+
+// jobFailureMessages 把 RAG 侧的稳定错误码映射为面向用户的中文说明；
+// 未收录的码回退到原始 message，避免出现无法解释的空文案。
+var jobFailureMessages = map[string]string{
+	"EMBEDDING_AUTH_FAILED": "Embedding 模型鉴权失败：请在设置中更新 API Key 后重试",
+	"EMBEDDING_UNAVAILABLE": "Embedding 服务不可用，请检查模型地址与网络",
+	// 额度/计费类失败与网络故障的处置完全不同，必须分开提示，
+	// 否则用户会去排查地址与网络，而真正的问题是配额用尽。
+	"EMBEDDING_QUOTA_EXCEEDED":     "Embedding 模型额度不足或已达限流上限：请检查模型服务的配额与计费，或稍后重试",
+	"EMBEDDING_DIMENSION_MISMATCH": "Embedding 维度与该知识库不一致，请使用相同维度的模型",
+	"EMPTY_DOCUMENT":               "文档没有可索引的文本内容",
+	"UPLOAD_TOO_LARGE":             "文件超过服务端大小上限",
+	"PDF_OCR_UNAVAILABLE":          "扫描件需要 OCR，但服务端未启用 OCR",
+	"INVALID_PDF":                  "文件不是可解析的 PDF",
+}
+
+func jobFailureMessage(j *pb.JobResult) string {
+	failure := j.GetFailure()
+	if failure == nil {
+		return ""
+	}
+	if mapped, ok := jobFailureMessages[failure.GetCode()]; ok {
+		return mapped
+	}
+	return failure.GetMessage()
+}
+
 func jobDTO(j *pb.JobResult, name string) gin.H {
 	status := strings.TrimPrefix(j.Status.String(), "JOB_STATUS_")
-	return gin.H{"id": j.JobId, "datasetId": j.DatasetId, "sourceName": name, "status": status, "progress": j.Progress * 100, "retryable": j.Retryable, "errorMessage": j.GetFailure().GetMessage(), "cancelRequested": j.CancelRequested, "type": strings.TrimPrefix(j.Type.String(), "JOB_TYPE_")}
+	return gin.H{"id": j.JobId, "datasetId": j.DatasetId, "sourceName": name, "status": status, "progress": j.Progress * 100, "retryable": j.Retryable, "errorMessage": jobFailureMessage(j), "cancelRequested": j.CancelRequested, "type": strings.TrimPrefix(j.Type.String(), "JOB_TYPE_")}
 }
 
 // documentState 把 RAG 任务状态映射为产品文档状态。任务在 RAG 服务中查不到（例如 RAG
@@ -202,17 +264,28 @@ func (s *Server) upload(c *gin.Context) {
 		return
 	}
 	defer part.Close()
+	// 空文件没有任何可索引内容：在建立 Job/Document 之前就拒绝，
+	// 避免用户拿到一个注定 FAILED(EMPTY_DOCUMENT) 的文档。
+	buffered := bufio.NewReader(part)
+	if _, e = buffered.Peek(1); e != nil {
+		fail(c, 400, "EMPTY_FILE", "文件内容为空，请重新选择。")
+		return
+	}
 	name := filepath.Base(part.FileName())
 	ext := strings.ToLower(filepath.Ext(name))
-	if !strings.Contains("|.pdf|.md|.txt|.py|.go|.js|.ts|.java|.chm|.chi|", "|"+ext+"|") {
+	if !strings.Contains("|.pdf|.pptx|.md|.txt|.py|.go|.js|.ts|.java|.chm|.chi|", "|"+ext+"|") {
 		fail(c, 400, "UNSUPPORTED_FILE", "暂不支持此文件格式。")
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Minute)
 	defer cancel()
-	result, e := s.RAG.Upload(ctx, r.ID, name, uid(c)+"-"+key(c), part)
+	result, e := s.RAG.Upload(ctx, r.ID, name, uid(c)+"-"+key(c), buffered)
 	if e != nil || result == nil {
-		fail(c, 502, "UPLOAD_FAILED", "上传失败，请保留请求键重试。")
+		status, code, message := uploadFailure(e)
+		// 上传失败必须留下可诊断的原因：此前 502 只有一句用户文案，无法判断是
+		// 服务端超限、流中断还是连接失败。只记录截断后的错误文本，不含正文与凭据。
+		slog.Info("upload_failed", "status", status, "code", code, "dataset_id", r.ID, "source_name", name, "reason", uploadReason(e))
+		fail(c, status, code, message)
 		return
 	}
 	doc := storage.Resource{ID: result.DocumentId, UserID: uid(c), DatasetID: r.ID, Kind: "document", Name: name, JobID: result.JobId}
@@ -265,6 +338,11 @@ func (s *Server) jobAction(c *gin.Context) {
 			return
 		}
 	case "retry":
+		// Retry 重新进入摄取链路前同步最新 embedding profile，避免 Dataset
+		// 使用首次绑定时的旧密钥。
+		if !s.bindEmbedding(c, r.DatasetID) {
+			return
+		}
 		resp, e := s.RAG.RPC.RetryJob(ctx, &pb.RetryJobRequest{Context: ragclient.Context(uid(c) + "-" + key(c)), JobId: r.ID})
 		if e != nil || ragclient.Error(resp.GetError()) != nil || resp.GetResult() == nil {
 			fail(c, 409, "RETRY_FAILED", "此任务不可重试。")
@@ -296,16 +374,39 @@ func (s *Server) jobAction(c *gin.Context) {
 	c.JSON(200, jobDTO(j, r.Name))
 }
 
+// reindexFailure 把重新索引失败映射为可执行的用户提示：未建立索引或源对象缺失时，
+// 用户需要的是「先重试」或「删除后重新上传」，而不是笼统的「暂时无法重新索引」。
+func reindexFailure(err error) (int, string, string) {
+	var business *ragclient.BusinessError
+	if errors.As(err, &business) {
+		switch business.Code {
+		case "DOCUMENT_NOT_INDEXED":
+			return 409, "DOCUMENT_NOT_INDEXED", "该文档尚未成功建立索引：请先重试失败的任务，或删除后重新上传。"
+		case "REINDEX_OBJECT_MISSING":
+			return 409, "REINDEX_OBJECT_MISSING", "该文档的源文件已不可用，请删除后重新上传。"
+		}
+	}
+	return 409, "REINDEX_FAILED", "此文档暂时无法重新索引。"
+}
+
 func (s *Server) reindexDocument(c *gin.Context) {
 	r, ok := s.owned(c, c.Param("id"), "document")
 	if !ok {
+		return
+	}
+	// Reindex 会复用 Dataset 的加密 embedding profile。先同步当前个人设置，确保
+	// 用户刚替换的 API Key 不会被旧快照继续使用。
+	if !s.bindEmbedding(c, r.DatasetID) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
 	j, e := s.RAG.ReindexDocument(ctx, r.ID, uid(c)+"-"+key(c))
 	if e != nil || j == nil {
-		fail(c, 409, "REINDEX_FAILED", "此文档暂时无法重新索引。")
+		// 未建立索引或源对象缺失时，重试/重新上传才是可行路径；
+		// 统一回「暂时无法重新索引」会让用户不知道该做什么。
+		status, code, message := reindexFailure(e)
+		fail(c, status, code, message)
 		return
 	}
 	job := storage.Resource{

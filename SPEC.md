@@ -73,9 +73,9 @@ Python MVP 的唯一入口是 gRPC；本地调试也调用同一 gRPC 服务。P
   → 返回带来源、分数和上下文预算建议的 evidence
 ```
 
-必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java`、PDF、`.chm` 与 `.chi`。PDF 默认使用 `auto` 路由：优先读取原生文字和坐标，原生文字不足的页面才经 Poppler 渲染并使用 Tesseract OCR；输出标题路径、阅读顺序、段落/列表/表格型文本、页码与矩形坐标。OCR 只识别文字，不负责图片语义和公式结构理解。
+必须支持的输入格式：`.md`、`.txt`、`.py/.go/.js/.ts/.java`、PDF、`.pptx`、`.chm` 与 `.chi`。PDF 默认使用 `auto` 路由：优先读取原生文字和坐标，原生文字不足的页面才经 Poppler 渲染并使用 Tesseract OCR；输出标题路径、阅读顺序、段落/列表/表格型文本、页码与矩形坐标。OCR 只识别文字，不负责图片语义和公式结构理解。PPTX 按演示文稿中的幻灯片顺序提取 OOXML 文本，每张幻灯片作为带物理 `page_number` 的独立来源段进入同一切块/检索链路，提供与 PDF 相同的页码引用体验；不执行宏、嵌入对象或外部链接。PPTX 还必须识别幻灯片引用的点阵图片（PNG/JPEG/BMP/GIF/TIFF/WebP）中的文字，因为讲稿的实质内容常以截图形式出现：OCR 文本并入该幻灯片的来源段（保留页码来源，不新增定位维度），同一素材在一份文档内只识别一次，矢量素材（EMF/WMF/SVG）与识别失败都不参与且不得中断摄取；OCR 是尽力而为的增强，单个文档仍以幻灯片正文为下限成功入库。
 
-自 `source-router-v8` 起，PDF `auto/deepdoc` 原生路径使用 pdfminer.six 的字符坐标和实际字号恢复物理行，避免 pypdf 文字回调在文本对象/变换矩阵切换时返回失真的坐标；`plain` 继续使用 pypdf。表格只有连续行的列起点、列数和行距均一致时才输出 Markdown 行；稀疏甘特图不能证明列结构时保留物理行与空白分隔，不猜测缺失单元格。加粗本身不构成标题，项目符号、短大写标签和表格行不得提升为标题；页首标题重置根层级。同页同标题下相邻段落/列表共同形成 segment，表格、页面和标题仍是边界，长段由既有 chunk_size/overlap 切块。页边以页码形态结尾的行可独立过滤，其他页眉页脚仍按跨页重复识别。这些规则改变正文、digest 和 Chunk ID，已有 PDF 必须通过新版本重建后才生效。
+自 `source-router-v9` 起，PDF `auto/deepdoc` 恢复经 CHM3 实际知识库验证的 pdfplumber 词级坐标路径：先按页面提取词块，再按纵向容差恢复物理行和横向间距；连续多列行可形成 Markdown 表格，段落、列表、表格、标题与明显纵向间距共同构成 segment 边界，长段仍由既有 `chunk_size/overlap` 切块。原生文本不足时继续按页降级到 Poppler + Tesseract OCR；重复页眉页脚仍按跨页统计移除。页脚印刷页码作为 `printed_page_number` 来源元数据保留并从正文剔除，物理页码继续保存在 locator，前端可同时展示两者。该回退仅改变 PDF 解析和索引正文，不改变 CHM/CHI、Embedding、ES schema 或查询流程；已有 PDF 必须通过新版本重建后才生效。
 
 一个上传的 CHM 对应一个既有 `Document`，不为 Topic 新建数据库 Document。CHM 内每个 HTML Topic 是逻辑子文档和不可跨越的切块硬边界；Topic 内先按 `h1`～`h6` 标题层级形成段落，超长标题段再依次优先选择段落、句子和词法 token 边界，单个不可分 token 才允许按字符硬截断。Topic 顺序优先采用 `.hhc` 目录，未列入目录的 HTML 按规范化路径稳定追加。每个 CHM Chunk 的 `content_with_weight` 必须在正文前稳定加入 `topic_title`、`heading_path` 与 locator `symbol` 上下文，使同一 Topic 的所有分块均可按页面标题、标题路径和接口符号检索；正文切分上限不包含该检索权重前缀。权重文本参与 Embedding、内容摘要和 `chunk_id` 计算，因此修改前缀规则必须提升 parser/chunker 配置版本并重建索引。Chunk 与 Evidence 必须同时保留原 CHM `source_name`，并在 metadata/locator metadata 中返回 `topic_path`、`topic_title`、`topic_order`、`heading_path` 和可选 `anchor`；行号仍表示 Topic 规范化正文中的行范围，不计算检索权重前缀。
 
@@ -112,7 +112,9 @@ PENDING → RUNNING → SUCCEEDED
 2. Sparse：BM25/关键词召回；
 3. Fusion：RRF 融合两个候选排名；
 4. 可选 Rerank：只重排 Top-20，输出 Top-6；
-5. ContextBuilder：在模型上下文预算内选取证据，超限时按得分截断，不截断句中间。
+5. 锚点多样化：按内容摘要跨文档去重，限制跨语言重复 Topic；概念、安装、配置、排错和性能类问题在有 PDF 候选时保留约三分之一叙述型手册锚点，API/QoS 问题仍按精确接口相关性排序；
+6. Topic 邻居只在锚点多样化后扩展，不占用直接召回锚点配额；
+7. ContextBuilder：在模型上下文预算内选取证据，超限时按得分截断，不截断句中间。
 
 ### 2.4 全链路可插拔，但只实现一套默认适配器
 
@@ -233,7 +235,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 
 | 能力 | MVP 策略 | 默认参数（可配置） |
 |---|---|---|
-| Embedding | OpenAI-compatible `/embeddings` | `batch_size=32`、`max_concurrency=4`；一个文档内按有界并发发送批次并保持全局输入顺序。多输入批次收到 HTTP 400 时按输入顺序二分并重试，单条仍被拒绝则返回 `EMBEDDING_REQUEST_REJECTED`；429/5xx 仍执行有限退避重试；维度由模型返回后校验并固定 Elasticsearch index mapping。 |
+| Embedding | OpenAI-compatible `/embeddings` | `batch_size=20`、`max_concurrency=4`；一个文档内按有界并发发送批次并保持全局输入顺序。默认批次大小按提供方常见上限（20）设定：超限会被 400 拒绝并触发二分，等于把每个批次放大成三次请求。多输入批次收到 HTTP 400 时按输入顺序二分并重试，并从错误文本中学习提供方声明的单请求上限以收紧后续批次；单条仍被拒绝则返回 `EMBEDDING_REQUEST_REJECTED`；429/5xx 执行遵循 `Retry-After` 的有限退避重试，并按 `embedding_max_chars_per_minute`（默认 25 万字符/分钟，0 表示不限制）以字符数近似输入量做令牌桶节流（突发容量约 10 秒预算，避免开头一次性打满整分钟配额），被限流后按半数收紧、持续成功后小幅恢复，额度类错误码（如 `insufficient_quota`）单独返回 `EMBEDDING_QUOTA_EXCEEDED`，避免把额度问题显示成网络故障；维度由模型返回后校验并固定 Elasticsearch index mapping。 |
 | Chunking | 多格式递归切分 | `chunk_size=800` 字符，`overlap=120`；代码按函数/类优先；CHM 固定 Topic/标题硬边界，超长标题段按段落→句子→词法 token 递归切分。 |
 | PDF 解析 | `plain / deepdoc / auto` | 默认 `auto`；每页原生文字少于 40 字符时尝试 `chi_sim+eng`、200 DPI OCR；最多 1000 页；重复页眉页脚在跨页统计后删除。 |
 | Dense 召回 | Cosine KNN | `dense_top_k=20` |
@@ -256,7 +258,7 @@ Elasticsearch 是 RAG 的私有基础设施，不是对外 API。默认 Compose�
 
 development/test 的 Compose 最终服务顺序固定为 `rag-security-materials → elasticsearch → rag-search-guard-bootstrap → rag-migrate → rag-server/rag-worker/rag-outbox`。材料服务向 `search-guard-node-secrets` 写入 node/admin 所需的 `ca.pem`、`node.pem`、`node-key.pem`、`admin.pem`、`admin-key.pem` 与 ES healthcheck 使用的 password 副本；向 `search-guard-client-secrets` 写入运行时所需的 `ca.pem`、`rag_mvp_password`。前者分别挂到 `/node-secrets`（bootstrap）和 ES 的 `/usr/share/elasticsearch/config/search-guard`，后者只读挂到应用/测试容器的 `/run/secrets/ca.pem`、`/run/secrets/rag_mvp_password`。首次启动采用两阶段健康策略：bootstrap 只等待 `elasticsearch: service_started` 并以管理员客户端证书初始化；普通 healthcheck 必须在 bootstrap 成功后才用 `rag_mvp` 请求 `/_searchguard/health`。对应静态/真实安全证据位于 `tests/contract/test_search_guard_assets.py`、`tests/contract/test_container_artifacts.py` 和 `tests/integration/test_search_guard_security.py`。
 
-生产使用根目录 `compose.production.yml` 与 `deploy/production/` 的单机 Compose 编排；它不是 development/test Compose 的 override，且只能只读挂载外部 CA/node/admin/client Secret，禁止定义或启动 `rag-security-materials`。生产主机的公开手工启动入口是 `make production-run`，Makefile 只能将执行委托给 Earthfile；该 target 必须先校验 `PUBLIC_MODE`、生产 env 和 Compose 配置，再从当前源码构建无状态 `production-material-check` 并以禁止拉取的本地镜像校验外部材料，校验成功后才可构建、启动 production manifest 的有状态与业务服务，且不得调用 development/product Compose。`production-material-check` 必须以 `--environment production` 验证材料；任何材料缺失、权限不正确或证书主体不匹配都必须阻断 ES、bootstrap 与下游服务启动。该入口默认 `PUBLIC_MODE=ip`，启动 Caddy 的 HTTP 入口并通过 `http://49.235.110.118` 访问；域名模式使用 `PUBLIC_MODE=domain`，要求真实域名 Origin、站点地址和 Secure Cookie 配置后由 Caddy 自动申请 HTTPS。生产 `edge` 网桥固定为 `172.19.0.0/16`，供公网回程策略路由保持走主路由；若与主机其他网络冲突，必须在启动前调整网段及配套策略。生产启动必须移除同 Compose 项目的孤儿容器，但不得删除持久卷。该 manifest 只发布 Caddy 的 80/443，将 MySQL、NATS、Elasticsearch、Python gRPC、Go API 与 web 放在 Compose 私网；Caddy 是唯一公网入口，并负责 34 MiB 请求上限与 SSE 立即转发。只有裸公网 IP 时不得宣称浏览器认可的 HTTPS 已验收。它是单机部署基线，不等同 Kubernetes/多节点高可用，也不得从 development/test Compose 推断其安全性。
+生产使用根目录 `compose.production.yml` 与 `deploy/production/` 的单机 Compose 编排；它不是 development/test Compose 的 override，且只能只读挂载外部 CA/node/admin/client Secret，禁止定义或启动 `rag-security-materials`。生产主机的公开手工启动入口是 `make production-run`，Makefile 只能将执行委托给 Earthfile；该 target 必须先校验 `PUBLIC_MODE`、生产 env 和 Compose 配置，再从当前源码构建无状态 `production-material-check` 并以禁止拉取的本地镜像校验外部材料，校验成功后才可构建、启动 production manifest 的有状态与业务服务，且不得调用 development/product Compose。`production-material-check` 必须以 `--environment production` 验证材料；任何材料缺失、权限不正确或证书主体不匹配都必须阻断 ES、bootstrap 与下游服务启动。该入口默认 `PUBLIC_MODE=ip`，启动 Caddy 的 HTTP 入口并通过 `http://49.235.110.118` 访问；域名模式使用 `PUBLIC_MODE=domain`，要求真实域名 Origin、站点地址和 Secure Cookie 配置后由 Caddy 自动申请 HTTPS。生产 `edge` 网桥固定为 `172.19.0.0/16`，供公网回程策略路由保持走主路由；若与主机其他网络冲突，必须在启动前调整网段及配套策略。生产启动必须移除同 Compose 项目的孤儿容器，但不得删除持久卷。该 manifest 只发布 Caddy 的 80/443，将 MySQL、NATS、Elasticsearch、Python gRPC、Go API 与 web 放在 Compose 私网；Caddy 是唯一公网入口，并负责 70 MB 请求上限与 SSE 立即转发。只有裸公网 IP 时不得宣称浏览器认可的 HTTPS 已验收。它是单机部署基线，不等同 Kubernetes/多节点高可用，也不得从 development/test Compose 推断其安全性。
 
 生产升级是维护窗口中的全量重启 runbook：先通过 `PRODUCTION_BACKUP_DIR` 挂载的宿主机持久化 repository 创建并验证 snapshot、禁用 shard allocation、停止全部节点并备份 data volume；再校验精确 ES/插件镜像与 checksum，预置外部 CA/node/admin/client 密钥并完成上述生产材料校验；只在其成功后由 production 编排启动 ES 和 bootstrap。bootstrap/health 通过后、恢复 allocation/业务前，必须创建新的受保护目标数据卷/集群，执行并验证已确认 snapshot restore，核对预期索引、文档计数/完整性与一次 RAG 可检索性；restore 或核验失败必须保持停止。只有这些恢复验证及 `rag_mvp` 索引边界通过后才启动下游服务并恢复 allocation。证书、密码或 bootstrap 失败立即停止；回滚仅使用已验证 snapshot 与旧镜像，始终保留私网端口策略。若怀疑历史 9200 暴露，必须轮换密码/证书、审查操作日志并重建可信索引。完整操作步骤见生产部署手册及 Linux/Windows 安装手册。
 
@@ -497,7 +499,11 @@ flowchart LR
 
 Go 是唯一公网入口和 Agent 决策者；Python 是私网 RAG 服务。Go 通过 RPC 调用 Python，并维护用户侧资源映射；Python 始终是 RAG Document/Job/Task/索引状态的唯一写入方。
 
-Web 文件选择器与 Go 上传入口必须共同放行 Python RAG 已支持的 `.pdf`、`.md`、`.txt`、`.py`、`.go`、`.js`、`.ts`、`.java`、`.chm` 和 `.chi`，避免产品入口与计算服务能力不一致。反向代理的请求体上限必须略高于 Python 的 `RAG_MAX_UPLOAD_BYTES`，为 multipart framing 预留开销；文件大小的权威业务上限仍由产品前端与 Python RAG 服务共同执行。
+Web 文件选择器与 Go 上传入口必须共同放行 Python RAG 已支持的 `.pdf`、`.pptx`、`.md`、`.txt`、`.py`、`.go`、`.js`、`.ts`、`.java`、`.chm` 和 `.chi`，避免产品入口与计算服务能力不一致。文件夹选择器必须同时绑定 `webkitdirectory` 与 `directory` 属性，不能退化为普通文件选择。`RAG_MAX_UPLOAD_BYTES` 默认是 64 MiB；文件大小的权威业务上限由产品前端、Go 上传入口与 Python RAG 服务共同执行。反向代理的请求体上限必须更高，为 multipart framing 预留开销。
+
+PPTX 只作为受限 OOXML 文本来源处理：解析器必须在解压前限制 ZIP 条目数量（≤ 4096）、单条展开字节（≤ 64 MiB，与单文件上限对齐，避免出现比入口更严的隐性限制）、总展开字节（≤ 256 MiB）与压缩比（≤ 100），并限制 XML 输入；含 DTD 或实体声明、越界关系目标、损坏或超限的文件一律以 `INVALID_PPTX` 拒绝。解析器不得执行宏、嵌入对象或外部关系。图片识别按 `RAG_PPTX_OCR_ENABLED`、`RAG_PPTX_OCR_LANGUAGE`、`RAG_PPTX_OCR_TIMEOUT_SECONDS`、`RAG_PPTX_OCR_MAX_IMAGES_PER_SLIDE` 与单图 8 MiB 上限执行，超限图片直接跳过。
+
+Go 产品层允许一个会话切换到任意当前可用的知识库，以避免已删除知识库让历史会话不可用。每条会话消息必须记录其创建时的 `dataset_id`；加载历史和传入模型的历史都只能包含当前选中知识库的消息，绝不能跨知识库混入上下文。并发生成锁必须在持久化用户消息前获得，返回 `CHAT_BUSY` 的请求不得写入消息。
 
 ### 5.2 建议目录树
 
@@ -726,13 +732,17 @@ sequenceDiagram
     end
 ```
 
-失败语义：可重试异常发送 `NAK(delay)` 或不 ACK 等待 JetStream 的 `ack_wait` 到期重投；Worker 以 `last_delivery_sequence` 条件更新 Task attempt，避免同一 delivery 的并发处理重复计数。Worker 从 delivery metadata 读取投递次数；在最后一次允许投递中，必须先将 Task/Job 标记 `FAILED` 并记录错误，再 ACK，不能依赖 `max_deliver` 自动回写 MySQL。此时若 Document 有正式 `object_key` 且 Job 可重试，关联 IngestionFingerprint 置为 `FAILED_RETRYABLE`；没有正式对象的失败由 Finalizer 置为 `RELEASED`。另订阅 JetStream `MAX_DELIVERIES` advisory，由补偿器扫描并修复遗漏终态。取消在每个阶段 checkpoint 检查；收到已取消任务、或完成事务发现 cancellation/document fence 失配时，Worker 不再写成功而是创建系统版本清理 Job 后 ACK。不支持的文件类型直接 `FAILED` 并写清错误码。Worker 只有确认 MySQL 终态持久化、Elasticsearch 写入完成后才 ACK。
+失败语义：可重试异常发送 `NAK(delay)` 或不 ACK 等待 JetStream 的 `ack_wait` 到期重投；`delay` 必须随投递次数指数增长（`nats_retry_backoff_seconds` 为基数），不得以 0 延迟把可恢复失败立即回队。Worker 在单次投递执行期间必须按 `worker_keepalive_seconds`（小于 `ack_wait`）周期性续约投递，使长耗时文档摄取不会因 `ack_wait` 到期被判定超时并重复投递；未续约的重复投递会让同一文档被反复解析和向量化，在模型限流窗口内把可恢复失败放大为终态失败。Worker 以 `last_delivery_sequence` 条件更新 Task attempt，避免同一 delivery 的并发处理重复计数。Worker 从 delivery metadata 读取投递次数；在最后一次允许投递中，必须先将 Task/Job 标记 `FAILED` 并记录错误，再 ACK，不能依赖 `max_deliver` 自动回写 MySQL。此时若 Document 有正式 `object_key` 且 Job 可重试，关联 IngestionFingerprint 置为 `FAILED_RETRYABLE`；没有正式对象的失败由 Finalizer 置为 `RELEASED`。另订阅 JetStream `MAX_DELIVERIES` advisory，由补偿器扫描并修复遗漏终态。取消在每个阶段 checkpoint 检查；收到已取消任务、或完成事务发现 cancellation/document fence 失配时，Worker 不再写成功而是创建系统版本清理 Job 后 ACK。不支持的文件类型直接 `FAILED` 并写清错误码。Worker 只有确认 MySQL 终态持久化、Elasticsearch 写入完成后才 ACK。
+摄取进度必须由流水线按阶段上报：解析完成 5%，Embedding 期间按已完成 Chunk 数线性推进到 90%，写入索引后 95%，终态由完成事务写为 100%。进度只用于展示，写进度失败不得让摄取失败；进度写入必须带 `Task=RUNNING`、`Job` 未取消与「不回退」三个条件，取消或终态后不得再更新。
+Worker 的每一条 `ingestion_*`/`delivery_*` 事件必须包含可定位字段 `job_id`、`document_id`、`dataset_id`、`index_version`，失败事件还必须携带 `error_code` 与截断后的 `failure_message`；缺少这些字段就无法把一次失败关联回具体文档。关联字段来自条件认领结果（`TaskClaim`），不得只记录全局投递序号。
+
+外部模型调用（Embedding）的重试语义：可重试的 429 必须优先遵循提供方 `Retry-After`（秒数或 HTTP 日期），并叠加有上限的指数退避与抖动；退避基数以秒计（`INITIAL_RETRY_DELAY_SECONDS=1`、上限 `MAX_RETRY_DELAY_SECONDS=30`），0.1 秒级别的退避等同于没有限流保护。某个批次一旦收到 429，同一文档后续并发批次必须共享该节流窗口后再发请求。重试耗尽后的失败信息必须包含提供方 HTTP 状态码与结构化错误码（如 `Throttling.RateQuota`），但不得回显提供方的自由文本、请求正文或凭据。
 
 `RetryJob` 不把失败 Task 或 Job 从 `FAILED` 改回 `PENDING`：它创建带 `retry_of_job_id`、与原 Job 相同 `type` 的新 Job、对应 Task 与 OutboxEvent；旧 Job 永远保持原终态。重试摄取只能复用已存在的正式 `object_key`，因此其 OutboxEvent 直接为 `READY_TO_PUBLISH`；没有正式对象的初始上传失败不可通过 RetryJob 恢复，调用方必须重新上传。删除清理失败重建 `CLEANUP_DOCUMENT` Task，也直接 READY。若失败的是一次已有 `READY` Document 的重建，旧 `active_version` 在新版本完整写入并切换前持续可见；若没有旧成功版本，Document 状态为 `FAILED`。`DeleteDocument` 先在事务内将 Document 标记为 `DELETED`、创建 `DELETE_DOCUMENT` Job/`CLEANUP_DOCUMENT` Task/`READY_TO_PUBLISH` OutboxEvent，因而即使 Relay 或 Worker 暂停，检索也会立即被 MySQL 复核挡住。`DeleteDataset` 使用同一可靠路径，但因成功的最终状态是物理删除整个聚合，不能复用 `RetryJob`，也不能依赖保留的成功 Job 作为完成标记。
 
 ### 5.6 目标态：Go 后端 / Agent Harness 的问答执行流程
 
-2026-09-06 后续迭代：Embedding URL/模型/API Key/超时/Top-K 由个人设置写入 Go MySQL，API Key 加密存储，不再要求运行环境提供模型凭据。创建 Dataset 时 Go 将配置加密快照经 gRPC 传给 Python，Python MySQL 随 Dataset 持久化，Worker 与 Retrieve 使用同一快照。仅基础设施加密密钥通过只读 secret 提供给 Python，不将 API Key 放入 NATS/日志或返回前端。已有 Dataset 的模型与维度不变；空快照可经 BindEmbeddingProfile 在行锁下首次绑定匹配配置，已绑定快照不可被该 RPC 覆盖。当前 ES 索引为 1024 维，前端清楚标明并校验维度。修改个人配置影响之后创建的知识库，避免不同模型的向量混用。批量上传按单文件调用已有上传 RPC、每文件独立幂等键；目录仅展开文件，不改变 Python Task/Outbox 语义。Go 历史会话返回创建/最近消息时间并稳定倒序；前端右侧模态抽屉展示。回答 Markdown 禁止原始 HTML并清洗输出，引用证据保留原文。
+2026-09-06 后续迭代：Embedding URL/模型/API Key/超时/Top-K 由个人设置写入 Go MySQL，API Key 加密存储，不再要求运行环境提供模型凭据。创建 Dataset 时 Go 将配置加密快照经 gRPC 传给 Python，Python MySQL 随 Dataset 持久化，Worker 与 Retrieve 使用同一快照。仅基础设施加密密钥通过只读 secret 提供给 Python，不将 API Key 放入 NATS/日志或返回前端。已有 Dataset 的模型与维度不变；`BindEmbeddingProfile` 在 Dataset 行锁内校验二者匹配后，允许以当前个人设置覆盖加密快照，使保存新 Key 后的上传、重建和检索不会继续使用旧 Key。当前 ES 索引为 1024 维，前端清楚标明并校验维度。修改个人配置影响之后创建的知识库，并会更新模型与维度相同的既有知识库密钥快照，避免不同模型的向量混用。批量上传按单文件调用已有上传 RPC、每文件独立幂等键；目录仅展开文件，不改变 Python Task/Outbox 语义。Go 历史会话返回创建/最近消息时间并稳定倒序；会话的 `dataset_id` 仅记录最近一次选择，发送时可切换为任一当前归属且可用的知识库，因此已删除知识库的历史会话可继续使用其他知识库。回答 Markdown 禁止原始 HTML并清洗输出，引用证据保留原文。
 
 2026-09-06 产品控制面迭代开始实施：`backend/go-api` 使用独立 MySQL 保存个人用户、模型配置、资源所有权索引和会话，单用户拥有多个 Dataset，无租户角色。网络 API 使用根路径与 24 小时 JWT cookie。Go Agent 通过现有 `Retrieve` RPC 执行只读工具调用，绑定已鉴权 Dataset，限制轮数/时间并支持取消。知识库创建、文档管理和知识库删除均经 Python RPC；Go 不读写 Python 表。Embedding 已改为用户配置及 Dataset 加密快照。实施与验收记录见 `docs/development/live-product-plane.md`。
 
@@ -785,7 +795,17 @@ SSE 是 **Go 公网 Chat API 的事件契约**，事件格式：
 {"event":"error","data":{"code":"MODEL_UNAVAILABLE","message":"..."}}
 ```
 
-2026-09-14 产品 Go 的事件与配置契约扩展：Chat SSE 在每轮模型调用前增加可选 `context` 事件，即 `{"event":"context","data":{"estimatedTokens":N,"usableTokens":N,"budgetTokens":N,"evidenceCount":N,"evidenceLimit":N}}`，其中用量由既有的 `ContextBudget.UsedTokens` 估算且 `usableTokens = maxTokens - reserveTokens`；同一 Run 内用量与证据数都不变时不得重复发送。该事件只服务于前端"上下文接近预算"告警，不改变回答、引用、裁剪或停止语义，也不得携带问题原文、Evidence 正文或模型私有推理。设置页新增 `POST /settings/models/:kind/test`（`kind` 为 `chat`/`embedding`/`rerank`）：服务端用已保存配置发起一次最小探测——chat 为不带 `tools` 的单轮补全，embedding 校验返回向量维度与索引维度一致，rerank 按 `/rerank` 协议校验返回条数与结果下标——探测总时长上限 30 秒。未配置 Key 返回 `MODEL_NOT_CONFIGURED`，密钥解密失败返回 `KEY_UNAVAILABLE`，供应商错误以 HTTP 200 加 `{"ok":false,"latencyMs":N,"detail":"..."}` 返回且回显必须截断；API Key 与完整供应商响应不得进入响应体、日志或前端存储。
+2026-09-14 产品 Go 的事件与配置契约扩展：Chat SSE 在每次将要调用模型前增加可选 `context` 事件（包括 `modelPhase` 的工具选择轮与 `finalizePhase` 生成最终回答的那一轮，后者必须带检索后的证据数，否则占用告警只会看到检索前的估算），即 `{"event":"context","data":{"estimatedTokens":N,"usableTokens":N,"budgetTokens":N,"evidenceCount":N,"evidenceLimit":N}}`，其中用量由既有的 `ContextBudget.UsedTokens` 估算且 `usableTokens = maxTokens - reserveTokens`；同一 Run 内用量与证据数都不变时不得重复发送。该事件只服务于前端"上下文接近预算"告警，不改变回答、引用、裁剪或停止语义，也不得携带问题原文、Evidence 正文或模型私有推理。设置页新增 `POST /settings/models/:kind/test`（`kind` 为 `chat`/`embedding`/`rerank`）：服务端用已保存配置发起一次最小探测——chat 为不带 `tools` 的单轮补全，embedding 校验返回向量维度与索引维度一致，rerank 按 `/rerank` 协议校验返回条数与结果下标——探测总时长上限 30 秒。未配置 Key 返回 `MODEL_NOT_CONFIGURED`，密钥解密失败返回 `KEY_UNAVAILABLE`，供应商错误以 HTTP 200 加 `{"ok":false,"latencyMs":N,"detail":"..."}` 返回且回显必须截断；API Key 与完整供应商响应不得进入响应体、日志或前端存储。
+
+2026-09-16 登录入口的失败限流：`POST /auth/login` 必须按「客户端地址 + 归一化账号」限制失败尝试——窗口内（5 分钟）累计 10 次失败后封锁 15 分钟，返回 429 `TOO_MANY_ATTEMPTS` 并带 `Retry-After`，成功登录立即清零。限流必须发生在口令校验与数据库查询之前，否则攻击者仍可无成本地消耗哈希与查询；计数只保留在进程内存中，不落库、不记录口令。口令长度规则（8–128）保持不变，复杂度要求属于产品决策，不在本契约内。
+
+2026-09-16 上传大小的分层契约：上传上限在四处独立存在——产品 API 中间件的请求体上限（`PRODUCT_MAX_UPLOAD_BYTES`，默认 33 MiB，必须与 RAG 侧成对配置以避免入口比服务端更严或更松）、Go 客户端的流式上限（64 MiB，超过即停止传输）、RAG 的 `RAG_MAX_UPLOAD_BYTES`（生产 32 MiB）、边缘请求体上限（Caddy/nginx 70 MB）。任一层的拒绝对用户都必须表现为 413 `UPLOAD_TOO_LARGE`，而不是笼统的 502 `UPLOAD_FAILED`；实现必须同时识别产品入口的 `*http.MaxBytesError`（其文本为 `http: request body too large`）、RAG 的 `UPLOAD_TOO_LARGE` 业务码与流中断错误文本。上传失败必须留下 status/code/dataset/source_name/reason 观测日志（原因截断、不含正文与凭据），否则 502 无法定位。
+
+2026-09-16 产品 Go 的引用编号语义：EvidencePool 仍按「首次加入」分配稳定 ordinal，但 `finalizePhase` 必须按正文中引用首次出现的顺序把被引用项重新编号为连续的 1..n，并同步改写正文里的 `[n]` 标记；禁止只保留被引用项而不重编号，否则会出现 `[1][2][4]` 这类空洞，正文标记与来源卡片编号错位。流式过程中先按原编号呈现、`final` 事件以重编号后的正文覆盖是允许的。
+
+2026-09-16 产品 Go 的聊天入口语义：知识库一个文档都没有时，`POST /chat/stream` 必须直接返回固定说明（无引用、不调用模型、不触发检索），因为空库不可能检索到证据——生产实测空库提问会消耗 7 次模型调用与 5 次检索才回答「无法回答」。判据只取「文档数为 0」，不得把「文档都在处理中或失败」误判为空库。上传入口必须在建立 Job/Document 之前拒绝 0 字节文件（`EMPTY_FILE`），并把 RAG 的 `UPLOAD_TOO_LARGE` 映射为 413 `UPLOAD_TOO_LARGE` 而不是笼统的 502。作业失败原因必须按 RAG 的稳定错误码映射为面向用户的中文说明（未收录的码回退原始 message），前端只在 PENDING/RUNNING 展示进度。
+
+2026-09-16 产品 Go 的会话并发语义：会话 id 由客户端生成，服务端必须把它当作不可信输入。写会话行使用幂等 upsert（`ON DUPLICATE KEY UPDATE`）后按 `(id, user_id)` 读回，读不到即视为该 id 被其他用户占用并返回 404 `NOT_FOUND`，禁止把主键冲突暴露成 5xx——否则并发首条消息与使用他人会话 id 都会得到 503，且响应差异构成跨租户存在性探针。会话的并发运行锁必须按「用户 + 会话」隔离，只按会话 id 加锁会让不同用户互相阻塞。会话行只保存最近一次选择的知识库，历史会话可切换到任一可用知识库继续。
 
 2026-09-14 产品 Go 的降级语义：产品库（`resource_index`）与 RAG 元数据可能失配（例如 RAG MySQL 被重置后产品库仍保留文档与任务引用）。此时 `GET /datasets`、`GET /datasets/:id` 必须仍然返回 200：单个文档在 RAG 侧查不到任务时，文档标记 `stale=true` 且 `status=FAILED`，任务列表给出等价的合成条目，禁止因为一条陈旧引用就让整个知识库列表返回 502——否则用户会完全看不到并无法清理自己的知识库。stale 文档不纳入批量重试，用户应删除后重新上传；产品库与 RAG 的真实一致性仍由重新上传与删除流程恢复。
 

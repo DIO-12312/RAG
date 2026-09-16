@@ -61,11 +61,30 @@ func (s *Store) Migrate(ctx context.Context) error {
 			}
 		}
 	}
+	if e = s.migrateConversationMessageDataset(ctx, conn); e != nil {
+		return e
+	}
 	_, e = conn.ExecContext(ctx, "INSERT IGNORE INTO schema_migrations(version) VALUES(1)")
 	if e != nil {
 		return e
 	}
 	return nil
+}
+
+// migrateConversationMessageDataset preserves old conversations while making each
+// message belong to the knowledge base selected when it was created.
+func (s *Store) migrateConversationMessageDataset(ctx context.Context, conn *sql.Conn) error {
+	var exists int
+	if e := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='conversation_messages' AND column_name='dataset_id'").Scan(&exists); e != nil {
+		return e
+	}
+	if exists == 0 {
+		if _, e := conn.ExecContext(ctx, "ALTER TABLE conversation_messages ADD COLUMN dataset_id VARCHAR(64) NOT NULL DEFAULT '' AFTER conversation_id, ADD INDEX conversation_dataset(conversation_id,dataset_id)"); e != nil {
+			return e
+		}
+	}
+	_, e := conn.ExecContext(ctx, "UPDATE conversation_messages m JOIN conversations c ON c.id=m.conversation_id SET m.dataset_id=c.dataset_id WHERE m.dataset_id='' ")
+	return e
 }
 
 type User struct {

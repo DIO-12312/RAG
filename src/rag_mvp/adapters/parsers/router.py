@@ -7,8 +7,10 @@ from pathlib import Path
 from rag_mvp.adapters.parsers.chi import ChiParser
 from rag_mvp.adapters.parsers.chm import ChmLibExtractor, ChmParser
 from rag_mvp.adapters.parsers.code import CodeParser
+from rag_mvp.adapters.parsers.image_ocr import TesseractImageOcr
 from rag_mvp.adapters.parsers.markdown import MarkdownParser
 from rag_mvp.adapters.parsers.pdf import PdfParser
+from rag_mvp.adapters.parsers.pptx import PptxParser
 from rag_mvp.adapters.parsers.text import TextParser
 from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.ports.parser import ParsedSegment, Parser, PdfParserMode
@@ -24,6 +26,11 @@ class SourceParserRouter:
         chm_max_files: int = 8192,
         chm_max_topics: int = 4096,
         chm_max_expanded_bytes: int = 128 * 1024 * 1024,
+        pptx_ocr_enabled: bool = True,
+        pptx_ocr_language: str = "chi_sim+eng",
+        pptx_ocr_timeout_seconds: float = 60.0,
+        pptx_ocr_max_images_per_slide: int = 8,
+        pptx_ocr_max_image_bytes: int = 8 * 1024 * 1024,
         pdf_parser_mode: PdfParserMode = PdfParserMode.AUTO,
         pdf_native_text_min_chars_per_page: int = 40,
         pdf_ocr_language: str = "chi_sim+eng",
@@ -35,6 +42,7 @@ class SourceParserRouter:
         chm_parser: Parser | None = None,
         chi_parser: Parser | None = None,
         pdf_parser: Parser | None = None,
+        pptx_parser: Parser | None = None,
     ) -> None:
         text = TextParser()
         markdown = MarkdownParser()
@@ -60,6 +68,14 @@ class SourceParserRouter:
             max_topics=chm_max_topics,
         )
         chi = chi_parser or ChiParser(extractor)
+        pptx = pptx_parser or PptxParser(
+            max_slides=pdf_max_pages,
+            image_ocr=TesseractImageOcr() if pptx_ocr_enabled else None,
+            ocr_language=pptx_ocr_language,
+            ocr_timeout_seconds=pptx_ocr_timeout_seconds,
+            ocr_max_images_per_slide=pptx_ocr_max_images_per_slide,
+            ocr_max_image_bytes=pptx_ocr_max_image_bytes,
+        )
         self._parsers: dict[str, Parser] = {
             ".txt": text,
             ".md": markdown,
@@ -69,6 +85,7 @@ class SourceParserRouter:
             ".ts": code,
             ".java": code,
             ".pdf": pdf,
+            ".pptx": pptx,
             ".chm": chm,
             ".chi": chi,
         }

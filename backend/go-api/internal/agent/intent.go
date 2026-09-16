@@ -25,6 +25,11 @@ const ordinaryReplyTailLimit = 8
 // knowledgeMarkerPattern 标识知识问句或新增事实需求；命中即不得因问候前缀跳过检索。
 var knowledgeMarkerPattern = regexp.MustCompile(`(怎么|如何|什么|啥|哪|多少|为什么|是否|另外|还有|顺便|告诉我|帮我|查一下|配置|参数|最大值|最小值|版本|超时|timeout)`)
 
+// selectedKnowledgeBasePattern 表示用户正在询问当前已选择的知识库本身。
+// “这个知识库的内容是什么”里的“这个”不是需要回看历史的代词，不能被误判为
+// 指代不清而中断检索。
+var selectedKnowledgeBasePattern = regexp.MustCompile(`^(这个|当前|本)?(知识库|资料库|文档库|资料)(的)?`)
+
 // normalizeOrdinaryMessage 只做稳定且可解释的规范化：去空白与常见标点，再去掉末尾语气词。
 func normalizeOrdinaryMessage(text string) string {
 	trimmed := strings.TrimSpace(text)
@@ -72,6 +77,12 @@ func RouteIntent(question string, history []Message) IntentResult {
 		}
 	}
 
+	// 当前知识库是 UI 已明确绑定的对象。即使没有聊天历史，也应检索资料来回答
+	// 内容概览、覆盖范围等问题，而不是要求用户再指定对象。
+	if selectedKnowledgeBasePattern.MatchString(q) {
+		return IntentResult{Intent: "knowledge", Action: "retrieve", StandaloneQuery: q}
+	}
+
 	// 已有回答加工
 	// 已有回答加工
 	if strings.Contains(q, "上一条") &&
@@ -103,7 +114,6 @@ func RouteIntent(question string, history []Message) IntentResult {
 	// 上下文追问 / 歧义指代
 	if strings.HasPrefix(q, "那") ||
 		strings.HasPrefix(q, "它") ||
-		strings.HasPrefix(q, "这个") ||
 		strings.HasPrefix(q, "这种") {
 
 		previousQuestion := ""

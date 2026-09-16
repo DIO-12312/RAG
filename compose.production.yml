@@ -11,7 +11,7 @@ x-rag-environment: &rag-environment
   RAG_ELASTICSEARCH_CA_CERT: /run/secrets/ca.pem
   RAG_NATS_URL: nats://nats:4222
   RAG_OBJECT_ROOT: /app/data/objects
-  RAG_MAX_UPLOAD_BYTES: ${RAG_MAX_UPLOAD_BYTES:-33554432}
+  RAG_MAX_UPLOAD_BYTES: ${RAG_MAX_UPLOAD_BYTES:-67108864}
   RAG_MODEL_ENCRYPTION_KEY_FILE: /run/model-keys/encryption.key
 
 x-search-guard-node-secrets: &search-guard-node-secrets
@@ -302,6 +302,9 @@ services:
     entrypoint: ["/bin/sh", "-ec", "export PRODUCT_MYSQL_DSN=\"$$(cat /run/secrets/product_mysql_dsn)\"; exec product"]
     environment:
       PRODUCT_HTTP_ADDR: 0.0.0.0:8080
+      # 单文件上限的唯一来源：必须与 RAG_MAX_UPLOAD_BYTES 一致，且入口会额外留 1 MiB
+      # multipart 余量。前端通过 /me 展示并校验同一数值。
+      PRODUCT_MAX_UPLOAD_BYTES: ${PRODUCT_MAX_UPLOAD_BYTES:-67108864}
       PRODUCT_ORIGIN: ${RAG_PUBLIC_ORIGIN:-http://49.235.110.118}
       PRODUCT_RAG_TARGET: rag-server:50051
       PRODUCT_KEY_DIR: /run/model-keys
@@ -331,7 +334,11 @@ services:
 
   web:
     image: ${WEB_IMAGE:?set WEB_IMAGE in .env.production}
-    build: apps/web
+    build:
+      context: apps/web
+      # 页面侧栏的版本徽标来自该构建参数；缺失会显示 unknown，无法确认线上是哪次提交。
+      args:
+        VITE_GIT_COMMIT: ${VITE_GIT_COMMIT:-unknown}
     depends_on:
       api: {condition: service_healthy}
     networks: [edge]
@@ -355,13 +362,22 @@ services:
     restart: unless-stopped
 
 networks:
+  # 三个网络都必须固定子网：只给 edge 固定时，先创建的 egress/backend
+  # 会被自动分配到 172.19.0.0/16，随后 edge 因网段重叠创建失败，
+  # 于是「容器全停后按发布记录恢复」（boot-start.sh）必然失败。
   edge:
     ipam:
       config:
         - subnet: 172.19.0.0/16
-  egress: {}
+  egress:
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
   backend:
     internal: true
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
 
 volumes:
   rag-mysql-data: {}

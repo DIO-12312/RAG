@@ -11,6 +11,7 @@ import (
 	"rag-mvp/backend/go-api/internal/ragclient"
 	"rag-mvp/backend/go-api/internal/security"
 	"rag-mvp/backend/go-api/internal/storage"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,9 @@ type Server struct {
 	EmbeddingDimension uint32
 	AllowLocalModels   bool
 	authSlots          chan struct{}
+	limitOnce          sync.Once
+	logins             *loginLimiter
+	loginsByIP         *loginLimiter
 	mu                 sync.Mutex
 	runs               map[string]bool
 }
@@ -34,6 +38,15 @@ type Server struct {
 func fail(c *gin.Context, status int, code, message string) {
 	c.AbortWithStatusJSON(status, gin.H{"code": code, "message": message})
 }
+
+// bodyLimitBytes 返回请求体上限：单文件上限之上留 1 MiB 给 multipart 边界与字段。
+// 入口上限必须严格大于文件上限，否则用户会在"界面允许、入口拒绝"之间踩坑；
+// 该值随 ragclient.MaxUploadBytes() 一起生效，前端展示的也是同一个文件上限。
+func bodyLimitBytes() int64 {
+	return ragclient.MaxUploadBytes() + 1<<20
+}
+
+// uid 返回认证中间件写入的用户标识。
 func uid(c *gin.Context) string { return c.GetString("user") }
 func (s *Server) Router() *gin.Engine {
 	s.authSlots = make(chan struct{}, 4)
@@ -43,7 +56,7 @@ func (s *Server) Router() *gin.Engine {
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
 		c.Writer.Header().Set("Cache-Control", "no-store")
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 33<<20)
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, bodyLimitBytes())
 		if c.Request.Method != "GET" && c.Request.Method != "HEAD" {
 			origin := c.GetHeader("Origin")
 			if origin != "" && origin != s.Origin {
@@ -72,7 +85,8 @@ func (s *Server) Router() *gin.Engine {
 			fail(c, 401, "AUTH_EXPIRED", "请重新登录。")
 			return
 		}
-		c.JSON(200, u)
+		// 前端据此展示并校验单文件上限，避免界面承诺值与服务端实际限制漂移。
+		c.JSON(200, gin.H{"id": u.ID, "email": u.Email, "language": u.Language, "maxUploadBytes": ragclient.MaxUploadBytes()})
 	})
 	a.POST("/auth/logout", s.logout)
 	a.GET("/settings", s.settings)
@@ -174,6 +188,22 @@ func (s *Server) login(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// 失败限流必须先于任何口令校验：否则攻击者可以用无效账号探测，
+	// 且数据库/哈希开销不受限制。
+	key := loginKey(c.ClientIP(), email)
+	ipKey := loginKey(c.ClientIP(), "")
+	limiter := s.limiter()
+	ipLimiter := s.ipLimiter()
+	if wait := limiter.retryAfter(key, time.Now()); wait > 0 {
+		c.Header("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		fail(c, 429, "TOO_MANY_ATTEMPTS", "登录尝试过于频繁，请稍后再试。")
+		return
+	}
+	if wait := ipLimiter.retryAfter(ipKey, time.Now()); wait > 0 {
+		c.Header("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		fail(c, 429, "TOO_MANY_ATTEMPTS", "登录尝试过于频繁，请稍后再试。")
+		return
+	}
 	defer func() { <-s.authSlots }()
 	u, e := s.Store.User(c.Request.Context(), email)
 	if e != nil && !errors.Is(e, sql.ErrNoRows) {
@@ -182,13 +212,18 @@ func (s *Server) login(c *gin.Context) {
 	}
 	if e != nil {
 		security.Hash(password)
+		limiter.fail(key, time.Now())
+		ipLimiter.fail(ipKey, time.Now())
 		fail(c, 401, "INVALID_CREDENTIALS", "邮箱或密码错误。")
 		return
 	}
 	if !security.Verify(password, u.Hash) {
+		limiter.fail(key, time.Now())
+		ipLimiter.fail(ipKey, time.Now())
 		fail(c, 401, "INVALID_CREDENTIALS", "邮箱或密码错误。")
 		return
 	}
+	limiter.reset(key)
 	s.session(c, u)
 }
 func (s *Server) logout(c *gin.Context) {

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 # 验证 NATS delivery 的认领、ACK/NAK、取消与重复投递控制。
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
+from structlog.testing import capture_logs
 
 from rag_mvp.adapters.chunkers.recursive import RecursiveChunker
 from rag_mvp.adapters.parsers.text import TextParser
@@ -33,6 +35,20 @@ class FailingModelGateway(FakeModelGateway):
         """模拟文本向量化并返回确定性向量。"""
         del texts
         raise ConnectionError("model unavailable")
+
+
+class SlowModelGateway(FakeModelGateway):
+    """模拟耗时较长的向量化，用于验证投递续约。"""
+
+    def __init__(self, delay_seconds: float, dimension: int) -> None:
+        """记录延迟时长与向量维度。"""
+        super().__init__(dimension)
+        self._delay_seconds = delay_seconds
+
+    async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
+        """等待指定时长后返回确定性向量。"""
+        await asyncio.sleep(self._delay_seconds)
+        return await super().embed(texts)
 
 
 class FailingDatasetCleanupSearch(FakeSearchEngine):
@@ -226,6 +242,173 @@ async def test_worker_naks_retryable_failure_then_fails_at_delivery_limit() -> N
     assert job.retryable is True
     assert task.status is TaskStatus.FAILED
     assert queue.acked_task_ids == [task.id]
+
+
+@pytest.mark.asyncio
+async def test_retryable_failure_naks_with_growing_backoff_delay() -> None:
+    """可恢复失败必须带退避延迟重投，而不是立刻回队再次冲击限流中的提供方。"""
+    now = datetime.now(UTC)
+    repository = FakeMetadataRepository()
+    storage = FakeObjectStorage()
+    queue = FakeTaskQueue()
+    documents = DocumentService(repository, storage, max_upload_bytes=1024)
+    await documents.create_dataset(
+        CreateDatasetCommand("trace", "create", "Docs", "fake", 8, now, "dataset-1")
+    )
+    await documents.submit_document(
+        SubmitDocumentCommand(
+            "trace",
+            "submit",
+            "dataset-1",
+            "guide.txt",
+            b"hello retrieval",
+            None,
+            None,
+            "text-v1",
+            800,
+            120,
+            "fake",
+            now,
+        )
+    )
+    await finalize_once(repository, storage, now, limit=10)
+    await relay_once(repository, queue, now, limit=10)
+    ingestion = IngestionService(
+        repository,
+        IngestionPipeline(
+            storage,
+            TextParser(),
+            RecursiveChunker(800, 120),
+            FailingModelGateway(8),
+            FakeSearchEngine(),
+        ),
+    )
+
+    assert await worker_once(
+        queue,
+        repository,
+        ingestion,
+        "worker-1",
+        now,
+        max_deliveries=3,
+        retry_backoff_seconds=3.0,
+    )
+    assert await worker_once(
+        queue,
+        repository,
+        ingestion,
+        "worker-2",
+        now,
+        max_deliveries=3,
+        retry_backoff_seconds=3.0,
+    )
+
+    assert queue.nak_delays == [3.0, 6.0]
+
+
+@pytest.mark.asyncio
+async def test_worker_events_carry_job_document_and_dataset_ids() -> None:
+    """投递事件必须带关联字段，否则失败日志无法定位到具体文档。"""
+    now = datetime.now(UTC)
+    repository = FakeMetadataRepository()
+    storage = FakeObjectStorage()
+    queue = FakeTaskQueue()
+    documents = DocumentService(repository, storage, max_upload_bytes=1024)
+    await documents.create_dataset(
+        CreateDatasetCommand("trace", "create", "Docs", "fake", 8, now, "dataset-1")
+    )
+    submitted = await documents.submit_document(
+        SubmitDocumentCommand(
+            "trace",
+            "submit",
+            "dataset-1",
+            "guide.txt",
+            b"hello retrieval",
+            None,
+            None,
+            "text-v1",
+            800,
+            120,
+            "fake",
+            now,
+        )
+    )
+    await finalize_once(repository, storage, now, limit=10)
+    await relay_once(repository, queue, now, limit=10)
+    ingestion = IngestionService(
+        repository,
+        IngestionPipeline(
+            storage,
+            TextParser(),
+            RecursiveChunker(800, 120),
+            FailingModelGateway(8),
+            FakeSearchEngine(),
+        ),
+    )
+
+    with capture_logs() as logs:
+        assert await worker_once(queue, repository, ingestion, "worker-1", now, max_deliveries=1)
+
+    failed = [entry for entry in logs if entry["event"] == "ingestion_failed"]
+    assert len(failed) == 1
+    assert failed[0]["job_id"] == submitted.job_id
+    assert failed[0]["dataset_id"] == "dataset-1"
+    assert failed[0]["document_id"] == submitted.document_id
+    assert failed[0]["error_code"] == "INGESTION_RETRYABLE"
+    assert "model unavailable" in str(failed[0]["failure_message"])
+
+
+@pytest.mark.asyncio
+async def test_slow_ingestion_keeps_the_delivery_alive() -> None:
+    """长耗时摄取必须周期续约投递，避免 ack_wait 到期触发重复投递。"""
+    now = datetime.now(UTC)
+    repository = FakeMetadataRepository()
+    storage = FakeObjectStorage()
+    queue = FakeTaskQueue()
+    documents = DocumentService(repository, storage, max_upload_bytes=1024)
+    await documents.create_dataset(
+        CreateDatasetCommand("trace", "create", "Docs", "fake", 8, now, "dataset-1")
+    )
+    await documents.submit_document(
+        SubmitDocumentCommand(
+            "trace",
+            "submit",
+            "dataset-1",
+            "guide.txt",
+            b"hello retrieval",
+            None,
+            None,
+            "text-v1",
+            800,
+            120,
+            "fake",
+            now,
+        )
+    )
+    await finalize_once(repository, storage, now, limit=10)
+    await relay_once(repository, queue, now, limit=10)
+    ingestion = IngestionService(
+        repository,
+        IngestionPipeline(
+            storage,
+            TextParser(),
+            RecursiveChunker(800, 120),
+            SlowModelGateway(0.05, 8),
+            FakeSearchEngine(),
+        ),
+    )
+
+    assert await worker_once(
+        queue,
+        repository,
+        ingestion,
+        "worker-1",
+        now,
+        keepalive_interval_seconds=0.01,
+    )
+
+    assert queue.in_progress_deliveries
+    assert queue.acked_task_ids
 
 
 @pytest.mark.asyncio

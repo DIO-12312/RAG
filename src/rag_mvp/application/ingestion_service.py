@@ -15,6 +15,12 @@ class IngestionExecution:
     claimed: bool
     completed: bool
     failure: DomainFailure | None = None
+    # 认领结果携带的关联字段：Worker 是唯一记录投递结果的位置，
+    # 没有这些字段就无法把一条失败日志定位到具体的 Job/Document。
+    job_id: str | None = None
+    document_id: str | None = None
+    dataset_id: str | None = None
+    index_version: int | None = None
 
 
 class IngestionService:
@@ -34,24 +40,45 @@ class IngestionService:
         if claim is None:
             return IngestionExecution(claimed=False, completed=False)
 
+        def result_of(
+            *,
+            completed: bool,
+            failure: DomainFailure | None = None,
+        ) -> IngestionExecution:
+            """带上本次认领的关联字段，供 Worker 记录可定位的日志。"""
+
+            return IngestionExecution(
+                claimed=True,
+                completed=completed,
+                failure=failure,
+                job_id=claim.job.id,
+                document_id=claim.document.id if claim.document is not None else None,
+                dataset_id=claim.dataset.id,
+                index_version=claim.job.index_version,
+            )
+
+        async def report(progress: float) -> None:
+            """把流水线阶段进度写回 Job，让长耗时摄取对用户可见。"""
+
+            await self._metadata.set_job_progress(task_id, progress, now)
+
         try:
-            chunks = await self._pipeline.execute(claim)
+            chunks = await self._pipeline.execute(claim, on_progress=report)
         except DomainError as error:
             if not error.failure.retryable:
                 await self._metadata.fail_task(task_id, error.failure, now)
-            return IngestionExecution(claimed=True, completed=False, failure=error.failure)
+            return result_of(completed=False, failure=error.failure)
         except Exception as error:
             failure = DomainFailure(
                 code="INGESTION_RETRYABLE",
                 message=str(error) or type(error).__name__,
                 retryable=True,
             )
-            return IngestionExecution(claimed=True, completed=False, failure=failure)
+            return result_of(completed=False, failure=failure)
 
         if await self._metadata.complete_ingestion(task_id, chunks, now):
-            return IngestionExecution(claimed=True, completed=True)
-        return IngestionExecution(
-            claimed=True,
+            return result_of(completed=True)
+        return result_of(
             completed=False,
             failure=DomainFailure(
                 code="COMPLETION_FENCE_MISMATCH",

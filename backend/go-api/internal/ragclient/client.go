@@ -2,10 +2,12 @@ package ragclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"io"
+	"os"
 	"rag-mvp/backend/go-api/internal/agent"
 	pb "rag-mvp/backend/go-api/internal/ragpb"
 	"rag-mvp/backend/go-api/internal/security"
@@ -38,11 +40,42 @@ func New(target string) (*Client, error) {
 func Context(key string) *pb.RequestContext {
 	return &pb.RequestContext{RequestId: security.ID(), IdempotencyKey: key}
 }
+
+// ErrUploadTooLarge 表示流式上传在客户端侧就超过了硬上限：继续传输只会被服务端整体拒绝，
+// 因此提前终止，并让调用方与 RAG 侧 UPLOAD_TOO_LARGE 一样映射为 413。
+var ErrUploadTooLarge = errors.New("upload exceeds client-side streaming limit")
+
+// defaultMaxUploadBytes 是单文件上限的默认值（64 MiB）。产品 API 的请求体上限与前端展示
+// 都必须以同一个值为准：此前 API 中间件硬编码 33 MiB，比界面承诺的 64 MB 更严，
+// 用户选中的 41 MB PPTX 在到达 RAG 之前就被拒绝。
+const defaultMaxUploadBytes = 64 << 20
+
+// MaxUploadBytes 返回允许上传的最大文件字节数；PRODUCT_MAX_UPLOAD_BYTES 覆盖默认值。
+func MaxUploadBytes() int64 {
+	if raw := os.Getenv("PRODUCT_MAX_UPLOAD_BYTES"); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return defaultMaxUploadBytes
+}
+
+// BusinessError 保留 RAG 侧的稳定错误码，使调用方能按码映射 HTTP 语义
+// （例如把 UPLOAD_TOO_LARGE 映射为 413 而不是笼统的 502）。
+type BusinessError struct {
+	Code    string
+	Message string
+}
+
+func (e *BusinessError) Error() string {
+	return fmt.Sprintf("RAG %s: %s", e.Code, e.Message)
+}
+
 func Error(e *pb.BusinessError) error {
 	if e == nil {
 		return nil
 	}
-	return fmt.Errorf("RAG %s: %s", e.Code, e.Message)
+	return &BusinessError{Code: e.Code, Message: e.Message}
 }
 func (c *Client) Create(ctx context.Context, name, model string, dim uint32, key string, profiles ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -115,8 +148,8 @@ func (c *Client) Upload(ctx context.Context, dataset, name, key string, file io.
 		n, err := file.Read(buf)
 		if n > 0 {
 			total += n
-			if total > 32*1024*1024 {
-				return nil, fmt.Errorf("upload exceeds 32 MB")
+			if int64(total) > MaxUploadBytes() {
+				return nil, ErrUploadTooLarge
 			}
 			if e = stream.Send(&pb.UploadDocumentRequest{Payload: &pb.UploadDocumentRequest_Data{Data: buf[:n]}}); e != nil {
 				return nil, e

@@ -4,6 +4,29 @@
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
 
+| `tests/contract/test_build_entrypoints.py::test_production_compose_pins_every_network_subnet` | 生产 Compose 的 edge/egress/backend 三个网络都必须固定子网且互不重复，backend 保持 internal；同时固定恢复入口 boot-start.sh 的 `--pull never` 与发布记录依赖，避免容器全停后恢复因网段重叠失败。 |
+
+### 2026-09-16 演示文稿截图文字进入检索
+
+| 文件 / 用例 | 职责与运行边界 |
+|---|---|
+| `tests/unit/ingestion/test_multiformat_parsers.py::test_pptx_parser_merges_slide_image_text_with_slide_provenance` | 幻灯片引用的点阵图片文字并入该页来源段并保留页码；同一素材跨页复用只识别一次。Fake OCR 引擎，不依赖真实 Tesseract。 |
+| 同上 `::test_pptx_parser_skips_vector_images_and_failed_ocr` | EMF 等矢量目标不送 OCR；识别抛错时仍按幻灯片正文成功入库且不写入图片来源标记。 |
+| 同上 `::test_pptx_parser_honours_image_limits_without_ocr_engine` | 未配置引擎、`max_images=0` 或单图超限时都不产生额外文字。 |
+| 同上 `::test_normalize_image_text_drops_layout_noise` | OCR 结果去除排版空白与无意义符号行，保留可检索文字。 |
+| `src/rag_mvp/adapters/parsers/image_ocr.py` | 复用 Tesseract 的图片识别边界；识别不可用、超时或非零退出都返回空字符串，由调用方保证软失败。 |
+
+### 2026-09-16 会话正文文字颜色一致性
+
+```text
+apps/web/tests/
+└─ text-color.spec.ts  # 弱化色不得命中会话正文的样式契约
+```
+
+| 文件 | 用例 / 职责 | 运行边界 |
+|---|---|---|
+| `apps/web/tests/text-color.spec.ts` | `does not dim prose paragraphs inside chat messages`：禁止裸 `article p` 弱化规则，要求弱化色只作用于 `article:not(.chat-message) p`；`pins chat Markdown prose to the body text color`：要求 `.chat-message .markdown-content` 显式使用正文色 | Vitest/jsdom 读取 `src/styles/global.css` 断言样式契约；jsdom 不计算层叠，不替代浏览器验收 |
+
 ### 2026-09-15 已索引文档主动重新索引与 Agent 运行限制
 
 | 文件 / 用例 | 职责与运行边界 |
@@ -15,7 +38,7 @@
 | `backend/go-api/internal/ragclient/client_test.go::TestReindexDocumentForwardsIdempotentCommand`、`TestReindexDocumentRejectsBusinessErrorAndMissingResult` | 验证 Go 控制面正确转发主动重建命令，并对业务错误和缺失结果 fail closed。 |
 | `apps/web/tests/dataset-batch.spec.ts` | 验证单个及批量已索引文档可发起重新索引，并展示已受理数量。 |
 | `apps/web/tests/api-contracts.spec.ts` | 验证前端重新索引路由与 Go API 路径一致。 |
-| `backend/go-api/internal/agent/*_test.go` | 验证模型调用次数仅用于观测而不再硬性终止；检索轮次、工具、Evidence 与上下文容量仍有界，但容量耗尽通过截断/压缩收敛而不是把正常问答判为失败；重复查询会收敛到最终回答。 |
+| `backend/go-api/internal/agent/*_test.go` | 验证模型调用次数仅用于观测而不再硬性终止；检索轮次、工具、Evidence 与上下文容量仍有界，但容量耗尽通过截断/压缩收敛而不是把正常问答判为失败；重复查询会收敛到最终回答。`TestRouteIntentBoundaries` 覆盖当前知识库概览不得误判为指代不清，`TestSystemPromptGuidesEvidenceBoundariesWithoutConfidenceScores` 固定主提示词的证据与置信度边界。 |
 
 ### 2026-09-13 开发环境 Make 入口
 
@@ -26,7 +49,8 @@
 | `tests/unit/ingestion/test_multiformat_parsers.py::test_non_pdf_formats_do_not_fabricate_printed_page_numbers` | 非 PDF 输入不伪造印刷页码，离线解析测试 |
 | `backend/go-api/internal/ragclient/client_test.go::TestRetrieveDisplaysPrintedAndPhysicalPDFPages`、`TestRetrieveFallsBackToPhysicalPDFPageWithoutPrintedFooter` | 兼容历史双页码 metadata，新结果无印刷页码时回退物理页；离线 Go RPC 替身 |
 
-2026-09-14 合并说明：Agent 与 PDF 冲突采用 `merge-feature-into-main` 的状态机、ToolPolicy 和 pdfminer 实现及配套测试。旧 `multiQueryModel`、`expandingRetriever`、`TestParallelToolCallsShareEvidenceBudgetWithoutFailing` 由该分支 evidence pool/runtime 预算测试覆盖替代；旧 `_fragmented_pdf_with_printed_page` 和 `test_deepdoc_pdf_uses_word_coordinates_and_records_printed_page_number` 随 pdfplumber 路径移除，当前解析器不生成印刷页码。目录仍使用既有 `backend/go-api/internal/agent/*_test.go`、`tests/unit/ingestion/test_pdf_deepdoc_parser.py`；Python 离线检查及 Go/前端测试通过 `make release-check` 验证，不替代真实模型或 PDF 质量验收。
+2026-09-16 目录噪声过滤：`source-router-v11`（此前 v10）在切块阶段丢弃纯目录/索引导引点段落，避免目录条目成为证据与引用；ZRDDS PDF 实测移除 93 个目录 Chunk，CHM/CHI 分段不受影响。
+2026-09-15 PDF 索引回退说明：`source-router-v10`（此前 v9）恢复 CHM3 验证过的 pdfplumber 词级坐标与版面分段路径，同时保留页脚印刷页码、物理页码、OCR、重复页眉页脚过滤和来源 bbox。`tests/unit/ingestion/test_pdf_deepdoc_parser.py` 覆盖标题、表格、OCR、页码与 CHM3 风格分段；Python 离线检查只验证确定性结构，不替代真实 ZRDDS PDF 重新索引后的人工质量验收。
 
 main 中无冲突的展示兼容仍保留：`tests/unit/retrieval/test_provenance.py` 的 `test_pdf_evidence_repairs_false_tables_and_emits_valid_markdown_tables` 与 `apps/web/tests/markdown-content.spec.ts` 的历史 PDF 修复用例验证展示投影；`backend/go-api/internal/ragclient/client_test.go` 的双页码及物理页回退用例验证历史 metadata 兼容；`tests/unit/ingestion/test_multiformat_parsers.py` 与 CHM/CHI 测试继续保证非 PDF 来源不伪造页码。这些均为离线测试，不要求新解析器产出印刷页码。
 
@@ -103,6 +127,11 @@ production-baseline/production-deploy/production-recover；仍校验 Earthfile �
 | 测试文件 / 函数 | 职责与运行边界 |
 | --- | --- |
 | `contract/test_release_deployment.py::test_release_success_persists_previous_and_never_recreates_infrastructure` | 发布状态持久化、只更新应用、不触发迁移或基础设施重建 |
+| 同上 | `test_network_subnet_drift_is_refused_before_stopping_anything` | 运行中网络子网与目标配置声明不一致时必须先拒绝：不写 pending、不 stop、不 up，生产保持原状 |
+| 同上 | `test_matching_or_missing_networks_pass_the_preflight` | 子网一致、网络尚未创建、或未固定子网的网络都不触发误拦 |
+| `contract/test_release_deployment.py::test_restart_only_projection_ignores_env_and_build_but_keeps_infrastructure` | Compose 兼容性摘要投影：只改 env/build 不改变摘要，volumes/ports 变化必须改变摘要 |
+| `contract/test_release_deployment.py::test_restart_only_projection_keeps_every_infrastructure_key_of_real_compose` | 生产 Compose 投影后仍是合法 YAML，只丢弃 `build`/`environment`/`env_file`/`labels`，服务集合与顶层 volumes/networks/secrets/configs 不变 |
+| `contract/test_release_deployment.py::test_compatibility_digest_moves_only_for_infrastructure_changes` | `compatibility()` 对 env 默认值变化保持摘要不变，对持久基础设施变化必须更换摘要 |
 | `contract/test_release_deployment.py::test_legacy_fingerprint_allows_safe_application_only_transition` | 旧摘要仅在生产 SHA 属于清单列出的同维护敏感文件树祖先时迁移到新版摘要；不得跨越数据库或基础设施变化 |
 | `test_release_failure_restores_images_and_preserves_active_state` | 拉取、部分更新、代理 reload 失败的回退，拉取失败不停止应用 |
 | `test_failed_rollback_keeps_journal_for_next_recovery` | 回退再次失败保留 journal，下次恢复旧镜像 |
@@ -144,10 +173,10 @@ apps/web/tests/
 | `contract/test_build_entrypoints.py` | `test_web_restart_only_rebuilds_web_through_earthly`：执行 Make recipe 与 Earthfile RUN 的命令替身，验证仅重新构建/重建 web、静默校验 Compose、不启动依赖或删除卷 | 离线 sh；GNU Make 转发另用 make -n 检查；不实际重启 Docker，不替代真实容器验收 |
 | `contract/test_container_artifacts.py` | Runtime 不再注入 Embedding 凭据，只读共享基础设施密钥；旧模型环境变量只用于显式模型测试 | `make ci` |
 | `integration/test_mysql_migrations.py` | 升级至 0003，加密快照列可空以兼容旧 Dataset | 必须隔离测试库，fixture 会清空业务表 |
-| `integration/test_mysql_submission.py` | `test_embedding_binding_is_first_write_only`：原模型不匹配拒绝、并发首次绑定收敛、后续配置不能覆盖快照 | 真实隔离 MySQL |
+ | `integration/test_mysql_submission.py` | `test_embedding_binding_refreshes_key_snapshot_but_keeps_vector_space`：同模型同维度可刷新加密 Key 快照，不匹配的模型或维度拒绝 | 真实隔离 MySQL |
 | `embedding_profile.py`、`e2e/conftest.py`、`resilience/docker/conftest.py` | `encrypted_test_profile` 使用测试专用凭据和共享加密密钥组装创建请求；无密钥路径则保持独立旧模式 | 显式真实模型测试；不打印密钥 |
 
-前端测试位于 `apps/web/tests/`：原 `upload-panel.spec.ts` 替换为 `batch-upload.spec.ts`（三项：独立失败重试/固定幂等键、文件夹展开与过滤、CHM/CHI 文件接纳）；新增 `markdown-content.spec.ts`（结构化渲染/流式更新、XSS与远程图片防护）。它们经 `npm test -- --run` 执行，不包含在 Python 门禁中。Go `TestLiveProductFlow` 通过真实 MySQL/gRPC/Worker/Embedding 验证保存配置、摄取、检索、会话时间与用户隔离；Chat 使用确定性测试供应商，除非显式启用真实 Chat。
+前端测试位于 `apps/web/tests/`：原 `upload-panel.spec.ts` 替换为 `batch-upload.spec.ts`（独立失败重试/固定幂等键、文件夹展开与过滤、PPTX/CHM/CHI 文件接纳、`webkitdirectory` 与 `directory` 属性）；新增 `markdown-content.spec.ts`（结构化渲染/流式更新、XSS与远程图片防护）。`chat-composer.spec.ts` 的“同一会话切换知识库后保留历史并带新知识库继续提问”覆盖会话不再不可变绑定知识库，删除旧库后可选择其他 READY 知识库继续提问。它们经 `npm test -- --run` 执行，不包含在 Python 门禁中。Go `TestLiveProductFlow` 通过真实 MySQL/gRPC/Worker/Embedding 验证保存配置、摄取、检索、会话时间与用户隔离；Chat 使用确定性测试供应商，除非显式启用真实 Chat。
 
 ```text
 tests/
@@ -263,7 +292,7 @@ tests/
    │  ├─ test_chm_parser.py
    │  ├─ test_failpoints.py
    │  ├─ test_multiformat_parsers.py
-   │  ├─ test_pdf_deepdoc_parser.py        # PDF 字符坐标、下标、目录、保守表格、段落合并、OCR 和安全上限
+   │  ├─ test_pdf_deepdoc_parser.py        # CHM3/pdfplumber 词坐标、标题、表格、双页码、OCR 和安全上限
    │  ├─ test_pipeline.py                 # 稳定去重、重复 PDF 页列表和重执行幂等
    │  ├─ test_recursive_chunker.py
    │  ├─ test_text_parser.py
@@ -324,6 +353,13 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_auth_failure_is_non_retryable_and_redacts_provider_body` | 401/403 不重试，映射稳定鉴权错误且不泄漏供应商正文或密钥。 |
 | 同上 | `test_embed_does_not_duplicate_existing_embeddings_suffix` | 已带 `/embeddings` 的 endpoint 不被重复拼接。 |
 | 同上 | `test_transient_statuses_retry_with_a_bound_and_recover` | 429/5xx 按有上限的指数退避重试，并在后续成功时恢复。 |
+| 同上 | `test_throttling_honours_retry_after_and_pauses_every_batch` | 429 按 `Retry-After` 退避，并让同一文档的其他并发批次一起放慢。 |
+| 同上 | `test_exhausted_throttling_reports_provider_status_and_code` | 限流耗尽后的失败信息包含提供方状态码与错误码，且不泄漏凭据或输入文本。 |
+| 同上 | `test_batch_limit_from_provider_is_learned_and_reused` | 提供方声明单请求输入上限后收紧后续批次，不再让每个批次都先撞一次 400。 |
+| 同上 | `test_quota_exhaustion_is_reported_as_quota_not_transport` | 额度类 429 返回 `EMBEDDING_QUOTA_EXCEEDED`，不与地址/网络故障混淆。 |
+| 同上 | `test_pacer_reserves_within_window_and_reports_remaining_wait` | 令牌桶按字符数节流：突发容量内可立即发送，额度耗尽后等待补充。 |
+| 同上 | `test_throttling_halves_the_pacing_budget` | 被限流后按半数收紧每分钟字符预算，避免持续突发。 |
+| 同上 | `test_pacing_recovers_budget_after_sustained_success` | 持续成功后小幅恢复每分钟字符预算，避免一次限流把整篇文档压到最低速率。 |
 | 同上 | `test_timeout_exhaustion_maps_to_retryable_unavailable` | 网络超时耗尽重试后映射为可重试 `EMBEDDING_UNAVAILABLE`。 |
 | `application/test_document_service.py` | `test_create_dataset_rejects_runtime_embedding_mismatch` | Dataset 声明的 Embedding 模型或维度与运行配置不一致时返回稳定错误。 |
 | `application/test_cleanup_service.py` | `test_dataset_cleanup_deletes_search_then_objects_then_purges_metadata` | Dataset cleanup 按 ES、对象、MySQL 顺序执行并最终移除完整聚合。 |
@@ -345,6 +381,9 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_chi_reference_replaces_duplicate_direct_chm_anchor` | CHI 回指与普通混合检索命中同一 CHM Chunk 时不复制正文：保留直接锚点位置和真实分数，并附加 CHI 桥接审计字段。 |
 | 同上 | `test_identifier_priority_supports_mixed_case_c_api_names` | 显式混合大小写 C API 名完整命中优先于更高 RRF 的无关候选，覆盖 `DDS_DomainParticipantFactory_create_participant` 形式。 |
 | 同上 | `test_vague_dds_query_runs_all_rewrites_through_dense_and_sparse_routes` | 模糊 DDS 问题产生的 2～3 个子查询全部经过 Dense/BM25 召回，并能用规范接口词命中证据。 |
+| 同上 | `test_general_query_deduplicates_topics_and_reserves_pdf` | 概念类查询按内容摘要跨文档去重、限制跨语言重复 Topic，并在存在 PDF 候选时保留叙述型手册证据。 |
+| 同上 | `test_api_query_does_not_force_pdf_ahead_of_chm` | API 查询保持精确 CHM 接口证据优先，不机械套用 PDF 配额。 |
+| 同上 | `test_top_one_general_query_keeps_the_most_relevant_non_pdf` | Top-1 概念查询保持最高相关候选，不因来源覆盖规则被无关 PDF 替换。 |
 | `application/test_source_service.py` | `test_source_service_returns_complete_normalized_topic_as_markdown` | 以 Document、激活版本和安全 Topic 路径从原始 CHM 恢复完整 Topic Markdown。 |
 | 同上 | `test_source_service_rejects_stale_citation_version` | 旧索引版本的引用不得读取当前版本原文，避免来源错配。 |
 | 同上 | `test_source_service_rejects_unsafe_topic_path` | 路径穿越在读取对象前 fail closed。 |
@@ -372,13 +411,15 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_router_selects_supported_parser` | Router 为各受支持后缀选择正确 parser。 |
 | 同上 | `test_router_rejects_unsupported_source_type` | 不支持的类型返回稳定错误。 |
 | 同上 | `test_pdf_parser_rejects_corrupt_bytes` | 损坏 PDF 返回稳定错误。 |
+| 同上 | `test_pptx_archive_limits_are_aligned_with_the_upload_limit` | PPTX 单条目/总量归档上限与单文件上限对齐，避免合法大讲稿出现「上传成功但解析失败」。 |
+| 同上 | `test_pptx_parser_rejects_entries_and_totals_beyond_limits` | 超单条目或超总展开字节的 PPTX 仍以 `INVALID_PPTX` 拒绝，压缩炸弹防护不退化。 |
 | `ingestion/test_pdf_deepdoc_parser.py` | `test_deepdoc_pdf_preserves_heading_bbox_table_and_removes_repeated_margins` | 复杂文本 PDF 恢复标题路径、表格型行和 bbox，删除跨页重复页眉页脚，并避免目录点线条目污染标题层级。 |
 | 同上 | `test_deepdoc_pdf_uses_ocr_for_a_scanned_page_and_keeps_confidence` | 原生文字不足时只对扫描页调用 OCR，并保留页码、坐标和置信度。 |
 | 同上 | `test_forced_deepdoc_rejects_scanned_pdf_when_ocr_is_unavailable` | 强制 DeepDoc 且缺少 OCR 工具时返回稳定错误，不把空内容伪装成成功。 |
 | 同上 | `test_auto_mode_degrades_to_native_content_without_ocr_tools` | auto 模式缺少 OCR 工具时仍保留已有原生文字。 |
-| 同上 | `test_pdf_keeps_scaled_grid_subscripts_and_contents_in_physical_rows` | 自生成缩放 PDF 验证目录编号与条目同行、稀疏网格及下标 Q0/Q1/Q2 不丢失。 |
-| 同上 | `test_pdf_bold_labels_stay_body_and_adjacent_small_blocks_merge` | 加粗短标签保留正文，同页同标题小段合并，单页异常页脚按页码形态过滤。 |
-| 同上 | `test_pdf_requires_aligned_columns_and_excludes_bullets_from_tables` | 几何对齐的连续行才成为表格，错位列和项目符号行不误判。 |
+| 同上 | `test_pdfplumber_keeps_scaled_contents_and_repeated_pages_deterministic` | 自生成缩放 PDF 验证目录编号、网格文字与下标数字不丢失，并保证重复页面产生相同规范化正文。 |
+| 同上 | `test_pdfplumber_uses_bold_labels_as_heading_boundaries` | 验证 CHM3 基线将短加粗标签作为标题边界并保留其后正文。 |
+| 同上 | `test_pdfplumber_recognizes_repeated_multicolumn_rows_as_tables` | 验证 CHM3 基线按重复多列物理行形成 Markdown 表格。 |
 | 同上 | `test_pdf_page_limit_fails_before_ocr` | 超过页数安全上限时在渲染/OCR 前拒绝文档。 |
 | `test_config.py` | `test_pdf_content_settings_change_the_parser_fingerprint` | 会改变 PDF 索引正文的配置必须改变 parser fingerprint，防止错误复用旧索引。 |
 | `ingestion/test_chm_parser.py` | `test_chm_parser_orders_topics_and_preserves_heading_provenance` | CHM 按 HHC 目录稳定排列 Topic，按标题层级分段，过滤脚本/样式并保留 Topic、标题路径与锚点。 |
@@ -396,15 +437,22 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_chm_parser_rejects_absolute_topic_path` | 绝对 Topic 路径在进入 HTML 解析前被 fail closed 拒绝。 |
 | 同上 | `test_chmlib_extractor_rejects_non_chm_before_starting_process` | 非 CHM 签名字节在启动外部解包进程前返回稳定 `INVALID_CHM`。 |
 | `ingestion/test_pipeline.py` | `test_pipeline_builds_stable_versioned_chunks_and_upserts_search` | Pipeline 生成稳定的版本化 chunk 并幂等写入检索端。 |
+| 同上 | `test_pipeline_reports_monotonic_progress_during_embedding` | 摄取按解析/Embedding/写索引阶段单调上报进度，长文档不再停在初始进度。 |
 | 同上 | `test_pipeline_collapses_duplicate_chunk_ids_before_embedding` | 同一 Document 内相同逻辑 Chunk 在 Embedding 前稳定折叠，保留首次来源并汇总 PDF 的 page_numbers，验证 Evidence/protobuf metadata 透传且重复执行仍输出相同记录，避免重复向量化及 manifest 唯一键冲突。 |
 | `ingestion/test_recursive_chunker.py` | `test_recursive_chunker_is_stable_bounded_and_overlapping` | 切块边界稳定、长度受限且 overlap 正确。 |
 | 同上 | `test_recursive_chunker_rejects_invalid_overlap` | 非法 overlap 参数被拒绝。 |
 | 同上 | `test_recursive_chunker_matches_txt_golden_fixture` | TXT 切块结果与 golden fixture 一致。 |
+| 同上 | `test_recursive_chunker_drops_table_of_contents_segments` | 目录页导引点条目不作为 Chunk 进入索引，正文段落不受影响。 |
+| 同上 | `test_recursive_chunker_keeps_ellipsis_and_short_page_numbers` | 正文省略号与带单位的短行不会被误判为目录条目。 |
 | `ingestion/test_text_parser.py` | `test_text_parser_normalizes_bom_and_newlines_with_line_locator` | 规范 BOM/换行并生成行定位。 |
 | 同上 | `test_text_parser_rejects_invalid_utf8_with_stable_error` | 非法 UTF-8 返回稳定错误码。 |
 | `ingestion/test_worker.py` | `test_worker_claims_executes_completes_then_acks` | Worker 的认领、执行、完成、ACK 顺序正确。 |
+| 同上 | `set_job_progress`（MetadataRepository） | 进度写入仅在 Task 仍 RUNNING、Job 未取消且进度不回退时生效；由 pipeline 进度用例与 `tests/fakes/metadata.py` 实现共同覆盖。 |
 | 同上 | `test_worker_returns_false_when_queue_is_empty` | 空队列时 Worker 不执行任务并返回空结果。 |
 | 同上 | `test_worker_naks_retryable_failure_then_fails_at_delivery_limit` | 可重试失败 NAK，达到投递上限后写入失败终态。 |
+| 同上 | `test_retryable_failure_naks_with_growing_backoff_delay` | 可恢复失败按递增延迟重投，不再立即回队冲击限流中的提供方。 |
+| 同上 | `test_worker_events_carry_job_document_and_dataset_ids` | 投递事件携带 Job/Document/Dataset 关联字段与失败原因，日志可定位到具体文档。 |
+| 同上 | `test_slow_ingestion_keeps_the_delivery_alive` | 长耗时摄取期间周期性续约投递，避免 `ack_wait` 到期后重复投递。 |
 | 同上 | `test_dataset_cleanup_failure_naks_even_at_delivery_limit_without_terminalizing` | Dataset cleanup 以专用可重试错误码 NAK，且不写失败终态。 |
 | 同上 | `test_late_dataset_cleanup_delivery_after_purge_is_ack_only` | Dataset 已 purge 后迟到的清理 delivery 只 ACK，不执行任何清理。 |
 | `outbox/test_finalizer.py` | `test_finalizer_promotes_object_before_outbox_becomes_ready` | 仅正式对象提升成功后，Outbox 才能 READY。 |
@@ -452,6 +500,7 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_production_source_never_imports_test_fakes` | 生产源码不得导入 `tests/fakes`。 |
 | 同上 | `test_all_declared_ports_are_protocols` | 所有 Port 均以 Protocol 声明。 |
 | `test_observability.py` | `test_rag_event_always_contains_correlation_and_stage_fields` | 结构化事件包含关联 ID 与阶段字段。 |
+| 同上 | `test_rag_event_records_absent_optional_fields_explicitly` | 可选字段缺省时仍以同一 schema 输出，便于按字段查询日志。 |
 | `test_process_lifecycle.py` | `test_empty_background_process_stops_without_external_connections` | Worker/Outbox 即使处于长轮询等待，也可由 stop event 立即退出且不连接外部服务。 |
 | 同上 | `test_grpc_server_starts_and_stops_cleanly` | gRPC Server 可启动并优雅停止。 |
 | 同上 | `test_all_unopened_rpc_methods_return_feature_not_available` | 未开放 RPC 返回 `FEATURE_NOT_AVAILABLE`。 |
@@ -470,7 +519,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_earthfile_pins_tools_and_separates_offline_targets` | Earthfile 固定 Python/uv 工具链，显式导出 protobuf 文件且不携带缓存，并定义质量、离线测试与 Secret 边界；lint/test/ci 聚合复用非空工作区基底，并复制生产 Compose/Caddy 契约输入，避免测试工作区遗漏部署文件。 |
 | 同上 | `test_docker_entrypoints_validate_suites_and_preserve_volumes` | Docker 公共入口复用 Function；run 统一由 Earthfile 顺序准备共享卷、等待 RAG、启动产品服务与容器化 Vue 前端；验证 suite、静默校验 Compose、关闭两套开发栈、清理本地镜像和持久卷保护。eval 同时收集既有 30 问与 PDF 五十问。此离线静态契约不替代 Windows/WSL/Linux 的实际启动验收。 |
 | 同上 | `test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths` | Docker 入口构建安全材料/ES/bootstrap 服务，并仅向测试容器传递 ES password file 与 CA path。 |
-| 同上 | `test_containerized_web_upload_limits_match_supported_rag_sources` | 前端与 Go 白名单一致接纳 PDF、CHM/CHI、Markdown、文本和代码；Nginx 为 32 MiB 文件及 multipart 开销设置 34 MiB 请求上限。 |
+| 同上 | `test_containerized_web_upload_limits_match_supported_rag_sources` | 前端与 Go 白名单一致接纳 PDF、PPTX、CHM/CHI、Markdown、文本和代码；Nginx 为 64 MiB 文件及 multipart 开销设置 70 MiB 请求上限。 |
 | 同上 | `test_containerized_web_proxies_product_health_checks` | 容器化 Nginx 必须将 `/healthz`、`/readyz` 转发到 Go API，防止 SPA fallback 返回 HTML 造成公网健康假阳性。 |
 | 同上 | `test_web_lockfile_is_complete_and_single_toolchain` | 前端 `package-lock.json` 必须为完整 npm v3 锁（npmjs 条目均带 integrity，且含 Linux rollup/esbuild 原生包），不得并存 pnpm 锁或 pnpm 专属 `.npmrc`，并核对 Dockerfile/Earthfile 使用 `npm ci`；静态契约，不执行安装。 |
 | `test_container_artifacts.py` | `test_package_and_container_use_canonical_root_readme` | GitHub 首页、Python package、Docker 镜像与 Earthly 依赖安装统一使用仓库根 README，禁止保留重复入口。 |
@@ -514,6 +563,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_submit_document_rejects_data_before_header` | 上传流首帧必须为 header。 |
 | 同上 | `test_open_methods_work_through_generated_grpc_transport` | 已开放方法可经生成的 gRPC transport 调用。 |
 | `test_metadata_repository_contract.py` | `test_submit_atomically_creates_task_and_waiting_outbox_and_deduplicates` | 提交原子创建 Task/WAITING Outbox，并分别验证同 key 与同 fingerprint 去重。 |
+| 同上 | `test_embedding_key_refresh_keeps_existing_model_and_dimension` | 同一模型与维度下刷新加密 Key 快照；模型或维度变化保持拒绝。 |
 | 同上 | `test_metadata_port_exposes_dataset_deletion_lifecycle` | Metadata Port 声明 Dataset 删除、对象快照和最终 purge 契约。 |
 | 同上 | `test_submit_failure_does_not_leave_partial_metadata` | 提交失败不留下部分元数据。 |
 | 同上 | `test_finalizer_transition_and_task_claim_are_conditional` | Finalizer/Relay 转换为条件更新；Task 按 delivery sequence 去重并允许更高序号重投。 |
@@ -574,6 +624,7 @@ Integration 测试直连真实中间件，验证 SDK、DDL 和服务端行为；
 | 同上 | `test_deleted_generation_fence_prevents_object_ready_and_task_claim` | Document 删除/generation 失配时禁止对象就绪和 Task 认领。 |
 | 同上 | `test_fail_task_persists_retryability_and_terminal_state_once` | Worker 失败只落一次终态，并按正式对象是否存在设置 Fingerprint 可重试状态。 |
 | `test_mysql_submission.py` | `test_concurrent_same_fingerprint_creates_one_canonical_task_and_outbox` | 并发同内容上传只保留一个 canonical Document/Job/Task/Outbox，并记录两个幂等结果。 |
+| 同上 | `test_embedding_binding_refreshes_key_snapshot_but_keeps_vector_space` | 真实 MySQL 行锁下验证旧 Key 快照可更新，向量空间参数不可变。 |
 | 同上 | `test_exception_before_commit_rolls_back_all_submission_rows` | Outbox INSERT 前异常使 Document/Fingerprint/Job/Task/Outbox/IndexBuild/幂等记录全部回滚。 |
 | 同上 | `test_same_idempotency_key_replays_result_and_rejects_changed_command` | 同 key 同命令回放首次结果，同 key 不同命令返回稳定冲突且不产生额外状态。 |
 | `test_real_embedding_model.py` | `test_real_embedding_returns_finite_declared_dimension_and_stable_duplicates` | 真实 API 分批返回声明维度的有限向量，相同中文文本向量保持高度一致。 |

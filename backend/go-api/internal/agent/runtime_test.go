@@ -794,13 +794,98 @@ func TestEmitContextSkipsUnchangedUsage(t *testing.T) {
 	state := h.newRunState("dataset", "question", nil)
 	count := 0
 	emit := func(string, any) error { count++; return nil }
-	if err := h.emitContext(state, emit); err != nil {
+	if err := h.emitContext(state, state.Messages, emit); err != nil {
 		t.Fatalf("first report failed: %v", err)
 	}
-	if err := h.emitContext(state, emit); err != nil {
+	if err := h.emitContext(state, state.Messages, emit); err != nil {
 		t.Fatalf("second report failed: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("unchanged usage must not repeat the event, got %d", count)
+	}
+}
+
+// stubAssessor 返回固定充分性结论，用于覆盖 SCA 之后的最终回答轮次。
+type stubAssessor struct{ decision SufficiencyDecision }
+
+func (s stubAssessor) Assess(context.Context, string, []Citation) (SufficiencyDecision, error) {
+	return s.decision, nil
+}
+
+// TestRuntimeReportsContextForFinalAnswerRound 验证生产路径（配置了 SCA、答案在
+// finalizePhase 生成）也会发出占用事件，且必须带上检索后的证据数量与更大的用量——
+// 否则前端占用告警永远只看到检索前的估算。
+func TestRuntimeReportsContextForFinalAnswerRound(t *testing.T) {
+	model := &scriptedModel{responses: []Message{
+		toolCallMessage("call-1", "migration"),
+		{Content: "Migration ends in December. [1]"},
+	}}
+	h := Harness{Model: model, Tool: &retriever{}, Assessor: stubAssessor{decision: SufficiencyDecision{Sufficient: true, ReasonCode: "covered"}}}
+	state := h.newRunState("owned-dataset", "question", nil)
+
+	type report struct {
+		tokens   int
+		evidence int
+	}
+	var reports []report
+	err := h.runStateMachine(context.Background(), state, func(event string, data any) error {
+		if event != "context" {
+			return nil
+		}
+		payload := data.(map[string]any)
+		tokens, _ := payload["estimatedTokens"].(int)
+		evidence, _ := payload["evidenceCount"].(int)
+		reports = append(reports, report{tokens: tokens, evidence: evidence})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if len(reports) != 2 {
+		t.Fatalf("expected pre-retrieval and final-answer context reports, got %d: %+v", len(reports), reports)
+	}
+	if reports[0].evidence != 0 {
+		t.Fatalf("first report must be pre-retrieval: %+v", reports[0])
+	}
+	if reports[1].evidence != 1 || reports[1].tokens <= reports[0].tokens {
+		t.Fatalf("final-answer report must include evidence and larger usage: %+v", reports)
+	}
+	if state.StopReason != StopReasonEvidenceSufficient || state.Answer != "Migration ends in December. [1]" {
+		t.Fatalf("unexpected stop state: %+v", state)
+	}
+}
+
+// TestFinalizeRenumbersCitationsContiguously 验证正文引用与来源列表编号连续且一一对应：
+// 只保留被引用项而不重编号会产出 [1][2][4] 这类空洞，前端来源卡片与标记会错位。
+func TestFinalizeRenumbersCitationsContiguously(t *testing.T) {
+	citations := []Citation{
+		{Ordinal: 1, Evidence: Evidence{ChunkID: "c1", DocumentID: "d", IndexVersion: 1, Content: "第一段"}},
+		{Ordinal: 2, Evidence: Evidence{ChunkID: "c2", DocumentID: "d", IndexVersion: 1, Content: "第二段"}},
+		{Ordinal: 3, Evidence: Evidence{ChunkID: "c3", DocumentID: "d", IndexVersion: 1, Content: "第三段"}},
+		{Ordinal: 4, Evidence: Evidence{ChunkID: "c4", DocumentID: "d", IndexVersion: 1, Content: "第四段"}},
+	}
+	model := &scriptedModel{responses: []Message{{Content: "先引用第四段 [4]，再引用第二段 [2]，重复一次 [4]。"}}}
+	h := Harness{Model: model, Tool: &retriever{}, Assessor: stubAssessor{decision: SufficiencyDecision{Sufficient: true}}}
+	state := h.newRunState("owned-dataset", "question", nil)
+	state.AnswerNeeded = true
+	state.RetrievalRounds = 1
+	hits := make([]Evidence, 0, len(citations))
+	for _, citation := range citations {
+		hits = append(hits, citation.Evidence)
+	}
+	if _, err := state.Pool.Add(hits); err != nil {
+		t.Fatalf("准备证据池失败: %v", err)
+	}
+	if err := h.finalizePhase(context.Background(), state, func(string, any) error { return nil }); err != nil {
+		t.Fatalf("finalize 失败: %v", err)
+	}
+	if state.Answer != "先引用第四段 [1]，再引用第二段 [2]，重复一次 [1]。" {
+		t.Fatalf("正文引用未按首次出现顺序重编号: %q", state.Answer)
+	}
+	if len(state.Citations) != 2 || state.Citations[0].Ordinal != 1 || state.Citations[1].Ordinal != 2 {
+		t.Fatalf("来源列表编号必须连续: %+v", state.Citations)
+	}
+	if state.Citations[0].Evidence.ChunkID != "c4" || state.Citations[1].Evidence.ChunkID != "c2" {
+		t.Fatalf("编号与证据对应错误: %+v", state.Citations)
 	}
 }

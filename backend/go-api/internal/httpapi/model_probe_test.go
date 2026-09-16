@@ -96,6 +96,14 @@ func TestProbeEndpointsRespectConfiguredSuffix(t *testing.T) {
 	if got := embedEndpoint("https://provider.test/v1/"); got != "https://provider.test/v1/embeddings" {
 		t.Fatalf("unexpected embedding endpoint: %s", got)
 	}
+	// 与 Python 适配器一致：配置里已经带 /embeddings 时不得再拼一次，
+	// 否则索引可用的账号会在「测试连接」里被判为失败。
+	if got := embedEndpoint("https://provider.test/v1/embeddings"); got != "https://provider.test/v1/embeddings" {
+		t.Fatalf("embedding endpoint must not be duplicated: %s", got)
+	}
+	if got := embedEndpoint("https://provider.test/v1/embeddings/"); got != "https://provider.test/v1/embeddings" {
+		t.Fatalf("embedding endpoint must tolerate a trailing slash: %s", got)
+	}
 	if got := rerankEndpoint("https://provider.test/v1"); got != "https://provider.test/v1/rerank" {
 		t.Fatalf("unexpected rerank endpoint: %s", got)
 	}

@@ -160,6 +160,11 @@ async def build_server_container(
             chm_max_files=settings.chm_max_files,
             chm_max_topics=settings.chm_max_topics,
             chm_max_expanded_bytes=settings.chm_max_expanded_bytes,
+            pptx_ocr_enabled=settings.pptx_ocr_enabled,
+            pptx_ocr_language=settings.pptx_ocr_language,
+            pptx_ocr_timeout_seconds=settings.pptx_ocr_timeout_seconds,
+            pptx_ocr_max_images_per_slide=settings.pptx_ocr_max_images_per_slide,
+            pptx_ocr_max_image_bytes=settings.pptx_ocr_max_image_bytes,
             pdf_parser_mode=settings.pdf_parser_mode,
             pdf_native_text_min_chars_per_page=settings.pdf_native_text_min_chars_per_page,
             pdf_ocr_language=settings.pdf_ocr_language,
@@ -224,6 +229,11 @@ async def build_worker_container(
                 chm_max_files=settings.chm_max_files,
                 chm_max_topics=settings.chm_max_topics,
                 chm_max_expanded_bytes=settings.chm_max_expanded_bytes,
+                pptx_ocr_enabled=settings.pptx_ocr_enabled,
+                pptx_ocr_language=settings.pptx_ocr_language,
+                pptx_ocr_timeout_seconds=settings.pptx_ocr_timeout_seconds,
+                pptx_ocr_max_images_per_slide=settings.pptx_ocr_max_images_per_slide,
+                pptx_ocr_max_image_bytes=settings.pptx_ocr_max_image_bytes,
                 pdf_parser_mode=settings.pdf_parser_mode,
                 pdf_native_text_min_chars_per_page=settings.pdf_native_text_min_chars_per_page,
                 pdf_ocr_language=settings.pdf_ocr_language,
@@ -327,6 +337,7 @@ async def _model_resource(settings: Settings) -> ManagedResource[ModelGateway]:
                 batch_size=settings.embedding_batch_size,
                 max_retries=settings.embedding_max_retries,
                 max_concurrency=settings.embedding_max_concurrency,
+                max_chars_per_minute=settings.embedding_max_chars_per_minute,
             )
         )
     profile = settings.require_embedding_profile()
@@ -342,6 +353,7 @@ async def _model_resource(settings: Settings) -> ManagedResource[ModelGateway]:
         profile.batch_size,
         profile.max_retries,
         profile.max_concurrency,
+        max_chars_per_minute=profile.max_chars_per_minute,
     )
     return ManagedResource(model, model.close)
 

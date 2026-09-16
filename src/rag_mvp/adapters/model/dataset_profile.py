@@ -82,9 +82,10 @@ class DatasetProfileGateway:
         rerank_dataset_id: str = "",
         *,
         allow_local_models: bool = False,
-        batch_size: int = 32,
+        batch_size: int = 20,
         max_retries: int = 2,
         max_concurrency: int = 4,
+        max_chars_per_minute: int = 0,
     ) -> None:
         self._key_file = key_file
         self._dataset = dataset
@@ -94,6 +95,7 @@ class DatasetProfileGateway:
         self._batch_size = batch_size
         self._max_retries = max_retries
         self._max_concurrency = max_concurrency
+        self._max_chars_per_minute = max_chars_per_minute
 
     def for_rerank(self, encrypted_profile: str, dataset_id: str) -> ModelGateway:
         return DatasetProfileGateway(
@@ -105,6 +107,7 @@ class DatasetProfileGateway:
             batch_size=self._batch_size,
             max_retries=self._max_retries,
             max_concurrency=self._max_concurrency,
+            max_chars_per_minute=self._max_chars_per_minute,
         )
 
     def for_dataset(self, dataset: Dataset) -> ModelGateway:
@@ -117,6 +120,7 @@ class DatasetProfileGateway:
             batch_size=self._batch_size,
             max_retries=self._max_retries,
             max_concurrency=self._max_concurrency,
+            max_chars_per_minute=self._max_chars_per_minute,
         )
 
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
@@ -173,6 +177,7 @@ class DatasetProfileGateway:
                 self._batch_size,
                 self._max_retries,
                 self._max_concurrency,
+                max_chars_per_minute=self._max_chars_per_minute,
             )
             return await model.embed(texts)
 

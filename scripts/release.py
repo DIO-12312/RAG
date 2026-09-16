@@ -16,10 +16,12 @@ import re
 import subprocess
 import tempfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 APPS = ("rag-server", "rag-worker", "rag-outbox", "api", "web")
+_PROJECT_NAME = "rag-production"
 INFRA = ("rag-mysql", "product-mysql", "elasticsearch", "nats")
 IMAGES = {
     "rag": ("Dockerfile", ".", "runtime"),
@@ -89,6 +91,99 @@ def read_json(path: Path) -> dict[str, Any]:
     return value
 
 
+# 只有持久 schema 与生产基础设施变化才需要维护窗口。Service 的
+# environment/env_file/build/labels 只是「重建容器即替换」的启动参数：
+# 改一个 env 默认值不应该要求维护窗口，否则每次调整配置都会被发布门禁拦住。
+# volumes/ports/secrets/command/entrypoint/healthcheck/depends_on 等仍然参与摘要。
+RESTART_ONLY_KEYS = frozenset({"build", "environment", "env_file", "labels"})
+_KEY = re.compile(r"^[ \t]*(?:-[ \t]*)?([A-Za-z0-9_.\-]+)[ \t]*:")
+_ALIAS = re.compile(r"^\*([A-Za-z0-9_.\-]+)$")
+
+
+# 前导空白宽度：用字符串运算而不是正则，避免可选匹配带来的类型分支。
+def _indent_width(line: str) -> int:
+    """Return the width of the leading whitespace of a Compose line."""
+
+    return len(line) - len(line.lstrip(" \t"))
+
+
+# 统计锚点被引用的位置：出现在重启即替换的块里的锚点不参与摘要。
+def _anchor_usage(text: str) -> tuple[set[str], set[str]]:
+    restart_only: set[str] = set()
+    elsewhere: set[str] = set()
+    stack: list[tuple[int, str]] = []
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = _indent_width(line)
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        parent = stack[-1][1] if stack else ""
+        key_match = _KEY.match(line)
+        if key_match is None or ":" not in line:
+            continue
+        key = key_match.group(1)
+        value = line.split(":", 1)[1].strip()
+        alias = _ALIAS.match(value)
+        if alias is not None:
+            # `environment: *x` 与 `<<: *x` 由自身/父键决定；
+            # 更深层的 `FOO: *x` 则由它所在的块决定。
+            owner = parent if key == "<<" else key
+            in_restart_block = any(item[1] in RESTART_ONLY_KEYS for item in stack)
+            target = restart_only if owner in RESTART_ONLY_KEYS or in_restart_block else elsewhere
+            target.add(alias.group(1))
+        if not value:
+            stack.append((indent, key))
+    return restart_only, elsewhere
+
+
+def strip_restart_only_blocks(text: str) -> str:
+    """Drop restart-only service blocks before hashing a rendered Compose input."""
+
+    restart_only, elsewhere = _anchor_usage(text)
+    dropped_anchors = restart_only - elsewhere
+    kept: list[str] = []
+    skip_indent: int | None = None
+    drop_definition = False
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        indent = _indent_width(line) if stripped else 0
+        if skip_indent is not None:
+            if not stripped:
+                continue
+            if indent > skip_indent or (indent == skip_indent and stripped.startswith("-")):
+                continue
+            skip_indent = None
+        if drop_definition:
+            if not stripped:
+                continue
+            if indent > 0:
+                continue
+            drop_definition = False
+        if not stripped:
+            kept.append(line)
+            continue
+        key_match = _KEY.match(line)
+        key = key_match.group(1) if key_match is not None else ""
+        if key in RESTART_ONLY_KEYS:
+            skip_indent = indent
+            continue
+        if indent == 0 and key.startswith("x-") and "&" in line:
+            anchor = line.split("&", 1)[1].strip()
+            if anchor in dropped_anchors:
+                drop_definition = True
+                continue
+        kept.append(line)
+    return "\n".join(kept) + "\n"
+
+
+# 只有 Compose 需要投影：其余维护敏感输入（schema、Caddyfile、migrations）整体参与摘要。
+PROJECTED_INPUTS = {"compose.production.yml": strip_restart_only_blocks}
+
+
 def compatibility(root: Path) -> str:
     digest = hashlib.sha256()
     for name in MAINTENANCE_PATHS:
@@ -99,7 +194,11 @@ def compatibility(root: Path) -> str:
         for item in files:
             if item.is_file() and "__pycache__" not in item.parts and item.suffix != ".pyc":
                 digest.update(str(item.relative_to(root)).encode() + b"\0")
-                digest.update(item.read_bytes() + b"\0")
+                payload = item.read_bytes()
+                projector = PROJECTED_INPUTS.get(name)
+                if projector is not None:
+                    payload = projector(payload.decode("utf-8")).encode("utf-8")
+                digest.update(payload + b"\0")
     return digest.hexdigest()
 
 
@@ -194,7 +293,7 @@ def publish(root: Path, sha: str, output: Path) -> None:
 
 
 def compose(config: Path, *args: str) -> list[str]:
-    return ["docker", "compose", "--project-name", "rag-production", "-f", str(config), *args]
+    return ["docker", "compose", "--project-name", _PROJECT_NAME, "-f", str(config), *args]
 
 
 def inspect_service(config: Path, service: str) -> dict[str, Any]:
@@ -203,6 +302,60 @@ def inspect_service(config: Path, service: str) -> dict[str, Any]:
         raise ReleaseError(f"expected one existing production container: {service}")
     value: dict[str, Any] = json.loads(run(["docker", "inspect", ids[0]]))[0]
     return value
+
+
+# 网络定义变更必须在停任何容器之前被发现：`up --force-recreate` 会为定义变化的
+# 网络触发重建，而此时 MySQL/Elasticsearch/NATS 仍挂在网络上，重建必然失败——
+# 应用已经被停掉，回滚又会撞上同一堵墙，生产就这样变成 502。
+def _declared_network_subnets(config: Mapping[str, Any]) -> dict[str, list[str]]:
+    """Map docker network name to the subnets the target config pins."""
+
+    declared: dict[str, list[str]] = {}
+    for name, definition in (config.get("networks") or {}).items():
+        subnets = [
+            str(item["subnet"])
+            for item in (((definition or {}).get("ipam") or {}).get("config") or [])
+            if item.get("subnet")
+        ]
+        if not subnets:
+            continue
+        explicit = (definition or {}).get("name")
+        docker_name = str(explicit) if explicit else f"{_PROJECT_NAME}_{name}"
+        declared[docker_name] = subnets
+    return declared
+
+
+# 读取运行中网络的子网；网络不存在或 docker 不可用时返回 None，交由后续步骤报错。
+def _live_network_subnets(docker_name: str) -> list[str] | None:
+    try:
+        output = run(
+            [
+                "docker",
+                "network",
+                "inspect",
+                docker_name,
+                "--format",
+                "{{range .IPAM.Config}}{{.Subnet}} {{end}}",
+            ]
+        )
+    except ReleaseError:
+        return None
+    return output.split()
+
+
+# 目标配置固定了子网、且运行中网络已有不同子网时拒绝发布，避免不可回滚的停机。
+def check_network_compatibility(config: Mapping[str, Any]) -> None:
+    """Refuse a deploy whose pinned network subnets differ from the live ones."""
+
+    for docker_name, declared in _declared_network_subnets(config).items():
+        live = _live_network_subnets(docker_name)
+        if not live or live == declared:
+            continue
+        raise ReleaseError(
+            f"network {docker_name} subnet drift: live={'/'.join(live)} "
+            f"declared={'/'.join(declared)}; recreate networks in a maintenance window "
+            "before deploying"
+        )
 
 
 def health(config: Path) -> None:
@@ -355,8 +508,10 @@ def deploy(root: Path, manifest: Path, state: Path, sha: str, sequence: int) -> 
             "persistent schema/infrastructure changed: maintenance deployment required"
         )
     old_path = Path(active["config"])
-    health(old_path)
     config = read_json(old_path)
+    # 目标配置的网络定义必须与运行中的网络一致，否则拒绝在停机之前。
+    check_network_compatibility(config)
+    health(old_path)
     # Detect manual image changes since baseline/last release before touching services.
     for service in APPS:
         expected = run(

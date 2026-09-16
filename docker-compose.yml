@@ -9,7 +9,7 @@ x-rag-environment: &rag-environment
   RAG_ELASTICSEARCH_CA_CERT: /run/secrets/ca.pem
   RAG_NATS_URL: nats://nats:4222
   RAG_OBJECT_ROOT: /app/data/objects
-  RAG_PARSER_VERSION: "${RAG_PARSER_VERSION:-source-router-v8}"
+  RAG_PARSER_VERSION: "${RAG_PARSER_VERSION:-source-router-v10}"
   RAG_PDF_PARSER_MODE: "${RAG_PDF_PARSER_MODE:-auto}"
   RAG_PDF_NATIVE_TEXT_MIN_CHARS_PER_PAGE: "${RAG_PDF_NATIVE_TEXT_MIN_CHARS_PER_PAGE:-40}"
   RAG_PDF_OCR_LANGUAGE: "${RAG_PDF_OCR_LANGUAGE:-chi_sim+eng}"
@@ -131,7 +131,7 @@ services:
       <<: *rag-environment
       RAG_ELASTICSEARCH_PASSWORD_FILE: /run/secrets/rag_mvp_password
       RAG_MODEL_ENCRYPTION_KEY_FILE: /run/model-keys/encryption.key
-      RAG_MAX_UPLOAD_BYTES: 33554432
+      RAG_MAX_UPLOAD_BYTES: 67108864
     ports:
       - "50051:50051"
     group_add: ["10001"]
@@ -167,7 +167,7 @@ services:
       RAG_ELASTICSEARCH_PASSWORD_FILE: /run/secrets/rag_mvp_password
       RAG_MODEL_ENCRYPTION_KEY_FILE: /run/model-keys/encryption.key
       RAG_ALLOW_LOCAL_MODELS: ${RAG_ALLOW_LOCAL_MODELS:-false}
-      RAG_MAX_UPLOAD_BYTES: 33554432
+      RAG_MAX_UPLOAD_BYTES: 67108864
     group_add: ["10001"]
     volumes:
       - product-model-keys:/run/model-keys:ro

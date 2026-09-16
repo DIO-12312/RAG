@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"log/slog"
@@ -54,35 +55,54 @@ func (s *Server) chat(c *gin.Context) {
 	if p.ConversationID == "" {
 		p.ConversationID = security.ID()
 	}
-	var dataset string
-	e = s.Store.DB.QueryRowContext(ctx, "SELECT dataset_id FROM conversations WHERE id=? AND user_id=?", p.ConversationID, uid(c)).Scan(&dataset)
-	if e != nil {
-		_, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversations(id,user_id,dataset_id,title) VALUES(?,?,?,?)", p.ConversationID, uid(c), p.DatasetID, string(title))
-	} else if dataset != p.DatasetID {
-		fail(c, 404, "NOT_FOUND", "会话不存在或知识库不匹配。")
-		return
-	}
-	if e != nil {
-		fail(c, 503, "SAVE_FAILED", "会话创建失败。")
-		return
-	}
-	// 立即持久化用户提问：即使回答流尚未完成，历史记录也能完整恢复该会话。
-	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,role,content,citations_json) VALUES(?,'user',?,'[]')", p.ConversationID, p.Question); e != nil {
-		fail(c, 503, "SAVE_FAILED", "会话保存失败。")
-		return
-	}
+	// 并发锁按「用户 + 会话」隔离：客户端可以构造任意会话 id，只用 id 会让不同用户互相阻塞。
+	lockKey := runKey(uid(c), p.ConversationID)
 	s.mu.Lock()
-	busy := s.runs[p.ConversationID]
+	busy := s.runs[lockKey]
 	if !busy {
-		s.runs[p.ConversationID] = true
+		s.runs[lockKey] = true
 	}
 	s.mu.Unlock()
 	if busy {
 		fail(c, 409, "CHAT_BUSY", "当前会话正在生成回答。")
 		return
 	}
-	defer func() { s.mu.Lock(); delete(s.runs, p.ConversationID); s.mu.Unlock() }()
-	rows, e := s.Store.DB.QueryContext(ctx, "SELECT role,content FROM (SELECT id,role,content FROM conversation_messages WHERE conversation_id=? ORDER BY id DESC LIMIT 12) recent ORDER BY id", p.ConversationID)
+	defer func() { s.mu.Lock(); delete(s.runs, lockKey); s.mu.Unlock() }()
+	if e = s.ensureConversation(ctx, uid(c), p.ConversationID, p.DatasetID, string(title)); e != nil {
+		if errors.Is(e, errConversationTaken) {
+			fail(c, 404, "NOT_FOUND", "会话不存在或知识库不匹配。")
+			return
+		}
+		fail(c, 503, "SAVE_FAILED", "会话创建失败。")
+		return
+	}
+	// 一个会话可切换知识库，但模型上下文只能使用当前知识库下的消息。
+	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,dataset_id,role,content,citations_json) VALUES(?,?,'user',?,'[]')", p.ConversationID, p.DatasetID, p.Question); e != nil {
+		fail(c, 503, "SAVE_FAILED", "会话保存失败。")
+		return
+	}
+	// 空知识库短路：没有任何文档时不可能检索到证据，直接给出结论，
+	// 不再消耗 SCA/重写与多轮检索（生产实测空库提问会烧 7 次模型调用 + 5 次检索）。
+	// 判据只取「文档数为 0」，避免把「文档都在处理中/失败」误判成空库。
+	if docs, derr := s.Store.List(ctx, uid(c), "document", p.DatasetID); derr != nil {
+		fail(c, 503, "LOAD_FAILED", "文档列表读取失败。")
+		return
+	} else if len(docs) == 0 {
+		answer := emptyKnowledgeBaseAnswer
+		if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,dataset_id,role,content,citations_json) VALUES(?,?,'assistant',?,'[]')", p.ConversationID, p.DatasetID, answer); e != nil {
+			fail(c, 503, "SAVE_FAILED", "会话保存失败。")
+			return
+		}
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("X-Accel-Buffering", "no")
+		c.Header("Cache-Control", "no-cache")
+		c.Status(200)
+		payload, _ := json.Marshal(gin.H{"answer": answer, "citations": []any{}, "conversationId": p.ConversationID})
+		_, _ = fmt.Fprintf(c.Writer, "event: final\ndata: %s\n\n", payload)
+		c.Writer.Flush()
+		return
+	}
+	rows, e := s.Store.DB.QueryContext(ctx, "SELECT role,content FROM (SELECT id,role,content FROM conversation_messages WHERE conversation_id=? AND dataset_id=? ORDER BY id DESC LIMIT 12) recent ORDER BY id", p.ConversationID, p.DatasetID)
 	if e != nil {
 		fail(c, 503, "LOAD_FAILED", "会话读取失败。")
 		return
@@ -157,7 +177,7 @@ func (s *Server) chat(c *gin.Context) {
 		return
 	}
 	b, _ := json.Marshal(citations)
-	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,role,content,citations_json) VALUES(?,'assistant',?,?)", p.ConversationID, answer, b); e != nil {
+	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,dataset_id,role,content,citations_json) VALUES(?,?,'assistant',?,?)", p.ConversationID, p.DatasetID, answer, b); e != nil {
 		_ = emit("error", gin.H{"code": "SAVE_FAILED", "message": "回答生成成功，但会话保存失败。"})
 		return
 	}
@@ -187,13 +207,19 @@ func (s *Server) conversations(c *gin.Context) {
 	c.JSON(200, out)
 }
 func (s *Server) messages(c *gin.Context) {
-	var exists int
-	e := s.Store.DB.QueryRowContext(c.Request.Context(), "SELECT COUNT(*) FROM conversations WHERE id=? AND user_id=?", c.Param("id"), uid(c)).Scan(&exists)
-	if e != nil || exists != 1 {
+	var dataset string
+	e := s.Store.DB.QueryRowContext(c.Request.Context(), "SELECT dataset_id FROM conversations WHERE id=? AND user_id=?", c.Param("id"), uid(c)).Scan(&dataset)
+	if e != nil {
 		fail(c, 404, "NOT_FOUND", "会话不存在。")
 		return
 	}
-	rows, e := s.Store.DB.QueryContext(c.Request.Context(), "SELECT role,content,citations_json FROM conversation_messages WHERE conversation_id=? ORDER BY id LIMIT 200", c.Param("id"))
+	if requested := c.Query("datasetId"); requested != "" {
+		if _, ok := s.owned(c, requested, "dataset"); !ok {
+			return
+		}
+		dataset = requested
+	}
+	rows, e := s.Store.DB.QueryContext(c.Request.Context(), "SELECT role,content,citations_json FROM conversation_messages WHERE conversation_id=? AND dataset_id=? ORDER BY id LIMIT 200", c.Param("id"), dataset)
 	if e != nil {
 		fail(c, 503, "LOAD_FAILED", "消息加载失败。")
 		return
