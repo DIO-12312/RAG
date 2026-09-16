@@ -176,7 +176,7 @@ apps/web/tests/
  | `integration/test_mysql_submission.py` | `test_embedding_binding_refreshes_key_snapshot_but_keeps_vector_space`：同模型同维度可刷新加密 Key 快照，不匹配的模型或维度拒绝 | 真实隔离 MySQL |
 | `embedding_profile.py`、`e2e/conftest.py`、`resilience/docker/conftest.py` | `encrypted_test_profile` 使用测试专用凭据和共享加密密钥组装创建请求；无密钥路径则保持独立旧模式 | 显式真实模型测试；不打印密钥 |
 
-前端测试位于 `apps/web/tests/`：原 `upload-panel.spec.ts` 替换为 `batch-upload.spec.ts`（独立失败重试/固定幂等键、文件夹展开与过滤、PPTX/CHM/CHI 文件接纳、`webkitdirectory` 与 `directory` 属性）；新增 `markdown-content.spec.ts`（结构化渲染/流式更新、XSS与远程图片防护）。`chat-composer.spec.ts` 的“同一会话切换知识库后保留历史并带新知识库继续提问”覆盖会话不再不可变绑定知识库，删除旧库后可选择其他 READY 知识库继续提问。它们经 `npm test -- --run` 执行，不包含在 Python 门禁中。Go `TestLiveProductFlow` 通过真实 MySQL/gRPC/Worker/Embedding 验证保存配置、摄取、检索、会话时间与用户隔离；Chat 使用确定性测试供应商，除非显式启用真实 Chat。
+前端测试位于 `apps/web/tests/`：原 `upload-panel.spec.ts` 替换为 `batch-upload.spec.ts`（独立失败重试/固定幂等键、文件夹展开与过滤、PPTX/CHM/CHI 文件接纳、`webkitdirectory` 与 `directory` 属性）；新增 `markdown-content.spec.ts`（结构化渲染/流式更新、XSS与远程图片防护）。`chat-composer.spec.ts` 的“同一会话切换知识库后保留历史并带新知识库继续提问”覆盖会话不再不可变绑定知识库，删除旧库后可选择其他 READY 知识库继续提问。`live-chat-stream.spec.ts` 覆盖 token 后仍能交付 error 终态以及缺失终态时拒绝截断连接。Go `TestRequiredToolFallbackRetrievesWithoutStreamingGhostAnswer` 覆盖模型违反 `tool_choice=required`、直接输出正文时，Agent 丢弃该正文并用独立查询补建检索调用。它们经 `npm test -- --run` 与 `go test ./...` 执行，不包含在 Python门禁中。Go `TestLiveProductFlow` 通过真实 MySQL/gRPC/Worker/Embedding 验证保存配置、摄取、检索、会话时间与用户隔离；Chat 使用确定性测试供应商，除非显式启用真实 Chat。
 
 ```text
 tests/

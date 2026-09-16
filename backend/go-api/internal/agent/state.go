@@ -61,7 +61,7 @@ func DefaultRunLimits() RunLimits {
 		MaxRetrievalRounds:   5,
 		MaxRewriteRounds:     2,
 		MaxToolCallsPerRound: 4,
-		MaxEvidence:          40,
+		MaxEvidence:          60,
 		MaxToolOutputBytes:   128 * 1024,
 	}
 }

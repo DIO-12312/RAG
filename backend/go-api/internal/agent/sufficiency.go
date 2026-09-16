@@ -39,11 +39,20 @@ type ModelSufficiencyAssessor struct {
 	Budget *ContextBudget
 }
 
-const sufficiencyPrompt = `You judge whether the supplied evidence covers every fact the user's question needs. ` +
-	`Reply with exactly one JSON object and no other text: ` +
-	`{"sufficient": true|false, "missing_facts": ["..."], "reason_code": "short_snake_case"}. ` +
-	`Use at most 5 missing facts, each at most 256 characters, and an empty array when the evidence is sufficient. ` +
-	`Never include reasoning, explanations or markdown fences.`
+const sufficiencyPrompt = `You evaluate whether the supplied evidence is sufficient for a useful, grounded answer to the user's explicit core request.
+
+Judge only the facts explicitly requested by the user and the facts strictly necessary to apply the answer correctly. Do not require optional background, encyclopedic completeness, every related API, exhaustive edge cases, or extra examples that the user did not request.
+
+Set sufficient=true when the evidence supports a direct answer to every explicitly requested part. A concise definition or overview is sufficient when the evidence identifies the subject, its purpose, and the main relationships needed by the question; an exhaustive inventory is not required. Installation, API, QoS, troubleshooting, comparison, and performance questions are sufficient only when the evidence contains the requested steps, names, values, conditions, causes, or trade-offs that are essential to the requested answer.
+
+Set sufficient=false when a core definition, required step, requested parameter or return value, compatibility condition, error cause, corrective action, comparison side, or other explicitly requested fact is missing. Do not mark evidence insufficient merely because more background could be added.
+
+When evidence conflicts, mark it sufficient only if the conflict itself can be accurately reported with both sides; otherwise identify the unresolved fact as missing. Write missing_facts as short, concrete, retrieval-ready facts. Never use vague gaps such as "more details", "additional information", or "complete documentation".
+
+Reply with exactly one JSON object and no other text:
+{"sufficient": true|false, "missing_facts": ["..."], "reason_code": "short_snake_case"}
+
+Use at most 5 missing facts, each at most 256 characters. Use an empty array when sufficient=true. Never include reasoning, explanations, or markdown fences.`
 
 // Assess 返回结构化判断；非法输出、预算失败与供应商故障都返回分类错误。
 func (a ModelSufficiencyAssessor) Assess(ctx context.Context, question string, citations []Citation) (SufficiencyDecision, error) {

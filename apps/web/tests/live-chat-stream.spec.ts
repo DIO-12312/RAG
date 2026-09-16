@@ -11,4 +11,5 @@ describe("HTTP chat stream",()=>{
   expect(result).toEqual([{type:"token",text:"你好"},{type:"final",answer:"你好",citations:[],conversationId:"c"}]);
  });
  it("rejects a truncated connection without final",async()=>{server.use(http.post("*/chat/stream",()=>new HttpResponse('event: token\ndata: {"text":"partial"}\n\n')));const run=async()=>{for await(const event of streamChat({datasetId:"d",question:"q"}).events)void event;};await expect(run()).rejects.toThrow("中断");});
+ it("delivers an error terminal after an earlier token",async()=>{server.use(http.post("*/chat/stream",()=>new HttpResponse('event: token\ndata: {"text":"partial"}\n\nevent: error\ndata: {"code":"FAILED","message":"failed"}\n\n',{headers:{"Content-Type":"text/event-stream"}})));const result=[];for await(const event of streamChat({datasetId:"d",question:"q"}).events)result.push(event);expect(result).toEqual([{type:"token",text:"partial"},{type:"error",code:"FAILED",message:"failed"}]);});
 });

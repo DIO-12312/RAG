@@ -136,7 +136,7 @@ func TestDefaultRunLimitsMatchPlan(t *testing.T) {
 	if limits.MaxRetrievalRounds != 5 ||
 		limits.MaxRewriteRounds != 2 ||
 		limits.MaxToolCallsPerRound != 4 ||
-		limits.MaxEvidence != 40 ||
+		limits.MaxEvidence != 60 ||
 		limits.MaxToolOutputBytes != 128*1024 {
 		t.Fatalf("unexpected default limits: %+v", limits)
 	}

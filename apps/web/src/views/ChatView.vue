@@ -26,9 +26,54 @@ watch(()=>datasets.readyDatasets.map(dataset=>dataset.id).join(","),()=>selectAv
 
 async function resume(id:string):Promise<void>{const row=conversations.value.find(c=>c.id===id);if(!row||busy.value)return;selectAvailableDataset(row.datasetId);await nextTick();conversationId.value=id;try{transcript.value=await request("/conversations/"+id+"/messages?datasetId="+encodeURIComponent(selectedId.value));}catch(e){error.value=e instanceof Error?e.message:"会话加载失败";}}
 
-watch(selectedId,async(datasetId,previous)=>{if(!datasetId||datasetId===previous||busy.value)return;active?.cancel();conversationId.value="";transcript.value=[];answer.value="";citations.value=[];contextUsage.value=undefined;const latest=conversations.value.find(c=>c.datasetId===datasetId);if(latest)await resume(latest.id);});
+watch(selectedId,async(datasetId,previous)=>{
+  if(!datasetId||datasetId===previous||busy.value)return;
+  active?.cancel();transcript.value=[];answer.value="";citations.value=[];contextUsage.value=undefined;
+  if(conversationId.value){
+    try{transcript.value=await request("/conversations/"+conversationId.value+"/messages?datasetId="+encodeURIComponent(datasetId));}
+    catch(e){error.value=e instanceof Error?e.message:"会话加载失败";}
+    return;
+  }
+  const latest=conversations.value.find(c=>c.datasetId===datasetId);
+  if(latest)await resume(latest.id);
+});
 
-async function ask():Promise<void>{if(!selectedId.value||!question.value.trim()||busy.value)return;if(questionTooLong.value){error.value="问题过长：服务端按 UTF-8 计算上限 8000 字节（约 2600 个汉字），请精简后重试。";return;}if(!conversationId.value){conversationId.value=randomUUID();router.replace({query:{c:conversationId.value}});}busy.value=true;error.value="";answer.value="";citations.value=[];contextUsage.value=undefined;phase.value="正在思考并检索…";const q=question.value;active=streamChat({datasetId:selectedId.value,question:q,conversationId:conversationId.value});let final=false;try{for await(const event of active.events){if(event.type==="context")contextUsage.value={estimatedTokens:event.estimatedTokens,usableTokens:event.usableTokens,evidenceCount:event.evidenceCount,evidenceLimit:event.evidenceLimit};if(event.type==="retrieval")phase.value="已检索到 "+event.hits.length+" 条证据，正在生成回答…";if(event.type==="token")answer.value+=event.text;if(event.type==="error")throw new Error(event.message);if(event.type==="final"){answer.value=event.answer;citations.value=event.citations;conversationId.value=event.conversationId??"";transcript.value.push({role:"user",content:q,citations:[]},{role:"assistant",content:answer.value,citations:citations.value});question.value="";answer.value="";citations.value=[];final=true;}}if(final)conversations.value=await request("/conversations");}catch(e){error.value=e instanceof Error&&e.name==="AbortError"?"已停止生成":e instanceof Error?e.message:"问答失败";}finally{busy.value=false;phase.value="";active=undefined;}}
+async function restorePersistedConversation(questionText:string):Promise<boolean>{
+  if(!conversationId.value||!selectedId.value)return false;
+  try{
+    const messages=await request<{role:string;content:string;citations:Citation[]}[]>("/conversations/"+conversationId.value+"/messages?datasetId="+encodeURIComponent(selectedId.value));
+    transcript.value=messages;
+    return messages.some(message=>message.role==="user"&&message.content===questionText);
+  }catch{return false;}
+}
+
+async function ask():Promise<void>{
+  if(!selectedId.value||!question.value.trim()||busy.value)return;
+  if(questionTooLong.value){error.value="问题过长：服务端按 UTF-8 计算上限 8000 字节（约 2600 个汉字），请精简后重试。";return;}
+  if(!conversationId.value){conversationId.value=randomUUID();router.replace({query:{c:conversationId.value}});}
+  busy.value=true;error.value="";answer.value="";citations.value=[];contextUsage.value=undefined;phase.value="正在思考并检索…";
+  const q=question.value;
+  active=streamChat({datasetId:selectedId.value,question:q,conversationId:conversationId.value});
+  let final=false;
+  try{
+    for await(const event of active.events){
+      if(event.type==="context")contextUsage.value={estimatedTokens:event.estimatedTokens,usableTokens:event.usableTokens,evidenceCount:event.evidenceCount,evidenceLimit:event.evidenceLimit};
+      if(event.type==="retrieval")phase.value="已检索到 "+event.hits.length+" 条证据，正在生成回答…";
+      if(event.type==="token")answer.value+=event.text;
+      if(event.type==="error")throw new Error(event.message);
+      if(event.type==="final"){
+        answer.value=event.answer;citations.value=event.citations;conversationId.value=event.conversationId??"";
+        transcript.value.push({role:"user",content:q,citations:[]},{role:"assistant",content:answer.value,citations:citations.value});
+        question.value="";answer.value="";citations.value=[];final=true;
+      }
+    }
+    if(final)conversations.value=await request("/conversations");
+  }catch(e){
+    error.value=e instanceof Error&&e.name==="AbortError"?"已停止生成":e instanceof Error?e.message:"问答失败";
+    answer.value="";citations.value=[];
+    if(await restorePersistedConversation(q))question.value="";
+  }finally{busy.value=false;phase.value="";active=undefined;}
+}
 </script>
 <template>
   <main class="chat-page">

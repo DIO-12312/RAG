@@ -66,6 +66,64 @@ func TestModelQueryRewriterComparisonKeepsBothSubjects(t *testing.T) {
 	}
 }
 
+func TestModelQueryRewriterAllowsAuditedDDSEntityNormalization(t *testing.T) {
+	tests := []struct {
+		name     string
+		question string
+		query    string
+	}{
+		{name: "DW abbreviation", question: "DW 如何设置可靠传输？", query: "DataWriter 可靠传输 QoS 设置"},
+		{name: "Chinese writer wording", question: "发布端怎么等待对端确认？", query: "DataWriter wait_for_acknowledgments DDS"},
+		{name: "service quality wording", question: "服务质量策略什么时候可以修改？", query: "QoS Quality of Service 修改时机"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			model := &assessorModel{responses: []Message{{Content: `{"queries":["` + tc.query + `"]}`}}}
+			rewriter := ModelQueryRewriter{Model: model}
+			request := RewriteRequest{
+				OriginalQuestion:   tc.question,
+				StandaloneQuestion: tc.question,
+				MissingFacts:       []string{"需要补充核心配置事实"},
+				AttemptedQueries:   []string{tc.question},
+			}
+
+			result, err := rewriter.Rewrite(context.Background(), request)
+			if err != nil {
+				t.Fatalf("controlled DDS normalization was rejected: %v", err)
+			}
+			if len(result.Queries) != 1 || result.Queries[0] != tc.query {
+				t.Fatalf("unexpected controlled rewrite: %+v", result)
+			}
+		})
+	}
+}
+
+func TestModelQueryRewriterAuditsEveryIntroducedEntity(t *testing.T) {
+	request := RewriteRequest{
+		OriginalQuestion:   "DW 如何设置可靠传输？",
+		StandaloneQuestion: "DW 如何设置可靠传输？",
+		MissingFacts:       []string{"Project Cobalt 的 WriterPro 配置"},
+		AttemptedQueries:   []string{"DW 如何设置可靠传输？"},
+	}
+
+	t.Run("controlled DataWriter is allowed but guessed product is rejected", func(t *testing.T) {
+		model := &assessorModel{responses: []Message{{Content: `{"queries":["Project Cobalt DataWriter 可靠传输"]}`}}}
+		rewriter := ModelQueryRewriter{Model: model}
+		if _, err := rewriter.Rewrite(context.Background(), request); !errors.Is(err, ErrRewriteUnavailable) {
+			t.Fatalf("guessed product from missing facts must be rejected: %v", err)
+		}
+	})
+
+	t.Run("unknown API is rejected even when another entity is approved", func(t *testing.T) {
+		model := &assessorModel{responses: []Message{{Content: `{"queries":["DataWriter WriterPro 可靠传输"]}`}}}
+		rewriter := ModelQueryRewriter{Model: model}
+		if _, err := rewriter.Rewrite(context.Background(), request); !errors.Is(err, ErrRewriteUnavailable) {
+			t.Fatalf("unapproved API must be rejected: %v", err)
+		}
+	})
+}
+
 func TestModelQueryRewriterDeduplicatesAttemptedQueries(t *testing.T) {
 	cases := []struct {
 		name      string

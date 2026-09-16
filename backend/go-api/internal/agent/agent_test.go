@@ -216,6 +216,63 @@ func TestHarnessUsesStreamingModel(t *testing.T) {
 	}
 }
 
+type requiredToolIgnoringStreamingModel struct {
+	streamCalls int
+	policies    []ToolPolicy
+}
+
+func (m *requiredToolIgnoringStreamingModel) Complete(context.Context, []Message, ToolPolicy) (Message, error) {
+	return Message{}, errors.New("unexpected non-streaming completion")
+}
+
+func (m *requiredToolIgnoringStreamingModel) Stream(
+	ctx context.Context,
+	_ []Message,
+	policy ToolPolicy,
+	onDelta func(string) error,
+	_ func(ToolCall) error,
+) error {
+	m.streamCalls++
+	m.policies = append(m.policies, policy)
+	if m.streamCalls == 1 {
+		// 模拟不遵守 tool_choice=required 的供应商：直接输出未经检索的回答。
+		return onDelta("不应展示的临时回答 [99]")
+	}
+	if err := onDelta("基于检索证据的回答 [1]"); err != nil {
+		return err
+	}
+	return ctx.Err()
+}
+
+func TestRequiredToolFallbackRetrievesWithoutStreamingGhostAnswer(t *testing.T) {
+	model := &requiredToolIgnoringStreamingModel{}
+	tool := &retriever{}
+	h := Harness{Model: model, Tool: tool, Streaming: true}
+
+	var tokens []string
+	answer, citations, err := h.Run(context.Background(), "owned-dataset", "ZRDDS是什么", nil, func(event string, data any) error {
+		if event == "token" {
+			tokens = append(tokens, data.(map[string]any)["text"].(string))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("required-tool fallback failed: %v", err)
+	}
+	if tool.calls != 1 || tool.query != "ZRDDS是什么" {
+		t.Fatalf("fallback must retrieve the routed standalone query: calls=%d query=%q", tool.calls, tool.query)
+	}
+	if model.streamCalls != 2 || len(model.policies) != 2 || model.policies[0].Mode != ToolRequired {
+		t.Fatalf("unexpected model calls or policies: calls=%d policies=%+v", model.streamCalls, model.policies)
+	}
+	if answer != "基于检索证据的回答 [1]" || len(citations) != 1 {
+		t.Fatalf("unexpected grounded result: answer=%q citations=%+v", answer, citations)
+	}
+	if len(tokens) != 1 || tokens[0] != answer {
+		t.Fatalf("tool-decision text must stay buffered; tokens=%q", tokens)
+	}
+}
+
 type intentCase struct {
 	name        string
 	question    string
@@ -315,11 +372,24 @@ func TestRouteIntentBoundaries(t *testing.T) {
 	})
 }
 
-func TestSystemPromptGuidesEvidenceBoundariesWithoutConfidenceScores(t *testing.T) {
+func TestSystemPromptDefinesDDSAnswerAndCitationBoundaries(t *testing.T) {
 	for _, required := range []string{
-		"summarize retrieved scope, not clarify",
-		"answer supported facts then the exact gap",
-		"Never invent facts, sources, citations, or confidence scores",
+		"technical assistant for DDS developers",
+		"Every factual statement about the product must have a supporting citation",
+		"end of the same sentence",
+		"cite every sentence separately",
+		"A citation must genuinely support the exact claim",
+		"Concept or architecture",
+		"Installation or configuration",
+		"API question",
+		"QoS question",
+		"Troubleshooting",
+		"Performance tuning",
+		"do not claim the whole answer is unavailable",
+		"Never invent facts, sources, API signatures",
+		"treat it as a fresh request for the same factual answer",
+		"Previous assistant answers are conversational context, not evidence",
+		"consistency and evidence fidelity take priority over novelty",
 	} {
 		if !strings.Contains(systemPrompt, required) {
 			t.Fatalf("system prompt must contain %q", required)

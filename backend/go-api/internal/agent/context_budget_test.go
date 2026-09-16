@@ -253,15 +253,15 @@ func TestHarnessAppliesContextBudget(t *testing.T) {
 	model := &captureModel{}
 
 	history := []Message{
-		{Role: "user", Content: "old question 12345678901234567890"},
-		{Role: "assistant", Content: "old answer 12345678901234567890"},
-		{Role: "user", Content: "another old question 12345678901234567890"},
-		{Role: "assistant", Content: "another old answer 12345678901234567890"},
+		{Role: "user", Content: strings.Repeat("old question ", 200)},
+		{Role: "assistant", Content: strings.Repeat("old answer ", 200)},
+		{Role: "user", Content: strings.Repeat("another old question ", 200)},
+		{Role: "assistant", Content: strings.Repeat("another old answer ", 200)},
 		{Role: "user", Content: "latest question"},
 	}
 
 	budget := ContextBudget{
-		MaxTokens:        160,
+		MaxTokens:        estimateMessageTokens(Message{Role: "system", Content: systemPrompt}) + 512,
 		ReserveTokens:    2,
 		SystemTokens:     2,
 		ToolSchemaTokens: 2,

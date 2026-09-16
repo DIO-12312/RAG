@@ -116,6 +116,10 @@ PENDING → RUNNING → SUCCEEDED
 6. Topic 邻居只在锚点多样化后扩展，不占用直接召回锚点配额；
 7. ContextBuilder：在模型上下文预算内选取证据，超限时按得分截断，不截断句中间。
 
+Go Agent 在一次 Run 的多轮检索中按 `document_id/index_version/chunk_id` 去重并累计 Evidence，默认最多保留 60 条；达到上限后保留稳定的前 60 条及既有 Citation 编号，并忽略后续低优先级候选。该数量上限不取消单轮工具结果的字节预算和模型上下文裁剪，最终送入模型的内容仍须服从上下文窗口。
+
+Go Agent 的知识问答首轮检索查询由确定性意图路由产生；若模型提供方违反 `tool_choice=required`、只返回自由文本而没有 `rag_retrieve` 调用，运行时必须丢弃该未检索正文，并用路由得到的独立查询补建一次成对的工具调用，不能以 `INVALID_TOOL_CALL` 留下只有用户消息的半成品会话。工具决策阶段的自由文本不得作为回答 token 发给浏览器。产品 HTTP 层只可在 Agent 完成引用校验且 assistant 消息成功写入 MySQL 后交付缓存的回答 token 和 `final` 事件；失败时只发送 `error`，前端必须清除临时正文并从已持久化会话恢复，避免刷新后回答消失。
+
 ### 2.4 全链路可插拔，但只实现一套默认适配器
 
 | 层 | 抽象端口 | MVP 默认实现 | 后续可替换实现 |

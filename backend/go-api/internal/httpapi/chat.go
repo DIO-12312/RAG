@@ -141,7 +141,7 @@ func (s *Server) chat(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no")
 	c.Header("Cache-Control", "no-cache")
 	c.Status(200)
-	emit := func(event string, data any) error {
+	sendEvent := func(event string, data any) error {
 		if e := ctx.Err(); e != nil {
 			return e
 		}
@@ -153,6 +153,17 @@ func (s *Server) chat(c *gin.Context) {
 		_, err = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, b)
 		c.Writer.Flush()
 		return err
+	}
+	// 回答正文只有在 Agent 完成引用校验且消息成功落库后才可交付给浏览器。
+	// 否则 required-tool 违规、非法引用或保存失败会留下只存在于页面内存中的
+	// “幽灵回答”：用户能看到 token，却永远收不到 final，刷新后回答随即消失。
+	bufferedTokens := []any{}
+	emit := func(event string, data any) error {
+		if event == "token" {
+			bufferedTokens = append(bufferedTokens, data)
+			return nil
+		}
+		return sendEvent(event, data)
 	}
 	modelClient := agent.ModelClient(s.AllowLocalModels)
 	defer modelClient.CloseIdleConnections()
@@ -173,15 +184,20 @@ func (s *Server) chat(c *gin.Context) {
 	answer, citations, e := h.Run(ctx, p.DatasetID, p.Question, history, emit)
 	if e != nil {
 		code, message := agent.FailureHint(e)
-		_ = emit("error", gin.H{"code": code, "message": message})
+		_ = sendEvent("error", gin.H{"code": code, "message": message})
 		return
 	}
 	b, _ := json.Marshal(citations)
 	if _, e = s.Store.DB.ExecContext(ctx, "INSERT INTO conversation_messages(conversation_id,dataset_id,role,content,citations_json) VALUES(?,?,'assistant',?,?)", p.ConversationID, p.DatasetID, answer, b); e != nil {
-		_ = emit("error", gin.H{"code": "SAVE_FAILED", "message": "回答生成成功，但会话保存失败。"})
+		_ = sendEvent("error", gin.H{"code": "SAVE_FAILED", "message": "回答生成成功，但会话保存失败。"})
 		return
 	}
-	_ = emit("final", gin.H{"answer": answer, "citations": citations, "conversationId": p.ConversationID})
+	for _, token := range bufferedTokens {
+		if e = sendEvent("token", token); e != nil {
+			return
+		}
+	}
+	_ = sendEvent("final", gin.H{"answer": answer, "citations": citations, "conversationId": p.ConversationID})
 }
 func (s *Server) conversations(c *gin.Context) {
 	rows, e := s.Store.DB.QueryContext(c.Request.Context(), "SELECT c.id,c.dataset_id,c.title,c.created_at,COALESCE((SELECT MAX(m.created_at) FROM conversation_messages m WHERE m.conversation_id=c.id),c.created_at) AS last_activity FROM conversations c WHERE c.user_id=? ORDER BY last_activity DESC,c.id DESC LIMIT 100", uid(c))

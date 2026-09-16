@@ -122,7 +122,30 @@ func (h Harness) modelPhase(ctx context.Context, state *RunState, emit Emit) err
 		return failFromError(state, ctx, err)
 	}
 	state.RecordModelCall()
-	h.observe(ctx, state, RunEvent{Stage: RunStageModel, Round: state.ModelCalls, Action: string(policy.Mode)})
+	modelAction := string(policy.Mode)
+
+	// 首轮知识检索的独立查询已经由确定性路由产生。部分兼容 OpenAI 的模型即使收到
+	// tool_choice=required 仍会直接输出一段答案而不返回 tool_calls。不能把这段未经检索
+	// 的正文当作最终回答，也不能因此让已保存的用户消息对应一个失败 Run；改用路由查询
+	// 补建严格成对的工具调用，后续仍走同一检索、充分性和引用校验链路。
+	if len(msg.ToolCalls) == 0 && policy.Mode == ToolRequired {
+		query := strings.TrimSpace(state.Intent.StandaloneQuery)
+		if state.Intent.Action != "retrieve" || query == "" {
+			state.MarkFailed(StopReasonInvalidToolCall)
+			return errors.New("required retrieval tool call is missing")
+		}
+		encoded, encodeErr := json.Marshal(query)
+		if encodeErr != nil {
+			state.MarkFailed(StopReasonProviderError)
+			return errors.New("required retrieval query cannot be encoded")
+		}
+		call := ToolCall{ID: fmt.Sprintf("required-retrieve-%d", state.ModelCalls), Type: "function"}
+		call.Function.Name = ragRetrieveToolName
+		call.Function.Arguments = fmt.Sprintf(`{"query":%s}`, encoded)
+		msg = Message{Role: "assistant", ToolCalls: []ToolCall{call}}
+		modelAction = "required_fallback"
+	}
+	h.observe(ctx, state, RunEvent{Stage: RunStageModel, Round: state.ModelCalls, Action: modelAction})
 
 	if policy.Mode == ToolNone && len(msg.ToolCalls) > 0 {
 		state.MarkFailed(StopReasonInvalidToolCall)
@@ -357,12 +380,16 @@ func (h Harness) complete(ctx context.Context, state *RunState, messages []Messa
 	}
 	var content strings.Builder
 	var toolCalls []ToolCall
+	forwardTokens := policy.Mode != ToolRequired
 	if err := sm.Stream(
 		ctx,
 		messages,
 		policy,
 		func(delta string) error {
 			content.WriteString(delta)
+			if !forwardTokens {
+				return nil
+			}
 			return emit("token", map[string]any{"text": delta})
 		},
 		func(call ToolCall) error {
@@ -383,7 +410,7 @@ func (h Harness) finalizePhase(ctx context.Context, state *RunState, emit Emit) 
 	if state.AnswerNeeded {
 		messages := state.Messages
 		if state.SufficiencyChecked && !state.Sufficiency.Sufficient {
-			messages = withSystemDirective(messages, insufficientEvidenceDirective)
+			messages = withSystemDirective(messages, buildInsufficientEvidenceDirective(state.Sufficiency))
 		}
 		messages = state.Budget.TrimMessages(messages)
 		if !state.Budget.Fits(messages) {
@@ -464,9 +491,27 @@ func (h Harness) finalizePhase(ctx context.Context, state *RunState, emit Emit) 
 	return nil
 }
 
-// insufficientEvidenceDirective 在 SCA 判定（或降级为）证据不足时约束最终回答。
-const insufficientEvidenceDirective = "The retrieved evidence is insufficient to answer fully. " +
-	"State clearly which facts are missing, do not invent citations, and do not answer beyond the supplied evidence."
+// buildInsufficientEvidenceDirective 在 SCA 判定（或降级为）证据不足时，
+// 把结构化缺口明确交给最终回答模型，避免模型重新猜测“缺什么”。
+func buildInsufficientEvidenceDirective(decision SufficiencyDecision) string {
+	if decision.ReasonCode == "assessor_unavailable" {
+		return "The evidence sufficiency assessment was unavailable. This does not mean the retrieved evidence is insufficient. Answer the user's core request directly from the strongest supplied evidence with sentence-level citations. Do not add a missing-information section unless the supplied evidence itself clearly cannot answer an explicitly requested part. Do not speculate or invent citations."
+	}
+
+	var builder strings.Builder
+	builder.WriteString("The retrieved evidence is insufficient for a complete answer and supports only a partial answer to the user's explicit request. ")
+	builder.WriteString("Answer every supported part with sentence-level citations, then add a short section named in the user's language that states the exact missing information. ")
+	builder.WriteString("Do not speculate, invent citations, or answer beyond the supplied evidence.")
+	if len(decision.MissingFacts) == 0 {
+		return builder.String()
+	}
+
+	builder.WriteString("\n\nThe sufficiency assessor identified these concrete missing facts:\n")
+	for _, fact := range decision.MissingFacts {
+		fmt.Fprintf(&builder, "- %s\n", fact)
+	}
+	return strings.TrimSpace(builder.String())
+}
 
 // withSystemDirective 保持消息顺序不变，只扩展首条 system 提示。
 func withSystemDirective(messages []Message, directive string) []Message {

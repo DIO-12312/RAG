@@ -8,6 +8,20 @@ import (
 	"testing"
 )
 
+func TestSufficiencyPromptJudgesExplicitCoreRequestNotEncyclopedicCompleteness(t *testing.T) {
+	for _, required := range []string{
+		"explicit core request",
+		"Do not require optional background, encyclopedic completeness",
+		"an exhaustive inventory is not required",
+		"Do not mark evidence insufficient merely because more background could be added",
+		"short, concrete, retrieval-ready facts",
+	} {
+		if !strings.Contains(sufficiencyPrompt, required) {
+			t.Fatalf("sufficiency prompt must contain %q", required)
+		}
+	}
+}
+
 // assessorModel 记录每次请求的消息与工具策略，并按顺序返回预设结果。
 type assessorModel struct {
 	responses []Message

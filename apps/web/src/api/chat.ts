@@ -3,8 +3,13 @@ import { checkedFetch } from "./http";
 export interface ChatStream { events: AsyncIterable<ChatEvent>; cancel(): void; }
 export function streamChat(payload: ChatRequest): ChatStream {
   const abort = new AbortController();
+  // Node/jsdom 等多 realm 环境可能提供与 fetch 的 Request 不同源的 AbortSignal；
+  // 这类 signal 会让请求在发出前抛 TypeError。浏览器中保持正常取消能力，只有
+  // 构造器明确拒绝时才省略 signal，避免测试/嵌入式运行时连请求都无法建立。
+  let signal: AbortSignal | undefined = abort.signal;
+  try { new Request(window.location.origin, { signal }); } catch { signal = undefined; }
   async function* events(): AsyncIterable<ChatEvent> {
-    const response = await checkedFetch("/chat/stream", { method: "POST", body: JSON.stringify(payload), signal: abort.signal });
+    const response = await checkedFetch("/chat/stream", { method: "POST", body: JSON.stringify(payload), signal });
     if (!response.body) throw new Error("服务器未返回对话流");
     const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let terminal = false;
     try {

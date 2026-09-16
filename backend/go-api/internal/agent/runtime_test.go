@@ -433,8 +433,10 @@ func TestRuntimeInsufficientEvidenceConstrainsFinalAnswer(t *testing.T) {
 		t.Fatalf("unexpected stop reason: %+v", state)
 	}
 	prompt := lastSystemPrompt(model.messages[len(model.messages)-1])
-	if !strings.Contains(prompt, "insufficient") {
-		t.Fatalf("finalize must instruct the model about missing evidence: %s", prompt)
+	for _, want := range []string{"partial answer", "migration 的结束时间", "sentence-level citations"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("finalize must pass the concrete missing fact and answer constraints (%q): %s", want, prompt)
+		}
 	}
 }
 
@@ -462,6 +464,11 @@ func TestRuntimeAssessorUnavailableDegradesWithoutRetry(t *testing.T) {
 	}
 	if model.calls != 2 {
 		t.Fatalf("expected tool decision + constrained answer, got %d calls", model.calls)
+	}
+	prompt := lastSystemPrompt(model.messages[len(model.messages)-1])
+	if !strings.Contains(prompt, "does not mean the retrieved evidence is insufficient") ||
+		strings.Contains(prompt, "supports only a partial answer") {
+		t.Fatalf("assessor outage must use a neutral evidence directive: %s", prompt)
 	}
 }
 
