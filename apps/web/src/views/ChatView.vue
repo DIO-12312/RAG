@@ -15,6 +15,7 @@ const questionTooLong=computed(()=>questionBytes.value>QUESTION_MAX_BYTES);
 const contextUsage=ref<{estimatedTokens:number;usableTokens:number;evidenceCount:number;evidenceLimit:number}|undefined>();
 const contextWarning=computed(()=>{const usage=contextUsage.value;if(!usage||!usage.usableTokens)return "";const ratio=usage.estimatedTokens/usage.usableTokens;const capped=usage.evidenceLimit>0&&usage.evidenceCount>=usage.evidenceLimit;if(ratio<0.8&&!capped)return "";const percent=Math.round(ratio*100);const detail=`约 ${usage.estimatedTokens.toLocaleString()} / ${usage.usableTokens.toLocaleString()} tokens`;if(capped&&ratio<0.8)return `证据条数已达上限（${usage.evidenceCount} / ${usage.evidenceLimit}），更早或更低分的证据会被丢弃。`;if(ratio>=0.95)return `上下文已用 ${percent}%（${detail}），接近上限，较早的对话与部分证据可能被裁剪。`;return `上下文已用 ${percent}%（${detail}，证据 ${usage.evidenceCount} 条），继续追问可能触发裁剪。`;});
 async function refreshHistory():Promise<void>{try{conversations.value=await request('/conversations');}catch(e){error.value=e instanceof Error?e.message:'历史会话加载失败';}}
+async function deleteConversations(ids:string[]):Promise<void>{if(busy.value||!ids.length)return;busy.value=true;error.value='';try{for(const id of ids)await request("/conversations/"+encodeURIComponent(id),{method:"DELETE"});if(ids.includes(conversationId.value))newChat();await refreshHistory();}catch(e){error.value=e instanceof Error?e.message:"历史会话删除失败";}finally{busy.value=false;}}
 function newChat():void{if(busy.value)return;conversationId.value='';transcript.value=[];answer.value='';citations.value=[];question.value='';error.value='';contextUsage.value=undefined;if(route.query.c)router.replace({query:{}});}
 function sendOnEnter(event:KeyboardEvent):void{if(event.isComposing||event.keyCode===229)return;if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();void ask();}
 let active:ChatStream|undefined;
@@ -85,6 +86,7 @@ async function ask():Promise<void>{
         @select="resume"
         @new="newChat"
         @refresh="refreshHistory"
+        @delete="deleteConversations"
       />
     </header><p
       v-if="datasets.error"

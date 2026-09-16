@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -222,6 +223,62 @@ func (s *Server) conversations(c *gin.Context) {
 	}
 	c.JSON(200, out)
 }
+func (s *Server) deleteConversation(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	conversationID := c.Param("id")
+	userID := uid(c)
+
+	tx, err := s.Store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		fail(c, 503, "DELETE_FAILED", "会话删除失败。")
+		return
+	}
+	defer tx.Rollback()
+
+	var exists int
+	if err = tx.QueryRowContext(
+		ctx,
+		"SELECT 1 FROM conversations WHERE id=? AND user_id=?",
+		conversationID,
+		userID,
+	).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			fail(c, 404, "NOT_FOUND", "会话不存在。")
+			return
+		}
+		fail(c, 503, "DELETE_FAILED", "会话删除失败。")
+		return
+	}
+
+	if _, err = tx.ExecContext(
+		ctx,
+		"DELETE FROM conversation_messages WHERE conversation_id=?",
+		conversationID,
+	); err != nil {
+		fail(c, 503, "DELETE_FAILED", "会话消息删除失败。")
+		return
+	}
+
+	if _, err = tx.ExecContext(
+		ctx,
+		"DELETE FROM conversations WHERE id=? AND user_id=?",
+		conversationID,
+		userID,
+	); err != nil {
+		fail(c, 503, "DELETE_FAILED", "会话删除失败。")
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		fail(c, 503, "DELETE_FAILED", "会话删除失败。")
+		return
+	}
+
+	c.AbortWithStatus(http.StatusNoContent)
+}
+
 func (s *Server) messages(c *gin.Context) {
 	var dataset string
 	e := s.Store.DB.QueryRowContext(c.Request.Context(), "SELECT dataset_id FROM conversations WHERE id=? AND user_id=?", c.Param("id"), uid(c)).Scan(&dataset)

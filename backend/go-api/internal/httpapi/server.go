@@ -106,6 +106,7 @@ func (s *Server) Router() *gin.Engine {
 	a.POST("/chat/stream", s.chat)
 	a.GET("/conversations", s.conversations)
 	a.GET("/conversations/:id/messages", s.messages)
+	a.DELETE("/conversations/:id", s.deleteConversation)
 	return r
 }
 func (s *Server) authenticate(c *gin.Context) {
