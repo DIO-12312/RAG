@@ -122,3 +122,145 @@ async def test_recursive_chunker_keeps_ellipsis_and_short_page_numbers() -> None
     assert len(drafts) == 2
     assert "更多..." in drafts[0].content_with_weight
     assert "内存：256M" in drafts[1].content_with_weight
+
+
+@pytest.mark.asyncio
+async def test_recursive_chunker_coalesces_adjacent_explicit_steps_within_scope() -> None:
+    """同页同章节的连续短步骤合并，避免泛化短句因语义不足而漏召回。"""
+
+    chunker = RecursiveChunker(chunk_size=800, overlap=120)
+    heading = "2. 安装与配置 > 2.1. Windows 安装"
+    segments = tuple(
+        ParsedSegment(
+            text=f"{heading}\n\n{text}",
+            locator=Locator(page_number=2, start_line=line, end_line=line),
+            metadata={
+                "source_type": "pdf",
+                "heading_path": heading,
+                "layout_type": "paragraph",
+            },
+        )
+        for line, text in (
+            (1, "第二步：选择安装路径后，并点击“安装”。"),
+            (2, "第三步：等待安装完成。"),
+            (3, "第四步：确认环境变量替换提示。"),
+        )
+    )
+
+    drafts = await chunker.split(segments)
+
+    assert len(drafts) == 1
+    assert drafts[0].content_with_weight.count(heading) == 1
+    assert "第二步：选择安装路径后" in drafts[0].content_with_weight
+    assert "第三步：等待安装完成" in drafts[0].content_with_weight
+    assert "第四步：确认环境变量" in drafts[0].content_with_weight
+    assert drafts[0].locator.page_number == 2
+    assert drafts[0].locator.start_line == 1
+    assert drafts[0].locator.end_line == 3
+    assert drafts[0].metadata["layout_type"] == "procedure"
+    assert drafts[0].metadata["procedure_step_start"] == "2"
+    assert drafts[0].metadata["procedure_step_end"] == "4"
+
+
+@pytest.mark.asyncio
+async def test_recursive_chunker_keeps_procedures_inside_source_boundaries() -> None:
+    """步骤合并不得跨 PDF 页面、CHM Topic，CHI 索引项也不参与步骤识别。"""
+
+    chunker = RecursiveChunker(chunk_size=800, overlap=120)
+    segments = (
+        ParsedSegment(
+            text="第一步：启动安装程序。",
+            locator=Locator(page_number=1, start_line=8, end_line=8),
+            metadata={"source_type": "pdf", "heading_path": "Windows 安装"},
+        ),
+        ParsedSegment(
+            text="第二步：选择安装路径。",
+            locator=Locator(page_number=2, start_line=1, end_line=1),
+            metadata={"source_type": "pdf", "heading_path": "Windows 安装"},
+        ),
+        ParsedSegment(
+            text="第一步：创建 DomainParticipant。",
+            locator=Locator(symbol="TopicA"),
+            metadata={
+                "source_type": "chm",
+                "topic_path": "api/topic-a.html",
+                "heading_path": "初始化",
+            },
+        ),
+        ParsedSegment(
+            text="第二步：创建 Publisher。",
+            locator=Locator(symbol="TopicB"),
+            metadata={
+                "source_type": "chm",
+                "topic_path": "api/topic-b.html",
+                "heading_path": "初始化",
+            },
+        ),
+        ParsedSegment(
+            text="第一步：索引关键词，不是正文步骤。",
+            locator=Locator(symbol="第一步"),
+            metadata={"source_type": "chi", "topic_path": "api/topic-a.html"},
+        ),
+    )
+
+    drafts = await chunker.split(segments)
+
+    assert len(drafts) == 5
+    assert drafts[0].locator.page_number == 1
+    assert drafts[1].locator.page_number == 2
+    assert drafts[2].metadata["topic_path"] == "api/topic-a.html"
+    assert drafts[3].metadata["topic_path"] == "api/topic-b.html"
+    assert "procedure_id" not in drafts[4].metadata
+
+
+@pytest.mark.asyncio
+async def test_recursive_chunker_does_not_merge_ordinary_numbered_lists() -> None:
+    """普通编号列表可能是参数、枚举或目录，不得仅凭数字误判成操作流程。"""
+
+    chunker = RecursiveChunker(chunk_size=800, overlap=120)
+    segments = (
+        ParsedSegment(text="1. DDS_RETCODE_OK", locator=Locator(start_line=1, end_line=1)),
+        ParsedSegment(text="2. DDS_RETCODE_ERROR", locator=Locator(start_line=2, end_line=2)),
+    )
+
+    drafts = await chunker.split(segments)
+
+    assert len(drafts) == 2
+    assert all("procedure_id" not in draft.metadata for draft in drafts)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_type", "first", "second"),
+    (
+        ("markdown", "Step 1: Create a participant.", "Step 2: Create a publisher."),
+        ("text", "步骤 1：创建参与者。", "步骤 2：创建发布者。"),
+    ),
+)
+async def test_recursive_chunker_recognizes_explicit_steps_across_body_formats(
+    source_type: str,
+    first: str,
+    second: str,
+) -> None:
+    """统一步骤策略覆盖正文格式及中英文显式标记。"""
+
+    drafts = await RecursiveChunker(chunk_size=800, overlap=120).split(
+        (
+            ParsedSegment(
+                text=first,
+                locator=Locator(start_line=1, end_line=1),
+                metadata={"source_type": source_type, "section": "quick-start"},
+            ),
+            ParsedSegment(
+                text=second,
+                locator=Locator(start_line=2, end_line=2),
+                metadata={"source_type": source_type, "section": "quick-start"},
+            ),
+        )
+    )
+
+    assert len(drafts) == 1
+    assert first in drafts[0].content_with_weight
+    assert second in drafts[0].content_with_weight
+    assert drafts[0].metadata["procedure_step_start"] == "1"
+    assert drafts[0].metadata["procedure_step_end"] == "2"

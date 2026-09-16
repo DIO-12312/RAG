@@ -49,6 +49,7 @@ apps/web/tests/
 | `tests/unit/ingestion/test_multiformat_parsers.py::test_non_pdf_formats_do_not_fabricate_printed_page_numbers` | 非 PDF 输入不伪造印刷页码，离线解析测试 |
 | `backend/go-api/internal/ragclient/client_test.go::TestRetrieveDisplaysPrintedAndPhysicalPDFPages`、`TestRetrieveFallsBackToPhysicalPDFPageWithoutPrintedFooter` | 兼容历史双页码 metadata，新结果无印刷页码时回退物理页；离线 Go RPC 替身 |
 
+2026-09-16 步骤识别：`source-router-v13` 在统一切分层合并同结构、同页面内连续的“第 N 步/步骤 N/Step N”短 segment，保留 procedure 元数据并严格限制 PDF 页、CHM Topic/标题及其他 section/symbol 边界；普通编号列表和 CHI sidecar 不参与合并。该变更会改变 Chunk 正文与 ID，已有正文文档需重新索引。
 2026-09-16 目录噪声过滤：`source-router-v11`（此前 v10）在切块阶段丢弃纯目录/索引导引点段落，避免目录条目成为证据与引用；ZRDDS PDF 实测移除 93 个目录 Chunk，CHM/CHI 分段不受影响。
 2026-09-15 PDF 索引回退说明：`source-router-v10`（此前 v9）恢复 CHM3 验证过的 pdfplumber 词级坐标与版面分段路径，同时保留页脚印刷页码、物理页码、OCR、重复页眉页脚过滤和来源 bbox。`tests/unit/ingestion/test_pdf_deepdoc_parser.py` 覆盖标题、表格、OCR、页码与 CHM3 风格分段；Python 离线检查只验证确定性结构，不替代真实 ZRDDS PDF 重新索引后的人工质量验收。
 
@@ -444,6 +445,10 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_recursive_chunker_matches_txt_golden_fixture` | TXT 切块结果与 golden fixture 一致。 |
 | 同上 | `test_recursive_chunker_drops_table_of_contents_segments` | 目录页导引点条目不作为 Chunk 进入索引，正文段落不受影响。 |
 | 同上 | `test_recursive_chunker_keeps_ellipsis_and_short_page_numbers` | 正文省略号与带单位的短行不会被误判为目录条目。 |
+| 同上 | `test_recursive_chunker_coalesces_adjacent_explicit_steps_within_scope` | 同页同章节的连续显式短步骤合并为一个 procedure Chunk，标题只保留一次并保留步骤范围和来源定位。 |
+| 同上 | `test_recursive_chunker_keeps_procedures_inside_source_boundaries` | 步骤识别不跨 PDF 页面或 CHM Topic，CHI 关键词 sidecar 不参与步骤合并。 |
+| 同上 | `test_recursive_chunker_does_not_merge_ordinary_numbered_lists` | 普通数字列表、枚举和参数序号不会被误判成操作流程。 |
+| 同上 | `test_recursive_chunker_recognizes_explicit_steps_across_body_formats` | Markdown/TXT 等正文格式共享中英文显式步骤识别，验证统一策略不局限于 PDF。 |
 | `ingestion/test_text_parser.py` | `test_text_parser_normalizes_bom_and_newlines_with_line_locator` | 规范 BOM/换行并生成行定位。 |
 | 同上 | `test_text_parser_rejects_invalid_utf8_with_stable_error` | 非法 UTF-8 返回稳定错误码。 |
 | `ingestion/test_worker.py` | `test_worker_claims_executes_completes_then_acks` | Worker 的认领、执行、完成、ACK 顺序正确。 |

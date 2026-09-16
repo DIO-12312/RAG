@@ -77,6 +77,8 @@ Python MVP 的唯一入口是 gRPC；本地调试也调用同一 gRPC 服务。P
 
 自 `source-router-v9` 起，PDF `auto/deepdoc` 恢复经 CHM3 实际知识库验证的 pdfplumber 词级坐标路径：先按页面提取词块，再按纵向容差恢复物理行和横向间距；连续多列行可形成 Markdown 表格，段落、列表、表格、标题与明显纵向间距共同构成 segment 边界，长段仍由既有 `chunk_size/overlap` 切块。原生文本不足时继续按页降级到 Poppler + Tesseract OCR；重复页眉页脚仍按跨页统计移除。页脚印刷页码作为 `printed_page_number` 来源元数据保留并从正文剔除，物理页码继续保存在 locator，前端可同时展示两者。该回退仅改变 PDF 解析和索引正文，不改变 CHM/CHI、Embedding、ES schema 或查询流程；已有 PDF 必须通过新版本重建后才生效。
 
+自 `source-router-v13` 起，统一切分层识别正文中的显式操作步骤（中文“第 N 步/步骤 N”和英文 `Step N`）。同一来源结构、同一页面内编号连续的短 segment 在递归切块前合并为一个 `procedure` segment，并保留 `procedure_id`、步骤起止编号和原始定位；PDF 不跨物理页，CHM 不跨 Topic/标题路径，其他结构化来源不跨 section/symbol。普通数字列表不视为步骤，CHI 作为关键词/Topic 映射 sidecar 不参与步骤合并。合并后的长流程仍必须遵守 `chunk_size=800` 与 `overlap=120`，该规则改变最终检索正文、Embedding 和 `chunk_id`，已有正文文档必须重新索引后生效。
+
 一个上传的 CHM 对应一个既有 `Document`，不为 Topic 新建数据库 Document。CHM 内每个 HTML Topic 是逻辑子文档和不可跨越的切块硬边界；Topic 内先按 `h1`～`h6` 标题层级形成段落，超长标题段再依次优先选择段落、句子和词法 token 边界，单个不可分 token 才允许按字符硬截断。Topic 顺序优先采用 `.hhc` 目录，未列入目录的 HTML 按规范化路径稳定追加。每个 CHM Chunk 的 `content_with_weight` 必须在正文前稳定加入 `topic_title`、`heading_path` 与 locator `symbol` 上下文，使同一 Topic 的所有分块均可按页面标题、标题路径和接口符号检索；正文切分上限不包含该检索权重前缀。权重文本参与 Embedding、内容摘要和 `chunk_id` 计算，因此修改前缀规则必须提升 parser/chunker 配置版本并重建索引。Chunk 与 Evidence 必须同时保留原 CHM `source_name`，并在 metadata/locator metadata 中返回 `topic_path`、`topic_title`、`topic_order`、`heading_path` 和可选 `anchor`；行号仍表示 Topic 规范化正文中的行范围，不计算检索权重前缀。
 
 CHM 只解析本地解包后的 HTML 文本，不执行脚本、样式、ActiveX 或外部资源。生产 Worker 使用 `extract_chmLib`，并对签名、路径、符号链接、解包超时、文件数、Topic 数和展开总字节执行 fail-closed 限制；缺少运行时返回 `CHM_EXTRACTOR_UNAVAILABLE`，损坏、越界或无可读 Topic 返回不可重试 `INVALID_CHM`。
@@ -240,7 +242,7 @@ Object Finalizer 对 `WAITING_OBJECT` 指数退避重试；达到 `max_finalize_
 | 能力 | MVP 策略 | 默认参数（可配置） |
 |---|---|---|
 | Embedding | OpenAI-compatible `/embeddings` | `batch_size=20`、`max_concurrency=4`；一个文档内按有界并发发送批次并保持全局输入顺序。默认批次大小按提供方常见上限（20）设定：超限会被 400 拒绝并触发二分，等于把每个批次放大成三次请求。多输入批次收到 HTTP 400 时按输入顺序二分并重试，并从错误文本中学习提供方声明的单请求上限以收紧后续批次；单条仍被拒绝则返回 `EMBEDDING_REQUEST_REJECTED`；429/5xx 执行遵循 `Retry-After` 的有限退避重试，并按 `embedding_max_chars_per_minute`（默认 25 万字符/分钟，0 表示不限制）以字符数近似输入量做令牌桶节流（突发容量约 10 秒预算，避免开头一次性打满整分钟配额），被限流后按半数收紧、持续成功后小幅恢复，额度类错误码（如 `insufficient_quota`）单独返回 `EMBEDDING_QUOTA_EXCEEDED`，避免把额度问题显示成网络故障；维度由模型返回后校验并固定 Elasticsearch index mapping。 |
-| Chunking | 多格式递归切分 | `chunk_size=800` 字符，`overlap=120`；代码按函数/类优先；CHM 固定 Topic/标题硬边界，超长标题段按段落→句子→词法 token 递归切分。 |
+| Chunking | 多格式递归切分 | `chunk_size=800` 字符，`overlap=120`；显式连续步骤先在同结构/同页面内合并并附带 procedure 元数据；代码按函数/类优先；CHM 固定 Topic/标题硬边界，超长标题段按段落→句子→词法 token 递归切分。 |
 | PDF 解析 | `plain / deepdoc / auto` | 默认 `auto`；每页原生文字少于 40 字符时尝试 `chi_sim+eng`、200 DPI OCR；最多 1000 页；重复页眉页脚在跨页统计后删除。 |
 | Dense 召回 | Cosine KNN | `dense_top_k=20` |
 | Sparse 召回 | Elasticsearch `match` / `multi_match` BM25 | `sparse_top_k=20` |
