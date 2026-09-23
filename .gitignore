@@ -83,6 +83,7 @@ CODEBUDDY.md
 
 .worktrees/
 .superpowers/
+/docs/personal/
 release.json
 release.tar.gz
 .releases/
