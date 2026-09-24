@@ -10,7 +10,7 @@ import (
 func TestUnauthenticatedAndCrossOrigin(t *testing.T) {
 	s := &Server{JWTKey: bytes.Repeat([]byte{1}, 32), Origin: "https://product.test"}
 	r := s.Router()
-	for _, path := range []string{"/me", "/datasets", "/settings", "/conversations"} {
+	for _, path := range []string{"/me", "/datasets", "/settings", "/conversations", "/admin/observability/metrics?window=1h", "/admin/observability/traces?service=rag-go-api&window=1h", "/admin/observability/traces/0123456789abcdef0123456789abcdef"} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		if w.Code != 401 {

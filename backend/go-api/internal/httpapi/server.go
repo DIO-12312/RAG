@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/mail"
+	"rag-mvp/backend/go-api/internal/observability"
 	"rag-mvp/backend/go-api/internal/ragclient"
 	"rag-mvp/backend/go-api/internal/security"
 	"rag-mvp/backend/go-api/internal/storage"
@@ -20,6 +21,7 @@ import (
 type Server struct {
 	Store              *storage.Store
 	RAG                *ragclient.Client
+	Observability      *observability.Client
 	Vault              *security.Vault
 	JWTKey             []byte
 	Origin             string
@@ -111,6 +113,10 @@ func (s *Server) Router() *gin.Engine {
 	a.GET("/conversations", s.conversations)
 	a.GET("/conversations/:id/messages", s.messages)
 	a.DELETE("/conversations/:id", s.deleteConversation)
+	admin := a.Group("/admin/observability", s.requireAdmin)
+	admin.GET("/metrics", s.observabilityMetrics)
+	admin.GET("/traces", s.observabilityTraces)
+	admin.GET("/traces/:trace_id", s.observabilityTrace)
 	return r
 }
 func (s *Server) authenticate(c *gin.Context) {

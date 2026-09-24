@@ -1,5 +1,7 @@
 # 测试目录与职责清单
 
+`backend/go-api/internal/observability/query_test.go`：假 Prometheus/Tempo 验证固定查询、部分故障、超限响应、空链路、非法 ID 和原始敏感 Span 属性过滤。`backend/go-api/internal/httpapi/server_test.go::TestUnauthenticatedAndCrossOrigin` 同时覆盖管理员路由未登录返回 401。
+
 `backend/go-api/internal/storage/admin_role_test.go`：角色枚举离线测试；设置 `PRODUCT_ROLE_TEST_MYSQL_DSN` 指向隔离 MySQL 时，检查注册默认普通用户、并发撤销最后管理员、无用户和非法角色。不能指向运行中的产品库。
 
 `backend/go-api/internal/telemetry/telemetry_test.go`：Go Agent 根 Span 与 gRPC 子 Span 同 trace、W3C metadata 传播、未知枚举和错误消息不会成为敏感 Span 属性；离线内存 exporter。
