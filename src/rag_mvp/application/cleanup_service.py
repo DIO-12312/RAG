@@ -13,7 +13,7 @@ from rag_mvp.ports.storage import ObjectStorage
 
 
 class CleanupService:
-    # 初始化该对象的依赖、配置或受控资源。
+    # 保存清理任务所需的元数据、检索和对象存储端口。
     def __init__(
         self,
         metadata: MetadataRepository,

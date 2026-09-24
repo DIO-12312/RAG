@@ -28,5 +28,5 @@ class ParsedSegment:
 class Parser(Protocol):
     """Parse source objects into normalized, traceable content."""
 
-    # 实现 parse 对应的局部职责。
+    # 将源文件字节解析为带出处定位和元数据的规范化片段。
     async def parse(self, source_name: str, content: bytes) -> Sequence[ParsedSegment]: ...

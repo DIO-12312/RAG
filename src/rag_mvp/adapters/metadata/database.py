@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 
-# 创建该方法负责的领域数据或基础设施状态。
+# 创建使用 READ COMMITTED 隔离级别和连接预检的异步 MySQL 引擎。
 def create_mysql_engine(dsn: str) -> AsyncEngine:
     """Create a pooled MySQL engine using the repository isolation contract."""
 
@@ -23,7 +23,7 @@ def create_mysql_engine(dsn: str) -> AsyncEngine:
     )
 
 
-# 创建该方法负责的领域数据或基础设施状态。
+# 创建提交后仍可读取已加载 ORM 对象的短生命周期异步会话工厂。
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     """Create short-lived sessions that retain loaded values after commit."""
 

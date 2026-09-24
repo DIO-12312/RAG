@@ -35,7 +35,7 @@ _CHINESE_DIGITS = {
 class RecursiveChunker:
     """Split segments with stable overlap while preferring line and word boundaries."""
 
-    # 初始化该对象的依赖、配置或受控资源。
+    # 校验并保存 Chunk 长度上限和相邻 Chunk 的重叠长度。
     def __init__(self, chunk_size: int, overlap: int) -> None:
         if chunk_size < 1:
             raise ValueError("chunk_size must be at least 1")
@@ -44,7 +44,7 @@ class RecursiveChunker:
         self._chunk_size = chunk_size
         self._overlap = overlap
 
-    # 实现 split 对应的局部职责。
+    # 合并连续流程段后按自然边界切块，并生成内容与来源定位信息。
     async def split(self, segments: Sequence[ParsedSegment]) -> tuple[ChunkDraft, ...]:
         drafts: list[ChunkDraft] = []
         for segment in _coalesce_procedure_segments(segments):
@@ -94,7 +94,7 @@ class RecursiveChunker:
         )
         return f"{prefix}\n\n{body}" if prefix else body
 
-    # 内部辅助：完成 find_end 所需的局部转换或校验。
+    # 在长度上限内优先选择段落、换行或句末边界作为切块终点。
     def _find_end(self, text: str, start: int) -> int:
         hard_end = min(start + self._chunk_size, len(text))
         if hard_end == len(text):
@@ -120,7 +120,7 @@ class RecursiveChunker:
         return token_boundary + 1 if token_boundary >= minimum else hard_end
 
     @staticmethod
-    # 内部辅助：完成 locator 所需的局部转换或校验。
+    # 根据切块字符范围推导来源行号；流程合并段保留完整流程范围。
     def _locator(segment: ParsedSegment, start: int, end: int) -> Locator:
         locator = segment.locator
         # A procedure segment may be assembled from several visual blocks. Its

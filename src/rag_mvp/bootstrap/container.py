@@ -85,16 +85,16 @@ class Container:
     _close_count: int = field(default=0, init=False)
 
     @property
-    # 实现 closed 对应的局部职责。
+    # 返回容器是否已执行关闭流程。
     def closed(self) -> bool:
         return self._closed
 
     @property
-    # 实现 close_count 对应的局部职责。
+    # 返回实际执行过的关闭流程次数。
     def close_count(self) -> int:
         return self._close_count
 
-    # 实现 register 对应的局部职责。
+    # 登记资源的关闭回调，并返回资源实例供容器装配使用。
     def register[T](self, resource: ManagedResource[T]) -> T:
         if self._closed:
             raise RuntimeError("cannot register a resource on a closed container")
@@ -120,7 +120,7 @@ class Container:
             raise first_error
 
 
-# 实现 default_adapter_factories 对应的局部职责。
+# 返回生产环境的适配器工厂；调用时不建立连接。
 def default_adapter_factories() -> AdapterFactories:
     """Return production factories without creating connections at import time."""
 
@@ -133,7 +133,7 @@ def default_adapter_factories() -> AdapterFactories:
     )
 
 
-# 构建该方法负责的领域数据或基础设施状态。
+# 创建 gRPC 服务进程所需的元数据、对象存储、检索和模型依赖。
 async def build_server_container(
     settings: Settings,
     factories: AdapterFactories | None = None,
@@ -199,7 +199,7 @@ async def build_server_container(
         raise
 
 
-# 构建该方法负责的领域数据或基础设施状态。
+# 创建唯一 JetStream Worker 所需的队列、摄取流水线和清理服务依赖。
 async def build_worker_container(
     settings: Settings,
     factories: AdapterFactories | None = None,
@@ -257,7 +257,7 @@ async def build_worker_container(
         raise
 
 
-# 构建该方法负责的领域数据或基础设施状态。
+# 创建 Object Finalizer、Outbox Relay 和 staging Sweeper 所需的依赖。
 async def build_outbox_container(
     settings: Settings,
     factories: AdapterFactories | None = None,
@@ -278,7 +278,7 @@ async def build_outbox_container(
         raise
 
 
-# 内部辅助：完成 metadata_resource 所需的局部转换或校验。
+# 创建 MySQL 元数据仓储，并登记数据库引擎的异步关闭回调。
 async def _metadata_resource(settings: Settings) -> ManagedResource[MetadataRepository]:
     engine = create_mysql_engine(settings.mysql_dsn)
 
@@ -295,12 +295,12 @@ async def _metadata_resource(settings: Settings) -> ManagedResource[MetadataRepo
     )
 
 
-# 内部辅助：完成 storage_resource 所需的局部转换或校验。
+# 创建配置目录对应的本地对象存储适配器。
 async def _storage_resource(settings: Settings) -> ManagedResource[ObjectStorage]:
     return ManagedResource(LocalObjectStorage(settings.object_root))
 
 
-# 内部辅助：完成 search_resource 所需的局部转换或校验。
+# 创建 Elasticsearch 检索适配器，确保索引存在后登记客户端关闭回调。
 async def _search_resource(settings: Settings) -> ManagedResource[SearchEngine]:
     dimension = (
         settings.search_embedding_dimension
@@ -327,7 +327,7 @@ async def _search_resource(settings: Settings) -> ManagedResource[SearchEngine]:
     return ManagedResource(search, search.close)
 
 
-# 内部辅助：完成 model_resource 所需的局部转换或校验。
+# 按模型配置创建本地数据集 Profile 或 OpenAI 兼容模型网关。
 async def _model_resource(settings: Settings) -> ManagedResource[ModelGateway]:
     if settings.model_encryption_key_file:
         return ManagedResource(
@@ -358,7 +358,7 @@ async def _model_resource(settings: Settings) -> ManagedResource[ModelGateway]:
     return ManagedResource(model, model.close)
 
 
-# 内部辅助：完成 queue_resource 所需的局部转换或校验。
+# 连接 NATS JetStream 并登记任务队列的关闭回调。
 async def _queue_resource(settings: Settings) -> ManagedResource[TaskQueue]:
     queue = await NatsJetStreamTaskQueue.connect(
         settings.nats_url,
@@ -371,13 +371,13 @@ async def _queue_resource(settings: Settings) -> ManagedResource[TaskQueue]:
     return ManagedResource(queue, queue.close)
 
 
-# 实现 install_shutdown_handlers 对应的局部职责。
+# 注册 SIGINT 和 SIGTERM 处理器，使进程停止时设置指定事件。
 def install_shutdown_handlers(stop_event: asyncio.Event) -> None:
     """Set *stop_event* for SIGINT/SIGTERM on Unix and Windows event loops."""
 
     loop = asyncio.get_running_loop()
 
-    # 实现 request_stop 对应的局部职责。
+    # 将同步信号处理器转发到事件循环以设置停止事件。
     def request_stop(_signum: int | None = None, _frame: FrameType | None = None) -> None:
         loop.call_soon_threadsafe(stop_event.set)
 

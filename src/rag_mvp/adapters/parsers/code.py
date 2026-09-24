@@ -34,7 +34,7 @@ _SYMBOLS = {
 
 
 class CodeParser:
-    # 实现 parse 对应的局部职责。
+    # 按顶层符号切分代码，并为每段保留语言和行号定位信息。
     async def parse(self, source_name: str, content: bytes) -> tuple[ParsedSegment, ...]:
         language = _LANGUAGES.get(Path(source_name).suffix.casefold())
         if language is None:
@@ -55,7 +55,7 @@ class CodeParser:
         return self._build(lines, language, tuple(ranges))
 
     @staticmethod
-    # 内部辅助：完成 find_symbols 所需的局部转换或校验。
+    # 扫描各行，找出与当前语言正则匹配的顶层符号及其行号。
     def _find_symbols(lines: list[str], pattern: re.Pattern[str]) -> list[tuple[int, str]]:
         result: list[tuple[int, str]] = []
         for index, line in enumerate(lines):
@@ -65,7 +65,7 @@ class CodeParser:
         return result
 
     @staticmethod
-    # 内部辅助：完成 build 所需的局部转换或校验。
+    # 将代码行范围转换为去除首尾空行的带定位信息的段落。
     def _build(
         lines: list[str],
         language: str,

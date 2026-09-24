@@ -24,7 +24,7 @@ from rag_mvp.domain.errors import DomainError, DomainFailure
 from rag_mvp.ports.message_queue import Delivery
 
 
-# 实现 delivery_from_message 对应的局部职责。
+# 将 JetStream 消息和元数据转换为端口定义的 Delivery。
 def delivery_from_message(message: Msg) -> Delivery:
     """Map JetStream metadata to the queue's infrastructure-neutral delivery."""
 
@@ -48,7 +48,7 @@ def delivery_from_message(message: Msg) -> Delivery:
 class NatsJetStreamTaskQueue:
     """Publish task IDs and pull explicit-ack deliveries from one durable consumer."""
 
-    # 初始化该对象的依赖、配置或受控资源。
+    # 保存 NATS 连接、JetStream 上下文和消费配置。
     def __init__(
         self,
         connection: NATS,
@@ -113,7 +113,7 @@ class NatsJetStreamTaskQueue:
                 await connection.close()
             raise cls._unavailable("task queue could not be connected or provisioned") from exc
 
-    # 实现 publish 对应的局部职责。
+    # 将 task_id 发布到 JetStream 主题，并等待服务端确认。
     async def publish(self, task_id: str) -> None:
         if not task_id.strip():
             raise ValueError("task_id must not be empty")
@@ -126,7 +126,7 @@ class NatsJetStreamTaskQueue:
         except NatsError as exc:
             raise self._unavailable("task could not be published") from exc
 
-    # 实现 consume 对应的局部职责。
+    # 从 durable consumer 拉取一条消息，并保存其确认句柄。
     async def consume(self, worker_id: str, timeout_seconds: float) -> Delivery | None:
         if not worker_id.strip():
             raise ValueError("worker_id must not be empty")
@@ -148,7 +148,7 @@ class NatsJetStreamTaskQueue:
         self._in_flight[delivery.id] = message
         return delivery
 
-    # 实现 ack 对应的局部职责。
+    # 确认已处理的投递，并移除本地飞行中消息记录。
     async def ack(self, delivery: Delivery) -> None:
         message = self._in_flight.get(delivery.id)
         if message is None:
@@ -159,7 +159,7 @@ class NatsJetStreamTaskQueue:
             raise self._unavailable("task delivery could not be acknowledged") from exc
         self._in_flight.pop(delivery.id, None)
 
-    # 实现 nak 对应的局部职责。
+    # 否认投递以请求重投，可携带延迟时间。
     async def nak(
         self,
         delivery: Delivery,
@@ -195,7 +195,7 @@ class NatsJetStreamTaskQueue:
             await self._connection.close()
 
     @staticmethod
-    # 内部辅助：完成 ensure_stream 所需的局部转换或校验。
+    # 创建或校验任务 Stream 的主题和保留配置。
     async def _ensure_stream(
         jetstream: JetStreamContext,
         stream: str,
@@ -222,7 +222,7 @@ class NatsJetStreamTaskQueue:
             raise _configuration_mismatch("existing stream configuration is incompatible")
 
     @staticmethod
-    # 内部辅助：完成 ensure_consumer 所需的局部转换或校验。
+    # 创建或校验 Worker 的 durable pull consumer 配置。
     async def _ensure_consumer(
         jetstream: JetStreamContext,
         stream: str,
@@ -247,7 +247,7 @@ class NatsJetStreamTaskQueue:
             raise _configuration_mismatch("existing consumer configuration is incompatible")
 
     @staticmethod
-    # 内部辅助：完成 validate_configuration 所需的局部转换或校验。
+    # 校验 NATS URL、主题、Stream 和 consumer 名称均可用于运行。
     def _validate_configuration(
         url: str,
         stream: str,
@@ -264,12 +264,12 @@ class NatsJetStreamTaskQueue:
             raise ValueError("max_deliver must be at least 1")
 
     @staticmethod
-    # 内部辅助：完成 unavailable 所需的局部转换或校验。
+    # 将底层 NATS 故障包装为可重试的队列不可用错误。
     def _unavailable(message: str) -> DomainError:
         return DomainError(DomainFailure("QUEUE_UNAVAILABLE", message, retryable=True))
 
 
-# 内部辅助：完成 invalid_message 所需的局部转换或校验。
+# 构造不可重试的无效队列消息错误。
 def _invalid_message() -> DomainError:
     return DomainError(
         DomainFailure(
@@ -280,6 +280,6 @@ def _invalid_message() -> DomainError:
     )
 
 
-# 内部辅助：完成 configuration_mismatch 所需的局部转换或校验。
+# 构造不可重试的队列配置不匹配错误。
 def _configuration_mismatch(message: str) -> DomainError:
     return DomainError(DomainFailure("QUEUE_CONFIG_MISMATCH", message, retryable=False))

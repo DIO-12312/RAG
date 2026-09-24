@@ -110,7 +110,7 @@ class _CharacterPacer:
 class OpenAICompatibleModelGateway:
     """Call an OpenAI-compatible embedding endpoint without leaking provider details."""
 
-    # 初始化该对象的依赖、配置或受控资源。
+    # 保存 OpenAI 兼容端点、认证信息、并发限制和自适应节流状态。
     def __init__(
         self,
         client: httpx.AsyncClient,
@@ -182,7 +182,7 @@ class OpenAICompatibleModelGateway:
             f"max_concurrency={self._max_concurrency})"
         )
 
-    # 实现 embed 对应的局部职责。
+    # 分批并发调用 Embedding 接口，并按输入顺序合并向量。
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
         """Embed inputs in bounded batches while preserving original order."""
 
@@ -204,7 +204,7 @@ class OpenAICompatibleModelGateway:
         embedded_batches = await asyncio.gather(*(embed_bounded(batch) for batch in batches))
         return [vector for batch in embedded_batches for vector in batch]
 
-    # 实现 rerank 对应的局部职责。
+    # 在未配置独立 Rerank 端点时，返回明确的降级错误。
     async def rerank(self, query: str, passages: list[str]) -> list[float]:
         """Report explicit degradation until a separate rerank endpoint is configured."""
 
@@ -223,7 +223,7 @@ class OpenAICompatibleModelGateway:
 
         await self._client.aclose()
 
-    # 内部辅助：完成 embed_batch 所需的局部转换或校验。
+    # 向 Embedding 端点提交一个批次，并处理限流、重试和响应校验。
     async def _embed_batch(self, texts: list[str]) -> list[tuple[float, ...]]:
         pending = sum(len(text) for text in texts)
         for attempt in range(self._max_retries + 1):
@@ -331,7 +331,7 @@ class OpenAICompatibleModelGateway:
                 learned_batch_size=limit,
             )
 
-    # 内部辅助：完成 backoff 所需的局部转换或校验。
+    # 按 Retry-After 或指数退避等待下一次请求。
     async def _backoff(self, attempt: int, retry_after: float | None) -> None:
         if retry_after is None:
             delay = min(
@@ -358,7 +358,7 @@ class OpenAICompatibleModelGateway:
         if remaining > 0:
             await self._sleep(min(remaining, self._retry_max_delay_seconds))
 
-    # 内部辅助：完成 parse_response 所需的局部转换或校验。
+    # 校验 Embedding 响应结构，并按索引还原输入对应的向量顺序。
     def _parse_response(
         self,
         response: httpx.Response,
@@ -396,7 +396,7 @@ class OpenAICompatibleModelGateway:
             raise self._invalid_response()
         return [vector for vector in ordered if vector is not None]
 
-    # 内部辅助：完成 parse_vector 所需的局部转换或校验。
+    # 校验单个 Embedding 向量元素均为有限数值，并转换为元组。
     def _parse_vector(self, raw_vector: Any) -> tuple[float, ...]:
         if not isinstance(raw_vector, list):
             raise self._invalid_response()
@@ -419,7 +419,7 @@ class OpenAICompatibleModelGateway:
         return tuple(vector)
 
     @staticmethod
-    # 内部辅助：完成 invalid_response 所需的局部转换或校验。
+    # 构造不可重试的模型响应格式错误。
     def _invalid_response() -> DomainError:
         return DomainError(
             DomainFailure(
@@ -430,7 +430,7 @@ class OpenAICompatibleModelGateway:
         )
 
     @staticmethod
-    # 内部辅助：完成 unavailable 所需的局部转换或校验。
+    # 将模型服务状态和错误码包装为可重试或不可重试的领域错误。
     def _unavailable(*facts: str, detail: str = "") -> DomainError:
         # 失败信息必须带上提供方的状态与错误码，否则运维只能看到
         # 「服务暂时不可用」，无法区分限流、超时还是配额耗尽。

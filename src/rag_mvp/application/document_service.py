@@ -31,7 +31,7 @@ from rag_mvp.ports.storage import ObjectStorage
 
 
 class DocumentService:
-    # 初始化该对象的依赖、配置或受控资源。
+    # 保存元数据和对象存储端口，并校验上传限制与默认 Embedding 配置。
     def __init__(
         self,
         metadata: MetadataRepository,
@@ -59,7 +59,7 @@ class DocumentService:
         self._embedding_model = embedding_model
         self._embedding_dimension = embedding_dimension
 
-    # 创建该方法负责的领域数据或基础设施状态。
+    # 校验幂等键和 Embedding 配置后创建数据集，并记录创建事件。
     async def create_dataset(self, command: CreateDatasetCommand) -> CreateDatasetResult:
         started_at = perf_counter()
         if not command.idempotency_key:
@@ -127,7 +127,7 @@ class DocumentService:
         )
 
     @staticmethod
-    # 实现 staging_key 对应的局部职责。
+    # 从幂等键的 SHA-256 摘要生成稳定的 staging object key。
     def staging_key(idempotency_key: str) -> str:
         if not idempotency_key:
             raise DomainError(
@@ -136,7 +136,7 @@ class DocumentService:
         digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
         return f"staging/{digest}"
 
-    # 提交该方法负责的领域数据或基础设施状态。
+    # 校验上传内容、写入 staging object，并创建或复用对应的摄取 Job。
     async def submit_document(self, command: SubmitDocumentCommand) -> SubmitDocumentResult:
         started_at = perf_counter()
         self._validate_upload(command)
@@ -221,7 +221,7 @@ class DocumentService:
         )
         return result
 
-    # 内部辅助：完成 validate_upload 所需的局部转换或校验。
+    # 校验上传大小、源文件名和切块参数。
     def _validate_upload(self, command: SubmitDocumentCommand) -> None:
         if len(command.content) > self._max_upload_bytes:
             raise DomainError(
@@ -239,7 +239,7 @@ class DocumentService:
                 )
             )
 
-    # 删除该方法负责的领域数据或基础设施状态。
+    # 创建文档删除 Job，并记录逻辑删除事件。
     async def delete_document(self, command: DeleteDocumentCommand) -> DeleteDocumentResult:
         if not command.idempotency_key:
             raise DomainError(
@@ -261,7 +261,7 @@ class DocumentService:
         )
         return DeleteDocumentResult(deleted.document_id, deleted.job_id, deleted.reused)
 
-    # 删除该方法负责的领域数据或基础设施状态。
+    # 创建数据集删除 Job，并记录逻辑删除事件。
     async def delete_dataset(self, command: DeleteDatasetCommand) -> DeleteDatasetResult:
         if not command.idempotency_key:
             raise DomainError(

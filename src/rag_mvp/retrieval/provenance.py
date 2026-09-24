@@ -11,7 +11,7 @@ from rag_mvp.retrieval.hybrid import HybridCandidate
 from rag_mvp.retrieval.rerank import RerankedCandidate
 
 
-# 执行稠密检索该方法负责的领域数据或基础设施状态。
+# 将稠密检索候选转换为携带 dense_score 的可引用 Evidence。
 def dense_evidence(candidate: SearchCandidate) -> Evidence:
     chunk = candidate.chunk
     return Evidence(
@@ -27,7 +27,7 @@ def dense_evidence(candidate: SearchCandidate) -> Evidence:
     )
 
 
-# 实现 hybrid_evidence 对应的局部职责。
+# 将混合检索候选转换为保留稠密、稀疏和融合分数的 Evidence。
 def hybrid_evidence(candidate: HybridCandidate) -> Evidence:
     chunk = candidate.chunk
     return Evidence(
@@ -47,7 +47,7 @@ def hybrid_evidence(candidate: HybridCandidate) -> Evidence:
     )
 
 
-# 实现 reranked_evidence 对应的局部职责。
+# 将重排候选转换为包含各阶段分数和重排分数的 Evidence。
 def reranked_evidence(candidate: RerankedCandidate) -> Evidence:
     chunk = candidate.chunk
     return Evidence(

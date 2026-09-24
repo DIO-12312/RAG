@@ -21,5 +21,5 @@ class ChunkDraft:
 class Chunker(Protocol):
     """Split normalized content into stable evidence chunks."""
 
-    # 实现 split 对应的局部职责。
+    # 将带定位信息的解析片段切为顺序稳定的 Chunk 草稿。
     async def split(self, segments: Sequence[ParsedSegment]) -> Sequence[ChunkDraft]: ...

@@ -12,7 +12,7 @@ from alembic.config import Config
 from rag_mvp.config import Settings
 
 
-# 内部辅助：完成 alembic_config 所需的局部转换或校验。
+# 从仓库中的 Alembic 配置创建实例，并写入本次迁移的 MySQL DSN。
 def _alembic_config(dsn: str, migrations_root: Path | None = None) -> Config:
     root = migrations_root or Path(__file__).resolve().parents[4]
     config = Config(root / "alembic.ini")
@@ -21,7 +21,7 @@ def _alembic_config(dsn: str, migrations_root: Path | None = None) -> Config:
     return config
 
 
-# 运行该方法负责的领域数据或基础设施状态。
+# 对指定数据库执行 upgrade、downgrade 或 current Alembic 操作。
 def run_migrations(
     dsn: str,
     action: str,

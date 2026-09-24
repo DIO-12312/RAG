@@ -20,7 +20,7 @@ class RerankedCandidate:
     rerank_score: float
 
 
-# 实现 apply_rerank_scores 对应的局部职责。
+# 将模型返回的重排分数配回候选，并按重排分数、融合分数和记录 ID 稳定排序。
 def apply_rerank_scores(
     candidates: Sequence[HybridCandidate],
     scores: Sequence[float],

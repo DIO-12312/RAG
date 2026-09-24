@@ -11,7 +11,7 @@ class DomainFailure:
     message: str
     retryable: bool = False
 
-    # 在构造完成后校验并固化领域不变式。
+    # 拒绝没有机器可读错误码的领域失败。
     def __post_init__(self) -> None:
         if not self.code:
             raise ValueError("failure code must not be empty")
@@ -20,7 +20,7 @@ class DomainFailure:
 class DomainError(Exception):
     """Base exception carrying a stable machine-readable failure."""
 
-    # 初始化该对象的依赖、配置或受控资源。
+    # 用领域失败的消息初始化异常，并保留失败对象供调用方处理。
     def __init__(self, failure: DomainFailure) -> None:
         super().__init__(failure.message)
         self.failure = failure
@@ -29,7 +29,7 @@ class DomainError(Exception):
 class InvalidStateTransition(DomainError):
     """Raised when a state machine transition violates a terminal fence."""
 
-    # 初始化该对象的依赖、配置或受控资源。
+    # 将非法状态迁移转换为带固定错误码的领域异常。
     def __init__(self, current: object, target: object) -> None:
         super().__init__(
             DomainFailure(

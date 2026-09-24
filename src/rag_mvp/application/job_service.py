@@ -21,14 +21,14 @@ from rag_mvp.ports.metadata import (
 
 
 class JobService:
-    # 初始化该对象的依赖、配置或受控资源。
+    # 保存元数据端口，并校验单个 Job 可创建的最大重试次数。
     def __init__(self, metadata: MetadataRepository, *, max_user_retries: int = 3) -> None:
         if max_user_retries < 1:
             raise ValueError("max_user_retries must be at least 1")
         self._metadata = metadata
         self._max_user_retries = max_user_retries
 
-    # 读取该方法负责的领域数据或基础设施状态。
+    # 读取 Job 及其 Task，并组装为调用方可见的状态视图。
     async def get_job(self, query: GetJobQuery) -> JobView:
         job = await self._metadata.get_job(query.job_id)
         if job is None:
@@ -44,7 +44,7 @@ class JobService:
             )
         return self._view(job, task)
 
-    # 重试该方法负责的领域数据或基础设施状态。
+    # 按幂等键创建或复用失败 Job 的重试 Job，并返回其状态视图。
     async def retry_job(self, command: RetryJobCommand) -> JobView:
         if not command.idempotency_key:
             raise DomainError(
@@ -109,7 +109,7 @@ class JobService:
             )
         return self._view(job, task)
 
-    # 取消该方法负责的领域数据或基础设施状态。
+    # 请求取消摄取 Job，并返回由元数据层收敛后的状态视图。
     async def cancel_job(self, command: CancelJobCommand) -> JobView:
         if not command.idempotency_key:
             raise DomainError(
@@ -129,7 +129,7 @@ class JobService:
         return self._view(job, task)
 
     @staticmethod
-    # 内部辅助：完成 view 所需的局部转换或校验。
+    # 将领域 Job 和 Task 转换为 RPC/application 层使用的 JobView。
     def _view(job: Job, task: Task) -> JobView:
         return JobView(
             job_id=job.id,

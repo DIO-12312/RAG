@@ -16,7 +16,7 @@ class Checkpoint(StrEnum):
 class InjectedWorkerCrash(BaseException):
     """Simulate abrupt process death without being converted into a business failure."""
 
-    # 初始化该对象的依赖、配置或受控资源。
+    # 记录被注入崩溃的流水线检查点，供恢复测试断言。
     def __init__(self, checkpoint: Checkpoint) -> None:
         super().__init__(f"injected worker crash at {checkpoint.value}")
         self.checkpoint = checkpoint

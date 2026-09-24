@@ -18,7 +18,7 @@ from rag_mvp.domain.errors import InvalidStateTransition
 StatusT = TypeVar("StatusT")
 
 
-# 内部辅助：完成 transition 所需的局部转换或校验。
+# 校验目标状态是否在当前状态允许的迁移集合中。
 def _transition(
     current: StatusT, target: StatusT, allowed: Mapping[StatusT, Set[StatusT]]
 ) -> StatusT:
@@ -70,31 +70,31 @@ _INDEX_BUILD_TRANSITIONS: Mapping[IndexBuildStatus, Set[IndexBuildStatus]] = {
 }
 
 
-# 执行状态迁移该方法负责的领域数据或基础设施状态。
+# 校验并返回 Job 的目标状态。
 def transition_job(current: JobStatus, target: JobStatus) -> JobStatus:
     return _transition(current, target, _JOB_TRANSITIONS)
 
 
-# 执行状态迁移该方法负责的领域数据或基础设施状态。
+# 校验并返回 Task 的目标状态。
 def transition_task(current: TaskStatus, target: TaskStatus) -> TaskStatus:
     return _transition(current, target, _TASK_TRANSITIONS)
 
 
-# 执行状态迁移该方法负责的领域数据或基础设施状态。
+# 校验并返回 Document 的目标状态。
 def transition_document(current: DocumentStatus, target: DocumentStatus) -> DocumentStatus:
     return _transition(current, target, _DOCUMENT_TRANSITIONS)
 
 
-# 执行状态迁移该方法负责的领域数据或基础设施状态。
+# 校验并返回 OutboxEvent 的目标状态。
 def transition_outbox(current: OutboxStatus, target: OutboxStatus) -> OutboxStatus:
     return _transition(current, target, _OUTBOX_TRANSITIONS)
 
 
-# 执行状态迁移该方法负责的领域数据或基础设施状态。
+# 校验并返回 IngestionFingerprint 的目标状态。
 def transition_fingerprint(current: FingerprintState, target: FingerprintState) -> FingerprintState:
     return _transition(current, target, _FINGERPRINT_TRANSITIONS)
 
 
-# 执行状态迁移该方法负责的领域数据或基础设施状态。
+# 校验并返回 IndexBuild 的目标状态。
 def transition_index_build(current: IndexBuildStatus, target: IndexBuildStatus) -> IndexBuildStatus:
     return _transition(current, target, _INDEX_BUILD_TRANSITIONS)

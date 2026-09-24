@@ -71,7 +71,7 @@ def merge_ranked_routes(
     )
 
 
-# 实现 reciprocal_rank_fusion 对应的局部职责。
+# 用 RRF 融合稠密和稀疏候选，保留各路原始分数并按融合分数稳定排序。
 def reciprocal_rank_fusion(
     dense: Sequence[SearchCandidate],
     sparse: Sequence[SearchCandidate],
@@ -105,7 +105,7 @@ def reciprocal_rank_fusion(
     return tuple(sorted(result, key=lambda item: (-item.fusion_score, item.record_id)))
 
 
-# 内部辅助：完成 add_route 所需的局部转换或校验。
+# 将一路检索结果的原始分数和加权 RRF 分数累加到候选集合。
 def _add_route(
     route: Sequence[SearchCandidate],
     rrf_k: int,

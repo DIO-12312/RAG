@@ -16,13 +16,13 @@ from rag_mvp.rpc.generated import rag_service_pb2, rag_service_pb2_grpc
 UPLOAD_FRAME_BYTES = 64 * 1024
 
 
-# 内部辅助：完成 add_context_arguments 所需的局部转换或校验。
+# 为需要幂等上下文的子命令添加 request ID 和 idempotency key 参数。
 def _add_context_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--request-id", required=True)
     parser.add_argument("--idempotency-key", required=True)
 
 
-# 内部辅助：完成 metadata_filter 所需的局部转换或校验。
+# 解析并校验命令行的 key=value 元数据过滤条件。
 def _metadata_filter(value: str) -> tuple[str, str]:
     key, separator, item = value.partition("=")
     if not separator or not key.strip() or not item.strip():
@@ -30,7 +30,7 @@ def _metadata_filter(value: str) -> tuple[str, str]:
     return key.strip(), item.strip()
 
 
-# 内部辅助：完成 parser 所需的局部转换或校验。
+# 构建开发 gRPC 客户端的全部子命令和参数定义。
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RAG MVP generated gRPC development client")
     parser.add_argument("--address", default="127.0.0.1:50051")
@@ -92,7 +92,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-# 内部辅助：完成 context 所需的局部转换或校验。
+# 从命令行参数构造 RPC 请求共用的幂等上下文。
 def _context(arguments: argparse.Namespace) -> rag_service_pb2.RequestContext:
     return rag_service_pb2.RequestContext(
         request_id=arguments.request_id,
@@ -100,7 +100,7 @@ def _context(arguments: argparse.Namespace) -> rag_service_pb2.RequestContext:
     )
 
 
-# 内部辅助：完成 upload_requests 所需的局部转换或校验。
+# 生成先含上传头、再按固定帧大小发送文件字节的上传请求流。
 async def _upload_requests(
     arguments: argparse.Namespace,
 ) -> AsyncIterator[rag_service_pb2.UploadDocumentRequest]:
@@ -121,13 +121,13 @@ async def _upload_requests(
             yield rag_service_pb2.UploadDocumentRequest(data=data)
 
 
-# 内部辅助：完成 render 所需的局部转换或校验。
+# 输出 protobuf 响应 JSON，并按是否包含业务错误返回进程退出码。
 def _render(response: Message) -> int:
     print(MessageToJson(response, preserving_proto_field_name=True))
     return int(response.WhichOneof("outcome") == "error")
 
 
-# 内部辅助：完成 run 所需的局部转换或校验。
+# 根据已解析的子命令调用对应的 gRPC 方法并返回退出码。
 async def _run(arguments: argparse.Namespace) -> int:
     async with grpc.aio.insecure_channel(arguments.address) as channel:
         stub = rag_service_pb2_grpc.RagServiceStub(channel)  # type: ignore[no-untyped-call]

@@ -21,19 +21,19 @@ from rag_mvp.domain.enums import (
 from rag_mvp.domain.errors import DomainFailure
 
 
-# 内部辅助：完成 require_text 所需的局部转换或校验。
+# 校验必填文本字段不是空字符串或纯空白。
 def _require_text(value: str, field_name: str) -> None:
     if not value.strip():
         raise ValueError(f"{field_name} must not be empty")
 
 
-# 内部辅助：完成 require_digest 所需的局部转换或校验。
+# 校验字段是 64 位小写十六进制 SHA-256 摘要。
 def _require_digest(value: str, field_name: str) -> None:
     if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
         raise ValueError(f"{field_name} must be a lowercase SHA-256 hex digest")
 
 
-# 内部辅助：完成 frozen_mapping 所需的局部转换或校验。
+# 复制映射并包装为只读视图，避免冻结领域对象的元数据被外部修改。
 def _frozen_mapping(value: Mapping[str, str]) -> Mapping[str, str]:
     return MappingProxyType(dict(value))
 
@@ -51,7 +51,7 @@ class Dataset:
     lifecycle_generation: int = 0
     encrypted_embedding_profile: str = field(default="", repr=False)
 
-    # 在构造完成后校验并固化领域不变式。
+    # 校验数据集标识、Embedding 配置和生命周期字段的取值范围。
     def __post_init__(self) -> None:
         _require_text(self.id, "id")
         _require_text(self.name, "name")
@@ -78,7 +78,7 @@ class Document:
     created_at: datetime
     object_key: str | None = None
 
-    # 在构造完成后校验并固化领域不变式。
+    # 校验文档标识、文件摘要和索引版本字段的取值范围。
     def __post_init__(self) -> None:
         _require_text(self.id, "id")
         _require_text(self.dataset_id, "dataset_id")
@@ -101,7 +101,7 @@ class IngestionFingerprint:
     job_id: str
     state: FingerprintState
 
-    # 在构造完成后校验并固化领域不变式。
+    # 校验去重指纹中的文件与配置摘要格式。
     def __post_init__(self) -> None:
         _require_digest(self.file_sha256, "file_sha256")
         _require_digest(self.config_digest, "config_digest")
@@ -126,7 +126,7 @@ class Job:
     is_system: bool = False
     dataset_id: str = ""
 
-    # 在构造完成后校验并固化领域不变式。
+    # 校验 Job 的版本、进度和重试字段，并约束数据集删除 Job 的引用关系。
     def __post_init__(self) -> None:
         _require_text(self.dataset_id, "dataset_id")
         _require_digest(self.config_digest, "config_digest")
@@ -157,7 +157,7 @@ class Task:
     created_at: datetime
     error: DomainFailure | None = None
 
-    # 在构造完成后校验并固化领域不变式。
+    # 校验投递尝试次数和 JetStream 投递序号的取值范围。
     def __post_init__(self) -> None:
         if self.attempt < 0:
             raise ValueError("attempt must not be negative")
@@ -175,7 +175,7 @@ class OutboxEvent:
     created_at: datetime
     published_at: datetime | None = None
 
-    # 在构造完成后校验并固化领域不变式。
+    # 校验 Outbox 发布尝试次数不能为负数。
     def __post_init__(self) -> None:
         if self.attempt < 0:
             raise ValueError("attempt must not be negative")
@@ -189,7 +189,7 @@ class IndexBuild:
     status: IndexBuildStatus
     created_at: datetime
 
-    # 在构造完成后校验并固化领域不变式。
+    # 校验索引构建版本从 1 开始。
     def __post_init__(self) -> None:
         if self.index_version < 1:
             raise ValueError("index_version must be at least 1")
@@ -204,7 +204,7 @@ class Locator:
     language: str | None = None
     metadata: Mapping[str, str] = field(default_factory=dict)
 
-    # 在构造完成后校验并固化领域不变式。
+    # 校验定位行页编号，并冻结附加元数据。
     def __post_init__(self) -> None:
         if self.page_number is not None and self.page_number < 1:
             raise ValueError("page_number must be at least 1")
@@ -227,7 +227,7 @@ class Chunk:
     locator: Locator
     metadata: Mapping[str, str] = field(default_factory=dict)
 
-    # 在构造完成后校验并固化领域不变式。
+    # 校验 Chunk 的版本、顺序、内容摘要，并冻结附加元数据。
     def __post_init__(self) -> None:
         if self.index_version < 1:
             raise ValueError("index_version must be at least 1")
@@ -258,7 +258,7 @@ class Evidence:
     metadata: Mapping[str, str] = field(default_factory=dict)
     display_content: str = ""
 
-    # 在构造完成后校验并固化领域不变式。
+    # 校验证据索引版本，冻结元数据，并在缺失时生成展示内容。
     def __post_init__(self) -> None:
         if self.index_version < 1:
             raise ValueError("index_version must be at least 1")

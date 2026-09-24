@@ -26,7 +26,7 @@ from rag_mvp.domain.errors import DomainFailure
 from rag_mvp.domain.models import Dataset, Document, Job, OutboxEvent, Task
 
 
-# 转换该方法负责的领域数据或基础设施状态。
+# 为 MySQL DATETIME 恢复 UTC 时区信息。
 def as_utc(value: datetime) -> datetime:
     """Restore UTC tzinfo stripped by MySQL DATETIME columns."""
 
@@ -35,7 +35,7 @@ def as_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-# 实现 failure_from_json 对应的局部职责。
+# 将数据库 JSON 中保存的失败信息还原为领域失败对象。
 def failure_from_json(value: Mapping[str, Any] | None) -> DomainFailure | None:
     if value is None:
         return None
@@ -46,7 +46,7 @@ def failure_from_json(value: Mapping[str, Any] | None) -> DomainFailure | None:
     )
 
 
-# 实现 failure_to_json 对应的局部职责。
+# 将领域失败对象编码为可存入 JSON 列的字典。
 def failure_to_json(value: DomainFailure | None) -> dict[str, object] | None:
     if value is None:
         return None
@@ -57,7 +57,7 @@ def failure_to_json(value: DomainFailure | None) -> dict[str, object] | None:
     }
 
 
-# 实现 dataset_from_table 对应的局部职责。
+# 将 Dataset ORM 行转换为领域 Dataset。
 def dataset_from_table(row: DatasetTable) -> Dataset:
     return Dataset(
         id=row.id,
@@ -73,7 +73,7 @@ def dataset_from_table(row: DatasetTable) -> Dataset:
     )
 
 
-# 实现 document_from_table 对应的局部职责。
+# 将 Document ORM 行转换为领域 Document。
 def document_from_table(row: DocumentTable) -> Document:
     return Document(
         id=row.id,
@@ -89,7 +89,7 @@ def document_from_table(row: DocumentTable) -> Document:
     )
 
 
-# 实现 job_from_table 对应的局部职责。
+# 将 Job ORM 行转换为领域 Job。
 def job_from_table(row: JobTable) -> Job:
     return Job(
         id=row.id,
@@ -113,7 +113,7 @@ def job_from_table(row: JobTable) -> Job:
     )
 
 
-# 实现 task_from_table 对应的局部职责。
+# 将 Task ORM 行转换为领域 Task。
 def task_from_table(row: TaskTable) -> Task:
     return Task(
         id=row.id,
@@ -128,7 +128,7 @@ def task_from_table(row: TaskTable) -> Task:
     )
 
 
-# 实现 outbox_from_table 对应的局部职责。
+# 将 OutboxEvent ORM 行转换为领域 OutboxEvent。
 def outbox_from_table(row: OutboxEventTable) -> OutboxEvent:
     return OutboxEvent(
         id=row.id,
