@@ -55,12 +55,12 @@
 
 ### Task 1A: Metric/Trace 存储预算与旧数据淘汰
 
-**Files:** Modify `deploy/observability/{prometheus,tempo}.yaml`、三套 Compose、`docs/deployment-production.md`、`SPEC.md`；按经验证的 Tempo 版本添加独立观测容量控制进程及其测试；同步 `tests/TEST.md`。
+**Files:** Create `backend/go-api/cmd/observability-retention/main.go`、`backend/go-api/internal/retention/{controller.go,controller_test.go}`；Modify `backend/go-api/Dockerfile`、`deploy/observability/{collector,prometheus,tempo}.yaml`、`docker-compose.yml`、`compose.production.yml`、`deploy/production/boot-start.sh`、`.env.production.example`、`docs/deployment-production.md`、`SPEC.md`、`tests/contract/test_container_artifacts.py`、`tests/TEST.md`。
 
 **Policy:** 部署时为 Prometheus 和 Tempo 分配各自的字节预算，并保留宿主机余量。统计各自数据卷实际占用，同时监控宿主文件系统剩余空间；仪表盘展示占用、预算、清理动作及 Trace 丢弃状态。Prometheus 使用原生时间/容量保留策略。Tempo 没有与 Prometheus 等价的容量保留开关；先验证所锁定版本的运行时保留期覆盖与后台清理机制，容量超阈值时缩短保留期，让 Tempo 自己按时间清理最旧的完整 Trace 数据块。业务程序、控制进程均不得直接 `rm` 后端文件或改写 Parquet/WAL。
 
 - [ ] **Step 1: 定义容量契约和测量口径。** 以可配置的每卷预算为上限目标，预留至少 20% 给 WAL、压缩和清理滞后；记录数据卷总占用、可用空间、近 24 小时增长率。容量按高水位 80%、低水位 70%、紧急水位 90% 处理；预算和阈值在三套 Compose/部署文档中明示，不以宿主机总容量代替卷预算。
-- [ ] **Step 2: 验证 Tempo 淘汰能力后实现独立控制。** 在确定版本的真实 Compose 中证明运行时缩短 retention 能触发 Tempo 自身删除最旧数据块、查询不报错，且恢复保留期不会让已删除 Trace 复活；控制进程只读取容量数据并通过受控运行时配置修改 retention，具备原子写入、单实例执行、重启恢复和最短保留期下限。高水位逐级缩短到低水位或最短保留期；不能保证“刚超限立即删除”，须把后台清理延迟作为验收项。若当前版本或部署方式不能可靠动态调整，则先改用经验证、具容量回收能力的 Trace 后端或部署方式，并修订计划后实施，不以文件级删除充数。
+- [ ] **Step 2: 验证 Tempo 淘汰能力后实现独立控制。** 在确定版本的真实 Compose 中证明运行时缩短 retention 能触发 Tempo 自身删除最旧数据块、查询不报错，且恢复保留期不会让已删除 Trace 复活；控制进程只读取容量数据并通过受控运行时配置修改 retention，具备原子写入、单实例执行、重启恢复和最短保留期下限。Tempo 租户覆盖会替换摄取限制，写入 retention 时须同时固定非零速率/突发/单 Trace 上限并用真实 OTLP 验证。高水位逐级缩短到低水位或最短保留期；不能保证“刚超限立即删除”，须把后台清理延迟作为验收项。若当前版本或部署方式不能可靠动态调整，则先改用经验证、具容量回收能力的 Trace 后端或部署方式，并修订计划后实施，不以文件级删除充数。
 - [ ] **Step 3: 设置紧急兜底。** 达到紧急水位、清理失效或宿主机剩余空间不足时，停止接收新的 Trace/提高采样丢弃率，保留业务和现有 JSON 日志；Metric 保留 Prometheus 原生回收能力。记录稳定错误状态并告警，容量恢复后自动恢复 Trace 摄取。Go/Python 不因该降级改变 RPC、Chat、摄取或状态机结果。
 - [ ] **Step 4: 最后增加容量契约和真实后端验证。** 覆盖超限淘汰顺序、异步清理、WAL/压缩余量、控制进程重启、Tempo 查询完整性、紧急暂停与恢复、Prometheus 时间/容量策略、业务不受影响；更新 `tests/TEST.md`。运行对应控制进程测试、`uv run pytest tests/contract/test_container_artifacts.py tests/contract/test_build_entrypoints.py -v`、`make ci` 和真实 Docker 容量验收；不可用的验证明确列为未运行。
 - [ ] **Step 5: 检查 `git status`，只暂存本 Task 文件，单独提交 `feat(observability): 增加观测存储容量控制`；报告预算值、实际验证和未运行项。**

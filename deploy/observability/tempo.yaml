@@ -1,6 +1,9 @@
 server:
   http_listen_port: 3200
 
+overrides:
+  per_tenant_override_config: /var/tempo-overrides/overrides.yaml
+
 distributor:
   receivers:
     otlp:

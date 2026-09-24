@@ -162,8 +162,9 @@ def test_observability_backends_are_private_and_have_bounded_retention() -> None
 
     for manifest in (root, production):
         services = manifest["services"]
-        for name in ("otel-collector", "prometheus", "tempo"):
+        for name in ("otel-collector", "prometheus", "tempo", "observability-retention"):
             assert "ports" not in services[name]
+        for name in ("otel-collector", "prometheus", "tempo"):
             assert "@sha256:" in services[name]["image"]
         assert any(
             arg == "--storage.tsdb.retention.time=15d" for arg in services["prometheus"]["command"]
@@ -179,6 +180,12 @@ def test_observability_backends_are_private_and_have_bounded_retention() -> None
     assert production["services"]["tempo"]["networks"] == ["backend"]
     assert production["services"]["prometheus"]["networks"] == ["backend"]
     assert production["services"]["otel-collector"]["networks"] == ["backend"]
+    assert production["services"]["observability-retention"]["networks"] == ["backend"]
+    assert (
+        production["services"]["tempo"]["depends_on"]["observability-retention"]["condition"]
+        == "service_healthy"
+    )
+    assert "tempo-overrides" in production["volumes"]
     assert product["services"]["api"]["environment"]["OTEL_SERVICE_NAME"] == "rag-go-api"
     assert (
         product["services"]["api"]["environment"]["OTEL_EXPORTER_OTLP_ENDPOINT"]
@@ -189,6 +196,11 @@ def test_observability_backends_are_private_and_have_bounded_retention() -> None
         (ROOT / "deploy/observability/collector.yaml").read_text(encoding="utf-8")
     )
     tempo = yaml.safe_load((ROOT / "deploy/observability/tempo.yaml").read_text(encoding="utf-8"))
+    assert (
+        collector["exporters"]["otlphttp/tempo"]["endpoint"]
+        == "http://observability-retention:9470"
+    )
+    assert tempo["overrides"]["per_tenant_override_config"] == "/var/tempo-overrides/overrides.yaml"
     actions = collector["processors"]["attributes/redact"]["actions"]
     redacted = {action["key"] for action in actions if action["action"] == "delete"}
     assert {
@@ -201,7 +213,7 @@ def test_observability_backends_are_private_and_have_bounded_retention() -> None
     } <= redacted
     assert tempo["compactor"]["compaction"]["block_retention"] == "168h"
     boot_start = (ROOT / "deploy/production/boot-start.sh").read_text(encoding="utf-8")
-    assert "for service in otel-collector prometheus tempo" in boot_start
+    assert "for service in observability-retention otel-collector prometheus tempo" in boot_start
 
 
 def test_debug_override_binds_elasticsearch_to_loopback_only() -> None:

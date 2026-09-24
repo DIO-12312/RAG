@@ -29,7 +29,7 @@ compose() { docker compose --project-name "$PROJECT" -f "$CONFIG" "$@"; }
 
 echo "[boot-start] 1/5 基础设施"
 observability_services=()
-for service in otel-collector prometheus tempo; do
+for service in observability-retention otel-collector prometheus tempo; do
     if compose config --services | grep -qx "$service"; then
         observability_services+=("$service")
     fi

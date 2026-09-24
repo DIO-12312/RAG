@@ -24,6 +24,21 @@ x-rag-environment: &rag-environment
   RAG_EMBEDDING_MAX_RETRIES: "${RAG_EMBEDDING_MAX_RETRIES:-3}"
 
 services:
+  observability-retention:
+    build: backend/go-api
+    entrypoint: ["/usr/local/bin/observability-retention"]
+    environment:
+      OBS_TEMPO_BUDGET_BYTES: ${OBS_TEMPO_BUDGET_BYTES:-3221225472}
+    volumes:
+      - tempo-data:/var/tempo-data:ro
+      - tempo-overrides:/var/tempo-overrides
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9470/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.132.0@sha256:e0f565815b2b8e78eb9fdbb80f6190c921ab323aaa8ccceab3255c6d4225f4af
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
@@ -49,6 +64,10 @@ services:
     volumes:
       - ./deploy/observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
       - tempo-data:/var/tempo
+      - tempo-overrides:/var/tempo-overrides:ro
+    depends_on:
+      observability-retention:
+        condition: service_healthy
     restart: unless-stopped
 
   mysql:
@@ -287,6 +306,7 @@ services:
 volumes:
   prometheus-data:
   tempo-data:
+  tempo-overrides:
   mysql-data:
   elasticsearch-data:
   nats-data:

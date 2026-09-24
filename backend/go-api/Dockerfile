@@ -4,8 +4,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /product ./cmd/api
+RUN CGO_ENABLED=0 go build -o /observability-retention ./cmd/observability-retention
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/* && useradd -u 10001 -m product && mkdir /var/lib/product && chown product:product /var/lib/product
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/* && useradd -u 10001 -m product && mkdir -p /var/lib/product /var/tempo-data /var/tempo-overrides && chown -R product:product /var/lib/product /var/tempo-data /var/tempo-overrides
 COPY --from=build /product /usr/local/bin/product
+COPY --from=build /observability-retention /usr/local/bin/observability-retention
 USER product
 ENTRYPOINT ["product"]

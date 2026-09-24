@@ -831,6 +831,8 @@ PDF 运行参数包括 `plain/deepdoc/auto` 模式、原生文字阈值、OCR �
 
 默认开发、产品及生产 Compose 均将 Collector、Prometheus、Tempo 置于私网，禁止发布其端口或由 Caddy 代理；浏览器只能经 Go 的管理员授权只读 API 查询预设 Metric/Trace。应用在出口使用允许列表，Collector 再清除请求头、查询参数、数据库语句、Prompt、Evidence、模型输入输出和正文；Metric 标签不得使用用户/请求/文档 ID 或其他高基数值。Prometheus 保留最多 15 天且另设字节上限，先触发的保留条件生效；Tempo 保留最多 7 天，容量预算与回收由独立观测控制进程负责。两种存储的后台清理均可能滞后，卷和宿主磁盘需留出 WAL、压缩及故障恢复余量；容量紧急状态只降级遥测摄取，不能中断业务。
 
+独立 `observability-retention` 进程按 Tempo 数据卷字节占用和宿主可用空间计算容量水位，超过 80% 预算逐级缩短 Tempo 的运行时保留期，让 Tempo 自己按时间淘汰最旧完整块；低于 70% 可逐级恢复，达到 90% 或宿主剩余不足 10% 时拒绝新 Trace。该进程只向其专用共享卷原子写入 `single-tenant` retention override，不能直接删除 Tempo/Prometheus 文件；私网 Trace 通过它转发到 Tempo。该策略的清理是异步的，不保证精确字节硬限。Prometheus 自身按时间/容量清理最旧块，并预留 WAL 与压缩空间。控制进程停机时 Trace 发送可失败，但不能影响任何业务结果。
+
 ---
 
 ## 6. 项目排期

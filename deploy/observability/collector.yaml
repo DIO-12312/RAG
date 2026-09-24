@@ -30,7 +30,13 @@ exporters:
   prometheus:
     endpoint: 0.0.0.0:9464
   otlphttp/tempo:
-    endpoint: http://tempo:4318
+    endpoint: http://observability-retention:9470
+    retry_on_failure:
+      max_interval: 5s
+      max_elapsed_time: 10s
+    sending_queue:
+      enabled: true
+      queue_size: 128
 
 service:
   telemetry:
