@@ -1,5 +1,7 @@
 # 测试目录与职责清单
 
+`tests/contract/test_container_artifacts.py::test_observability_backends_are_private_and_have_bounded_retention`：离线解析开发、产品、生产 Compose 及 Collector/Tempo 配置，检查私网、镜像 digest、保留策略、跨进程服务名和敏感属性删除。使用既有 `tests/contract/test_container_artifacts.py`，目录树未增删文件。
+
 本文件是 `tests/` 的索引和维护清单。新增、删除、重命名测试文件或 `test_*` 函数时，必须在同一改动中更新本文件的目录树和对应职责表。参数化测试在表中按一个测试函数记录，pytest 的实际用例数可能更多。
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。

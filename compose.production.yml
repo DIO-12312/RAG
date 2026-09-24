@@ -11,6 +11,7 @@ x-rag-environment: &rag-environment
   RAG_ELASTICSEARCH_CA_CERT: /run/secrets/ca.pem
   RAG_NATS_URL: nats://nats:4222
   RAG_OBJECT_ROOT: /app/data/objects
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
   RAG_MAX_UPLOAD_BYTES: ${RAG_MAX_UPLOAD_BYTES:-67108864}
   RAG_MODEL_ENCRYPTION_KEY_FILE: /run/model-keys/encryption.key
 
@@ -102,6 +103,36 @@ x-rag-dsn-secret: &rag-dsn-secret
     mode: 0400
 
 services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.132.0@sha256:e0f565815b2b8e78eb9fdbb80f6190c921ab323aaa8ccceab3255c6d4225f4af
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./deploy/observability/collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    networks: [backend]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=${OBS_PROMETHEUS_RETENTION_SIZE:-2GB}
+    volumes:
+      - ./deploy/observability/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheus-data:/prometheus
+    networks: [backend]
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.8.2@sha256:0ef775495967cd5d7a6b2e146b6ea695d624803c8db8349fb8ce4164f719f9b7
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./deploy/observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    networks: [backend]
+    restart: unless-stopped
+
   production-material-check:
     image: ${RAG_BOOTSTRAP_IMAGE:?set RAG_BOOTSTRAP_IMAGE in .env.production}
     build:
@@ -240,7 +271,9 @@ services:
       dockerfile: Dockerfile
       target: runtime
     entrypoint: ["/bin/sh", "-ec", "export RAG_MYSQL_DSN=\"$$(cat /run/secrets/rag_mysql_dsn)\"; exec rag-server"]
-    environment: *rag-environment
+    environment:
+      <<: *rag-environment
+      OTEL_SERVICE_NAME: rag-python-server
     group_add: ["10001"]
     volumes: [object-data:/app/data/objects]
     secrets: *rag-runtime-secrets
@@ -264,7 +297,9 @@ services:
       dockerfile: Dockerfile
       target: runtime
     entrypoint: ["/bin/sh", "-ec", "export RAG_MYSQL_DSN=\"$$(cat /run/secrets/rag_mysql_dsn)\"; exec rag-worker"]
-    environment: *rag-environment
+    environment:
+      <<: *rag-environment
+      OTEL_SERVICE_NAME: rag-python-worker
     group_add: ["10001"]
     volumes: [object-data:/app/data/objects]
     secrets: *rag-runtime-secrets
@@ -284,7 +319,9 @@ services:
       dockerfile: Dockerfile
       target: runtime
     entrypoint: ["/bin/sh", "-ec", "export RAG_MYSQL_DSN=\"$$(cat /run/secrets/rag_mysql_dsn)\"; exec rag-outbox"]
-    environment: *rag-environment
+    environment:
+      <<: *rag-environment
+      OTEL_SERVICE_NAME: rag-python-outbox
     group_add: ["10001"]
     volumes: [object-data:/app/data/objects]
     secrets: *rag-dsn-secret
@@ -310,6 +347,8 @@ services:
       PRODUCT_KEY_DIR: /run/model-keys
       PRODUCT_COOKIE_SECURE: "${PRODUCT_COOKIE_SECURE:-false}"
       PRODUCT_ALLOW_LOCAL_MODELS: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: rag-go-api
     group_add: ["10001"]
     secrets:
       - source: product_mysql_dsn
@@ -380,6 +419,8 @@ networks:
         - subnet: 172.21.0.0/16
 
 volumes:
+  prometheus-data: {}
+  tempo-data: {}
   rag-mysql-data: {}
   product-mysql-data: {}
   elasticsearch-data: {}

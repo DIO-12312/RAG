@@ -827,6 +827,10 @@ PDF 运行参数包括 `plain/deepdoc/auto` 模式、原生文字阈值、OCR �
 
 每个 Job 与检索请求写结构化日志：`request_id/job_id/document_id/dataset_id/stage/duration_ms/model/index_version/error_code`。MVP 先输出 JSON 日志和 DB 简单审计记录；未来 Go 层接入 OpenTelemetry/Langfuse 时，Python 通过 trace context 继续传播。
 
+管理员观测迭代采用 OpenTelemetry SDK/OTLP 作为 Go/Python 进程的遥测出口，私网 Collector 接收并脱敏，Prometheus 存储 Metric，Tempo 存储 Trace。JSON 日志和 MySQL Job/Task 状态仍保留原有职责；观测后端不是业务状态或审计记录的权威来源。Go→Python 同步 gRPC 传播 W3C `traceparent`；异步 Worker 只从 `task_id` 读取任务并创建独立 Trace，不向 NATS 消息加入遥测字段。OTLP 失败不能改变 RPC、Chat/SSE 或 Worker ACK/NAK 结果。
+
+默认开发、产品及生产 Compose 均将 Collector、Prometheus、Tempo 置于私网，禁止发布其端口或由 Caddy 代理；浏览器只能经 Go 的管理员授权只读 API 查询预设 Metric/Trace。应用在出口使用允许列表，Collector 再清除请求头、查询参数、数据库语句、Prompt、Evidence、模型输入输出和正文；Metric 标签不得使用用户/请求/文档 ID 或其他高基数值。Prometheus 保留最多 15 天且另设字节上限，先触发的保留条件生效；Tempo 保留最多 7 天，容量预算与回收由独立观测控制进程负责。两种存储的后台清理均可能滞后，卷和宿主磁盘需留出 WAL、压缩及故障恢复余量；容量紧急状态只降级遥测摄取，不能中断业务。
+
 ---
 
 ## 6. 项目排期

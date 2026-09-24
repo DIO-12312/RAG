@@ -28,8 +28,14 @@ echo "[boot-start] 使用发布记录 $(python3 -c 'import json,sys; d=json.load
 compose() { docker compose --project-name "$PROJECT" -f "$CONFIG" "$@"; }
 
 echo "[boot-start] 1/5 基础设施"
+observability_services=()
+for service in otel-collector prometheus tempo; do
+    if compose config --services | grep -qx "$service"; then
+        observability_services+=("$service")
+    fi
+done
 compose up -d --no-build --pull never --wait --wait-timeout 300 \
-    elasticsearch nats rag-mysql product-mysql
+    elasticsearch nats rag-mysql product-mysql "${observability_services[@]}"
 
 echo "[boot-start] 2/5 一次性初始化（Search Guard 材料 / Alembic 迁移）"
 compose up -d --no-build --pull never --wait --wait-timeout 300 \

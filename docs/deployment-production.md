@@ -5,6 +5,14 @@ main 分支 GHCR 发布与应用镜像回退见 [自动发布手册](deployment-
 
 这份手册对应单机 `compose.production.yml`，不替代高可用、Kubernetes 或托管数据库方案。只有公网 IP 时可以启动 Caddy 的 HTTP 入口并通过 `http://49.235.110.118` 验收页面，但不能完成浏览器认可的公网 HTTPS 验收。域名模式必须使用真实域名的 A/AAAA 记录，不得将公网 IP 填入域名 HTTPS 配置。
 
+## 观测服务与数据保留
+
+同一生产 Compose 在 `backend` 私网运行 OpenTelemetry Collector、Prometheus 和 Tempo；它们没有宿主端口，Caddy 也不代理原生查询接口。Go API 与三个 Python 进程只通过私网 `otel-collector:4318` 发送 OTLP。Collector 将脱敏后的指标供 Prometheus 抓取，将 Trace 发往 Tempo；保留原 JSON 日志和数据库业务状态。Collector、Prometheus 或 Tempo 不可用时，业务服务仍应正常运行，仪表盘显示后端不可用。
+
+Prometheus 使用独立命名卷 `prometheus-data`，最长保留 15 天，并以 `OBS_PROMETHEUS_RETENTION_SIZE` 设置数据块容量上限（默认 `2GB`，实际部署须按磁盘预算调整）。Tempo 的 `tempo-data` 命名卷最长保留 7 天。卷仍占宿主硬盘；保留时间和 Prometheus 数据块上限都不是文件系统硬配额，须预留 WAL、压缩和回收延迟的空间，并监测卷占用和宿主剩余空间。Tempo 的容量回收在独立 Task 1A 中交付，交付前不得宣称已有严格字节上限。生产长期运行宜将 Tempo 换为受支持的对象存储后端；当前本地卷部署需先完成真实负载容量验收。
+
+备份和升级时将观测卷视为可重建的短期运营数据，按实际审计需求决定是否做一致性备份；不得运行 `docker compose down -v`。更新 Collector/Prometheus/Tempo 镜像前，检查固定版本的来源和 digest，在隔离环境验证配置兼容和旧卷读取，然后逐项升级。采集属性不得包含凭据、Prompt、Evidence、问题正文或模型输入输出。
+
 ## 主机预检
 
 以有 sudo 权限的运维账号检查 Ubuntu、Docker、Compose、磁盘与内存：

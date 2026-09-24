@@ -27,6 +27,8 @@ services:
       PRODUCT_KEY_DIR: /var/lib/product
       PRODUCT_COOKIE_SECURE: "false"
       PRODUCT_ALLOW_LOCAL_MODELS: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: rag-go-api
     volumes:
       - product-keys:/var/lib/product
     ports:
