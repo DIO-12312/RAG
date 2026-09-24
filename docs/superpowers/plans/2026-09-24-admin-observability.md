@@ -10,6 +10,8 @@
 
 **Spec:** `SPEC.md`（§1、§2.2、§2.3、§2.5、§3.1、§4、§5.7）。当前规格先约定 JSON 日志和未来 trace context；Task 1--6 必须同步修订对应章节后才能验收。
 
+**2026-09-24 执行顺序调整（用户确认）：** Task 1、1A、2 已完成验证并分别提交。从 Task 3 起，先连续完成 Task 3--6 的实现、配置、`SPEC.md` 与文档，不在每个 Task 结束时停下来跑测试。全部功能完成后集中补齐/调整测试并统一运行离线、前端及真实 Docker 验证；验证收敛后仍按工作包分别提交。下文各 Task 的测试步骤统一顺延到这一最终验证阶段，原有覆盖范围和验收标准不降低。
+
 ## Global Constraints
 
 - Python 只提供版本化 gRPC 业务接口；OTLP 仅为出站私网观测流量，不新增 Python HTTP/FastAPI adapter。
@@ -19,7 +21,7 @@
 - Prometheus、Tempo、Collector 仅私网可达。浏览器不直连，Go 不接受任意 PromQL、TraceQL、URL 或高基数标签。
 - 不采集问题/Prompt/Evidence/凭据/私有推理；ID 仅在脱敏 Span/日志中，Metric 标签限枚举。观测后端故障不改变回答、SSE、ACK/NAK 或状态机。
 - Metric 与 Trace 分别配置容量预算、独立持久卷和宿主机预留空间；容量治理属于观测部署，不由 Go/Python 业务进程扫描或删除后端数据文件。容量不足时允许丢失旧观测数据或暂停新 Trace 摄取，但不能影响业务。
-- 每个 Task 先完成实现、配置、必要文档及 `SPEC.md`，最后调整对应测试并运行验证。新增/移动测试同步 `tests/TEST.md`；修改 Compose/Make/Earthfile 运行 `tests/contract/test_build_entrypoints.py`。
+- Task 3--6 先完成实现、配置、必要文档及 `SPEC.md`，全部完成后再集中调整对应测试并运行验证。新增/移动测试同步 `tests/TEST.md`；修改 Compose/Make/Earthfile 运行 `tests/contract/test_build_entrypoints.py`。
 - 已验收计划的小模块验证后各自单独提交；提交前检查 `git status`，只暂存本模块文件，不推送。
 
 ## Review Focus

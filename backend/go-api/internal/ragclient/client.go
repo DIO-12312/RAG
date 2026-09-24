@@ -11,6 +11,7 @@ import (
 	"rag-mvp/backend/go-api/internal/agent"
 	pb "rag-mvp/backend/go-api/internal/ragpb"
 	"rag-mvp/backend/go-api/internal/security"
+	"rag-mvp/backend/go-api/internal/telemetry"
 	"strconv"
 	"strings"
 	"time"
@@ -31,7 +32,12 @@ type SourceTopic struct {
 }
 
 func New(target string) (*Client, error) {
-	c, e := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4<<20)))
+	c, e := grpc.NewClient(target,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4<<20)),
+		grpc.WithChainUnaryInterceptor(telemetry.UnaryClientInterceptor()),
+		grpc.WithChainStreamInterceptor(telemetry.StreamClientInterceptor()),
+	)
 	if e != nil {
 		return nil, e
 	}

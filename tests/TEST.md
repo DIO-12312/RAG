@@ -1,5 +1,7 @@
 # 测试目录与职责清单
 
+`backend/go-api/internal/telemetry/telemetry_test.go`：Go Agent 根 Span 与 gRPC 子 Span 同 trace、W3C metadata 传播、未知枚举和错误消息不会成为敏感 Span 属性；离线内存 exporter。
+
 `tests/contract/test_container_artifacts.py::test_observability_backends_are_private_and_have_bounded_retention`：离线解析开发、产品、生产 Compose 及 Collector/Tempo 配置，检查私网、镜像 digest、保留策略、跨进程服务名和敏感属性删除。使用既有 `tests/contract/test_container_artifacts.py`，目录树未增删文件。
 
 `backend/go-api/internal/retention/controller_test.go`：验证 Tempo 容量高/低/紧急水位、原子写入的运行时保留期、Trace 转发/暂停、容量恢复及扫描失败时拒绝摄取。Go 测试位于产品控制面目录，不改变下方 `tests/` 目录树。

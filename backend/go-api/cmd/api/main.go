@@ -12,6 +12,7 @@ import (
 	"rag-mvp/backend/go-api/internal/ragclient"
 	"rag-mvp/backend/go-api/internal/security"
 	"rag-mvp/backend/go-api/internal/storage"
+	"rag-mvp/backend/go-api/internal/telemetry"
 	"time"
 )
 
@@ -25,6 +26,20 @@ func main() {
 	// Agent 观测事件（agent_run）必须可按字段采集：SPEC 要求单行 JSON，
 	// 而 slog 默认是文本 handler，因此进程启动即安装 JSON handler。
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	telemetryInitCtx, telemetryInitCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	shutdownTelemetry, telemetryErr := telemetry.Init(telemetryInitCtx)
+	telemetryInitCancel()
+	if telemetryErr != nil {
+		slog.Warn("telemetry_init_failed", "error_code", "OTEL_INIT_FAILED")
+	} else {
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := shutdownTelemetry(ctx); err != nil {
+				slog.Warn("telemetry_shutdown_failed", "error_code", "OTEL_SHUTDOWN_FAILED")
+			}
+		}()
+	}
 	encoded, e := loadKey("PRODUCT_ENCRYPTION_KEY", "encryption.key")
 	if e != nil {
 		log.Fatal(e)
