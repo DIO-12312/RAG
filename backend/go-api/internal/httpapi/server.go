@@ -82,11 +82,15 @@ func (s *Server) Router() *gin.Engine {
 	a.GET("/me", func(c *gin.Context) {
 		u, e := s.Store.UserID(c.Request.Context(), uid(c))
 		if e != nil {
-			fail(c, 401, "AUTH_EXPIRED", "请重新登录。")
+			if errors.Is(e, sql.ErrNoRows) {
+				fail(c, 401, "AUTH_EXPIRED", "请重新登录。")
+			} else {
+				fail(c, 503, "DATABASE_UNAVAILABLE", "认证服务暂不可用。")
+			}
 			return
 		}
 		// 前端据此展示并校验单文件上限，避免界面承诺值与服务端实际限制漂移。
-		c.JSON(200, gin.H{"id": u.ID, "email": u.Email, "language": u.Language, "maxUploadBytes": ragclient.MaxUploadBytes()})
+		c.JSON(200, gin.H{"id": u.ID, "email": u.Email, "language": u.Language, "role": u.Role, "maxUploadBytes": ragclient.MaxUploadBytes()})
 	})
 	a.POST("/auth/logout", s.logout)
 	a.GET("/settings", s.settings)
@@ -137,6 +141,19 @@ func (s *Server) authenticate(c *gin.Context) {
 	c.Set("claims", cl)
 	c.Next()
 }
+
+func (s *Server) requireAdmin(c *gin.Context) {
+	role, err := s.Store.UserRole(c.Request.Context(), uid(c))
+	if err != nil && !errors.Is(err, storage.ErrUserMissing) {
+		fail(c, 503, "AUTHORIZATION_UNAVAILABLE", "权限服务暂不可用。")
+		return
+	}
+	if role != "admin" {
+		fail(c, 403, "ADMIN_REQUIRED", "需要管理员权限。")
+		return
+	}
+	c.Next()
+}
 func (s *Server) credentials(c *gin.Context) (string, string, bool) {
 	var p struct {
 		Email    string `json:"email"`
@@ -177,7 +194,7 @@ func (s *Server) register(c *gin.Context) {
 		return
 	}
 	defer func() { <-s.authSlots }()
-	u := storage.User{ID: security.ID(), Email: email, Language: "zh-CN", Hash: security.Hash(password)}
+	u := storage.User{ID: security.ID(), Email: email, Language: "zh-CN", Role: "user", Hash: security.Hash(password)}
 	if e := s.Store.CreateUser(c.Request.Context(), u); e != nil {
 		fail(c, 409, "REGISTER_FAILED", "无法注册此邮箱。")
 		return

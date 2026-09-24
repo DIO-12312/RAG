@@ -1,5 +1,7 @@
 # 测试目录与职责清单
 
+`backend/go-api/internal/storage/admin_role_test.go`：角色枚举离线测试；设置 `PRODUCT_ROLE_TEST_MYSQL_DSN` 指向隔离 MySQL 时，检查注册默认普通用户、并发撤销最后管理员、无用户和非法角色。不能指向运行中的产品库。
+
 `backend/go-api/internal/telemetry/telemetry_test.go`：Go Agent 根 Span 与 gRPC 子 Span 同 trace、W3C metadata 传播、未知枚举和错误消息不会成为敏感 Span 属性；离线内存 exporter。
 
 `tests/contract/test_container_artifacts.py::test_observability_backends_are_private_and_have_bounded_retention`：离线解析开发、产品、生产 Compose 及 Collector/Tempo 配置，检查私网、镜像 digest、保留策略、跨进程服务名和敏感属性删除。使用既有 `tests/contract/test_container_artifacts.py`，目录树未增删文件。

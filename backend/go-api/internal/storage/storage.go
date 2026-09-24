@@ -64,9 +64,24 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if e = s.migrateConversationMessageDataset(ctx, conn); e != nil {
 		return e
 	}
+	if e = s.migrateUserRole(ctx, conn); e != nil {
+		return e
+	}
 	_, e = conn.ExecContext(ctx, "INSERT IGNORE INTO schema_migrations(version) VALUES(1)")
 	if e != nil {
 		return e
+	}
+	return nil
+}
+
+func (s *Store) migrateUserRole(ctx context.Context, conn *sql.Conn) error {
+	var exists int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='users' AND column_name='role'").Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		_, err := conn.ExecContext(ctx, "ALTER TABLE users ADD COLUMN role VARCHAR(16) NOT NULL DEFAULT 'user', ADD CONSTRAINT users_role_valid CHECK(role IN ('user','admin'))")
+		return err
 	}
 	return nil
 }
@@ -91,19 +106,20 @@ type User struct {
 	ID       string `json:"id"`
 	Email    string `json:"email"`
 	Language string `json:"language"`
+	Role     string `json:"role"`
 	Hash     string `json:"-"`
 }
 
 func (s *Store) User(ctx context.Context, email string) (u User, e error) {
-	e = s.DB.QueryRowContext(ctx, "SELECT id,email,language,password_hash FROM users WHERE email=?", email).Scan(&u.ID, &u.Email, &u.Language, &u.Hash)
+	e = s.DB.QueryRowContext(ctx, "SELECT id,email,language,role,password_hash FROM users WHERE email=?", email).Scan(&u.ID, &u.Email, &u.Language, &u.Role, &u.Hash)
 	return
 }
 func (s *Store) UserID(ctx context.Context, id string) (u User, e error) {
-	e = s.DB.QueryRowContext(ctx, "SELECT id,email,language FROM users WHERE id=?", id).Scan(&u.ID, &u.Email, &u.Language)
+	e = s.DB.QueryRowContext(ctx, "SELECT id,email,language,role FROM users WHERE id=?", id).Scan(&u.ID, &u.Email, &u.Language, &u.Role)
 	return
 }
 func (s *Store) CreateUser(ctx context.Context, u User) error {
-	_, e := s.DB.ExecContext(ctx, "INSERT INTO users(id,email,password_hash,language) VALUES(?,?,?,?)", u.ID, u.Email, u.Hash, u.Language)
+	_, e := s.DB.ExecContext(ctx, "INSERT INTO users(id,email,password_hash,language,role) VALUES(?,?,?,?,'user')", u.ID, u.Email, u.Hash, u.Language)
 	return e
 }
 func (s *Store) Revoked(ctx context.Context, jti string) (bool, error) {
