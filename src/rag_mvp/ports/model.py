@@ -9,10 +9,10 @@ from rag_mvp.domain.models import Dataset
 class ModelGateway(Protocol):
     """Provide embedding and reranking without leaking a model SDK."""
 
-    # 实现 embed 对应的局部职责。
+    # 为输入文本按原顺序生成向量；每个向量维度须与数据集配置一致。
     async def embed(self, texts: list[str]) -> list[tuple[float, ...]]: ...
 
-    # 实现 rerank 对应的局部职责。
+    # 为 query 与 passages 的相关性按 passages 原顺序返回分数。
     async def rerank(self, query: str, passages: list[str]) -> list[float]: ...
 
 

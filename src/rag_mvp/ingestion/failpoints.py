@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 class FileBarrierFailpoint:
     """Block once per shared root until a test creates the release marker."""
 
-    # 初始化该对象的依赖、配置或受控资源。
+    # 保存测试专用的触发目录、启用检查点和轮询间隔。
     def __init__(
         self,
         root: Path,
@@ -31,7 +31,7 @@ class FileBarrierFailpoint:
         self._poll_interval_seconds = poll_interval_seconds
 
     @classmethod
-    # 实现 from_settings 对应的局部职责。
+    # 仅在测试环境且显式配置时，从 Settings 创建故障注入器。
     def from_settings(cls, settings: Settings) -> Self | None:
         """Build only from an explicitly test-scoped Settings capability."""
 

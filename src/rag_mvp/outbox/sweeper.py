@@ -10,7 +10,7 @@ from rag_mvp.ports.metadata import MetadataRepository
 from rag_mvp.ports.storage import ObjectStorage
 
 
-# 清理该方法负责的领域数据或基础设施状态。
+# 删除超过 TTL 且未被 WAITING Outbox 引用的 staging 对象。
 async def sweep_staging_once(
     metadata: MetadataRepository,
     storage: ObjectStorage,
@@ -27,7 +27,7 @@ async def sweep_staging_once(
     return deleted
 
 
-# 运行该方法负责的领域数据或基础设施状态。
+# 按固定间隔执行 staging 对象清理，直到收到停止信号。
 async def run_staging_sweeper(
     metadata: MetadataRepository,
     storage: ObjectStorage,

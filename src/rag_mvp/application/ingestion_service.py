@@ -24,7 +24,7 @@ class IngestionExecution:
 
 
 class IngestionService:
-    # 初始化该对象的依赖、配置或受控资源。
+    # 保存元数据端口和单 Task 摄取流水线。
     def __init__(self, metadata: MetadataRepository, pipeline: IngestionPipeline) -> None:
         self._metadata = metadata
         self._pipeline = pipeline

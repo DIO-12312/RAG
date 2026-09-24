@@ -12,7 +12,7 @@ _HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
 
 
 class MarkdownParser:
-    # 实现 parse 对应的局部职责。
+    # 按 Markdown 标题切分文本，并把标题写入段落元数据。
     async def parse(self, source_name: str, content: bytes) -> tuple[ParsedSegment, ...]:
         normalized = (await TextParser().parse(source_name, content))[0].text
         lines = normalized.splitlines()
@@ -30,7 +30,7 @@ class MarkdownParser:
         return self._segments(lines, tuple(ranges))
 
     @staticmethod
-    # 内部辅助：完成 segments 所需的局部转换或校验。
+    # 将标题范围转换为去除首尾空行的带行号段落。
     def _segments(
         lines: list[str], ranges: tuple[tuple[int, int, str | None], ...]
     ) -> tuple[ParsedSegment, ...]:

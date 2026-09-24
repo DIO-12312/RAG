@@ -19,16 +19,16 @@ class Delivery:
 class TaskQueue(Protocol):
     """Publish and consume task identifiers through NATS JetStream."""
 
-    # 实现 publish 对应的局部职责。
+    # 向 JetStream 发布 task_id，供 Worker 至少一次消费。
     async def publish(self, task_id: str) -> None: ...
 
-    # 实现 consume 对应的局部职责。
+    # 以 worker_id 拉取一条投递；超时无消息时返回 None。
     async def consume(self, worker_id: str, timeout_seconds: float) -> Delivery | None: ...
 
-    # 实现 ack 对应的局部职责。
+    # 确认投递已处理，使其不再被队列重投。
     async def ack(self, delivery: Delivery) -> None: ...
 
-    # 实现 nak 对应的局部职责。
+    # 否定确认投递，附带失败原因并按延迟请求重新投递。
     async def nak(self, delivery: Delivery, delay_seconds: float, error: DomainFailure) -> None: ...
 
     # 长耗时执行期间续约投递，避免 ack_wait 到期触发重复投递。

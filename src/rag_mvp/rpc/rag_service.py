@@ -61,7 +61,7 @@ _DOCUMENT_STATUS: Mapping[DocumentStatus, rag_service_pb2.DocumentStatus] = {
 }
 
 
-# 内部辅助：完成 unavailable 所需的局部转换或校验。
+# 构造当前里程碑未提供能力时返回的业务错误。
 def _unavailable(request_id: str) -> rag_service_pb2.BusinessError:
     return business_error(
         DomainFailure(
@@ -72,7 +72,7 @@ def _unavailable(request_id: str) -> rag_service_pb2.BusinessError:
     )
 
 
-# 内部辅助：完成 unexpected 所需的局部转换或校验。
+# 将领域异常、参数异常和未知异常转换为业务错误并记录失败事件。
 def _unexpected(error: Exception, request_id: str) -> rag_service_pb2.BusinessError:
     if isinstance(error, DomainError):
         failure = error.failure
@@ -90,7 +90,7 @@ def _unexpected(error: Exception, request_id: str) -> rag_service_pb2.BusinessEr
     return business_error(failure, request_id)
 
 
-# 内部辅助：完成 job_result 所需的局部转换或校验。
+# 将应用层 JobView 转换为 protobuf JobResult，并复制可选失败信息。
 def _job_result(view: JobView) -> rag_service_pb2.JobResult:
     result = rag_service_pb2.JobResult(
         job_id=view.job_id,
@@ -115,7 +115,7 @@ def _job_result(view: JobView) -> rag_service_pb2.JobResult:
     return result
 
 
-# 内部辅助：完成 locator 所需的局部转换或校验。
+# 将 Evidence 的可选来源定位字段复制到 protobuf Locator。
 def _locator(locator: Locator) -> rag_service_pb2.Locator:
     result = rag_service_pb2.Locator(metadata=dict(locator.metadata))
     if locator.page_number is not None:
@@ -131,7 +131,7 @@ def _locator(locator: Locator) -> rag_service_pb2.Locator:
     return result
 
 
-# 内部辅助：完成 scores 所需的局部转换或校验。
+# 将存在的检索阶段分数复制到 protobuf ScoreBreakdown。
 def _scores(scores: ScoreBreakdown) -> rag_service_pb2.ScoreBreakdown:
     result = rag_service_pb2.ScoreBreakdown()
     if scores.dense_score is not None:
@@ -145,7 +145,7 @@ def _scores(scores: ScoreBreakdown) -> rag_service_pb2.ScoreBreakdown:
     return result
 
 
-# 内部辅助：完成 evidence 所需的局部转换或校验。
+# 将领域 Evidence 转换为 protobuf Evidence，包括定位、元数据和分数。
 def _evidence(evidence: Evidence) -> rag_service_pb2.Evidence:
     return rag_service_pb2.Evidence(
         chunk_id=evidence.chunk_id,
@@ -160,7 +160,7 @@ def _evidence(evidence: Evidence) -> rag_service_pb2.Evidence:
     )
 
 
-# 内部辅助：完成 retrieve_result 所需的局部转换或校验。
+# 将上下文计划转换为包含保留证据、Token 估算和省略 Chunk 的 RPC 结果。
 def _retrieve_result(plan: ContextPlan) -> rag_service_pb2.RetrieveResult:
     return rag_service_pb2.RetrieveResult(
         evidence=[_evidence(item) for item in plan.evidence],
@@ -169,7 +169,7 @@ def _retrieve_result(plan: ContextPlan) -> rag_service_pb2.RetrieveResult:
     )
 
 
-# 内部辅助：完成 filters 所需的局部转换或校验。
+# 将 RPC 元数据过滤条件转为字典，并拒绝空键或值不一致的重复键。
 def _filters(request: rag_service_pb2.RetrieveRequest) -> dict[str, str]:
     result: dict[str, str] = {}
     for item in request.filters:
@@ -187,7 +187,7 @@ def _filters(request: rag_service_pb2.RetrieveRequest) -> dict[str, str]:
 class RagService:
     """Milestone B transport adapter with explicitly injected application services."""
 
-    # 初始化该对象的依赖、配置或受控资源。
+    # 注入应用服务和摄取默认配置，并校验切块参数范围。
     def __init__(
         self,
         *,
@@ -217,7 +217,7 @@ class RagService:
         self._chunk_overlap = chunk_overlap
         self._embedding_model = embedding_model
 
-    # 实现 CreateDataset 对应的局部职责。
+    # 将创建数据集 RPC 请求转为应用命令，并返回创建结果或业务错误。
     async def CreateDataset(
         self,
         request: rag_service_pb2.CreateDatasetRequest,
@@ -281,7 +281,7 @@ class RagService:
                 error=_unexpected(error, request.context.request_id)
             )
 
-    # 实现 SubmitDocument 对应的局部职责。
+    # 校验上传帧顺序、聚合文件字节后提交摄取命令，并返回文档和 Job 信息。
     async def SubmitDocument(
         self,
         request_iterator: AsyncIterator[rag_service_pb2.UploadDocumentRequest],
@@ -347,7 +347,7 @@ class RagService:
         except Exception as error:
             return rag_service_pb2.SubmitDocumentResponse(error=_unexpected(error, request_id))
 
-    # 实现 DeleteDataset 对应的局部职责。
+    # 将删除数据集 RPC 请求转为应用命令，并返回异步删除 Job。
     async def DeleteDataset(
         self,
         request: rag_service_pb2.DeleteDatasetRequest,
@@ -378,7 +378,7 @@ class RagService:
                 error=_unexpected(error, request.context.request_id)
             )
 
-    # 实现 GetJob 对应的局部职责。
+    # 查询 Job 当前状态并转换为 protobuf 响应。
     async def GetJob(
         self,
         request: rag_service_pb2.GetJobRequest,
@@ -393,7 +393,7 @@ class RagService:
         except Exception as error:
             return rag_service_pb2.GetJobResponse(error=_unexpected(error, request.request_id))
 
-    # 实现 RetryJob 对应的局部职责。
+    # 为可重试的失败 Job 创建或复用重试 Job，并返回其状态。
     async def RetryJob(
         self,
         request: rag_service_pb2.RetryJobRequest,
@@ -447,7 +447,7 @@ class RagService:
                 error=_unexpected(error, request.context.request_id)
             )
 
-    # 实现 CancelJob 对应的局部职责。
+    # 请求取消摄取 Job，并返回 Job、Task 和取消请求状态。
     async def CancelJob(
         self,
         request: rag_service_pb2.CancelJobRequest,
@@ -478,7 +478,7 @@ class RagService:
                 error=_unexpected(error, request.context.request_id)
             )
 
-    # 实现 Retrieve 对应的局部职责。
+    # 将检索请求转为应用查询，并返回受上下文预算约束的 Evidence。
     async def Retrieve(
         self,
         request: rag_service_pb2.RetrieveRequest,
@@ -539,7 +539,7 @@ class RagService:
                 error=_unexpected(error, request.request_id)
             )
 
-    # 实现 DeleteDocument 对应的局部职责。
+    # 将删除文档 RPC 请求转为应用命令，并返回逻辑删除状态和清理 Job。
     async def DeleteDocument(
         self,
         request: rag_service_pb2.DeleteDocumentRequest,

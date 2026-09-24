@@ -48,7 +48,7 @@ async def serve(
         await server.stop(settings.grpc_shutdown_timeout_seconds)
 
 
-# 内部辅助：完成 run 所需的局部转换或校验。
+# 加载配置、装配服务容器并运行到收到停止信号为止。
 async def _run() -> None:
     settings = load_settings()
     container = await build_server_container(settings)

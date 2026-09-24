@@ -17,7 +17,7 @@ from rag_mvp.ports.parser import ParsedSegment, Parser, PdfParserMode
 
 
 class SourceParserRouter:
-    # 初始化该对象的依赖、配置或受控资源。
+    # 创建各格式解析器，并按文件扩展名登记路由。
     def __init__(
         self,
         *,
@@ -90,7 +90,7 @@ class SourceParserRouter:
             ".chi": chi,
         }
 
-    # 实现 parse 对应的局部职责。
+    # 根据源文件扩展名选择解析器；未知格式返回明确的领域错误。
     async def parse(self, source_name: str, content: bytes) -> tuple[ParsedSegment, ...]:
         suffix = Path(source_name).suffix.casefold()
         parser = self._parsers.get(suffix)

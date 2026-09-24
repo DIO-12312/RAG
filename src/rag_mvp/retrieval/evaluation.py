@@ -24,7 +24,7 @@ class RetrievalMetrics:
     locator_accuracy: float
 
 
-# 实现 evaluate_rankings 对应的局部职责。
+# 按给定 Top-K 计算标注样本的平均 Recall、MRR 和定位准确率。
 def evaluate_rankings(cases: tuple[EvaluationCase, ...], *, k: int) -> RetrievalMetrics:
     if not cases:
         raise ValueError("evaluation requires at least one case")

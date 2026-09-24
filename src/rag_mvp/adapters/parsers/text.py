@@ -10,7 +10,7 @@ from rag_mvp.ports.parser import ParsedSegment
 class TextParser:
     """Parse a complete UTF-8 text object into one traceable segment."""
 
-    # 实现 parse 对应的局部职责。
+    # 解码文本字节、规范化换行符，并保留完整内容为单个段落。
     async def parse(self, source_name: str, content: bytes) -> tuple[ParsedSegment, ...]:
         del source_name
         try:

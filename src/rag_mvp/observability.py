@@ -7,7 +7,7 @@ import structlog
 _LOGGER = structlog.get_logger("rag_mvp")
 
 
-# 实现 emit_event 对应的局部职责。
+# 以统一关联字段写入一条 RAG 生命周期结构化日志事件。
 def emit_event(
     event: str,
     *,

@@ -95,7 +95,7 @@ class _LockedEventAggregate:
 class MySQLMetadataRepository:
     """Persist metadata with short READ COMMITTED transactions and explicit locks."""
 
-    # 初始化该对象的依赖、配置或受控资源。
+    # 保存异步会话工厂和此服务可访问的默认租户。
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
@@ -106,7 +106,7 @@ class MySQLMetadataRepository:
         self._session_factory = session_factory
         self._default_tenant_id = default_tenant_id
 
-    # 创建该方法负责的领域数据或基础设施状态。
+    # 创建数据集；相同 ID 已存在时返回已有数据集。
     async def create_dataset(self, dataset: Dataset) -> Dataset:
         if dataset.tenant_id != self._default_tenant_id:
             raise DomainError(
@@ -136,7 +136,7 @@ class MySQLMetadataRepository:
             session.add(row)
         return dataset
 
-    # 读取该方法负责的领域数据或基础设施状态。
+    # 在默认租户范围内读取数据集。
     async def get_dataset(self, dataset_id: str) -> Dataset | None:
         async with self._session_factory() as session:
             row = await session.scalar(
@@ -172,7 +172,7 @@ class MySQLMetadataRepository:
             row.encrypted_embedding_profile = encrypted_profile
             return dataset_from_table(row)
 
-    # 提交该方法负责的领域数据或基础设施状态。
+    # 原子创建或复用摄取 Job、Task 和 Outbox，并处理并发唯一键冲突。
     async def submit_ingestion(self, command: SubmitIngestion) -> SubmitResult:
         request_digest = self._submission_digest(command)
         try:
@@ -316,7 +316,7 @@ class MySQLMetadataRepository:
             )
         return result
 
-    # 内部辅助：完成 prepare_document 所需的局部转换或校验。
+    # 新建文档或锁定既有文档，并分配本次摄取的索引版本。
     async def _prepare_document(
         self,
         session: AsyncSession,
@@ -366,7 +366,7 @@ class MySQLMetadataRepository:
         await session.flush()
         return existing_document, index_version
 
-    # 内部辅助：完成 resolve_submit_conflict 所需的局部转换或校验。
+    # 在唯一键冲突后重新锁定幂等记录或摄取指纹，并返回规范任务。
     async def _resolve_submit_conflict(
         self,
         command: SubmitIngestion,
@@ -389,7 +389,7 @@ class MySQLMetadataRepository:
                 request_digest,
             )
 
-    # 内部辅助：完成 reuse_fingerprint 所需的局部转换或校验。
+    # 复用指纹关联的规范 Job，并记录本次幂等提交结果。
     async def _reuse_fingerprint(
         self,
         session: AsyncSession,
@@ -424,7 +424,7 @@ class MySQLMetadataRepository:
         await session.flush()
         return result
 
-    # 内部辅助：完成 locked_idempotency 所需的局部转换或校验。
+    # 锁定上传操作的幂等记录。
     async def _locked_idempotency(
         self,
         session: AsyncSession,
@@ -437,7 +437,7 @@ class MySQLMetadataRepository:
         )
 
     @staticmethod
-    # 内部辅助：完成 locked_operation_idempotency 所需的局部转换或校验。
+    # 按操作类型和幂等键行锁读取幂等记录。
     async def _locked_operation_idempotency(
         session: AsyncSession,
         operation: str,
@@ -456,7 +456,7 @@ class MySQLMetadataRepository:
         )
 
     @staticmethod
-    # 内部辅助：完成 locked_fingerprint 所需的局部转换或校验。
+    # 按数据集、文件摘要和配置摘要行锁读取摄取指纹。
     async def _locked_fingerprint(
         session: AsyncSession,
         command: SubmitIngestion,
@@ -475,7 +475,7 @@ class MySQLMetadataRepository:
         )
 
     @staticmethod
-    # 内部辅助：完成 new_idempotency_record 所需的局部转换或校验。
+    # 创建保存摄取提交结果的幂等记录。
     def _new_idempotency_record(
         idempotency_key: str,
         dataset_id: str,
@@ -497,7 +497,7 @@ class MySQLMetadataRepository:
         )
 
     @staticmethod
-    # 内部辅助：完成 new_operation_idempotency_record 所需的局部转换或校验。
+    # 创建保存操作结果 JSON 的通用幂等记录。
     def _new_operation_idempotency_record(
         operation: str,
         idempotency_key: str,
@@ -516,7 +516,7 @@ class MySQLMetadataRepository:
         )
 
     @staticmethod
-    # 内部辅助：完成 recorded_submit_result 所需的局部转换或校验。
+    # 校验请求摘要后，从幂等记录还原已提交的摄取结果。
     def _recorded_submit_result(
         record: IdempotencyRecordTable,
         request_digest: str,
@@ -538,7 +538,7 @@ class MySQLMetadataRepository:
         )
 
     @staticmethod
-    # 内部辅助：完成 submission_digest 所需的局部转换或校验。
+    # 为影响摄取语义的提交字段计算稳定 SHA-256 摘要。
     def _submission_digest(command: SubmitIngestion) -> str:
         payload = json.dumps(
             {
@@ -555,12 +555,12 @@ class MySQLMetadataRepository:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     @staticmethod
-    # 内部辅助：完成 is_duplicate_key 所需的局部转换或校验。
+    # 判断 SQLAlchemy 完整性异常是否由 MySQL 唯一键冲突引起。
     def _is_duplicate_key(error: IntegrityError) -> bool:
         arguments = getattr(error.orig, "args", ())
         return bool(arguments and arguments[0] == MYSQL_DUPLICATE_KEY)
 
-    # 读取该方法负责的领域数据或基础设施状态。
+    # 在默认租户范围内读取 Job。
     async def get_job(self, job_id: str) -> Job | None:
         async with self._session_factory() as session:
             row = await session.scalar(
@@ -573,7 +573,7 @@ class MySQLMetadataRepository:
             )
             return job_from_table(row) if row is not None else None
 
-    # 读取该方法负责的领域数据或基础设施状态。
+    # 在默认租户范围内读取指定 Task。
     async def get_task(self, task_id: str) -> Task | None:
         async with self._session_factory() as session:
             row = await session.scalar(
@@ -587,7 +587,7 @@ class MySQLMetadataRepository:
             )
             return task_from_table(row) if row is not None else None
 
-    # 读取该方法负责的领域数据或基础设施状态。
+    # 在默认租户范围内读取一个 Job 的首个 Task。
     async def get_task_for_job(self, job_id: str) -> Task | None:
         async with self._session_factory() as session:
             row = await session.scalar(
@@ -603,7 +603,7 @@ class MySQLMetadataRepository:
             )
             return task_from_table(row) if row is not None else None
 
-    # 读取该方法负责的领域数据或基础设施状态。
+    # 在默认租户范围内读取指定 Document。
     async def get_document(self, document_id: str) -> Document | None:
         async with self._session_factory() as session:
             row = await session.scalar(
@@ -616,15 +616,15 @@ class MySQLMetadataRepository:
             )
             return document_from_table(row) if row is not None else None
 
-    # 列出该方法负责的领域数据或基础设施状态。
+    # 列出等待正式对象提升的 Outbox 事件。
     async def list_waiting_outbox(self, limit: int) -> Sequence[OutboxEvent]:
         return await self._list_outbox(OutboxStatus.WAITING_OBJECT, limit)
 
-    # 列出该方法负责的领域数据或基础设施状态。
+    # 列出可发布到 JetStream 的 Outbox 事件。
     async def list_ready_outbox(self, limit: int) -> Sequence[OutboxEvent]:
         return await self._list_outbox(OutboxStatus.READY_TO_PUBLISH, limit)
 
-    # 内部辅助：完成 list_outbox 所需的局部转换或校验。
+    # 按创建顺序分页读取指定状态的租户内 Outbox 事件。
     async def _list_outbox(
         self,
         status: OutboxStatus,
@@ -647,7 +647,7 @@ class MySQLMetadataRepository:
             )
             return tuple(outbox_from_table(row) for row in rows)
 
-    # 实现 waiting_staging_keys 对应的局部职责。
+    # 返回仍被 WAITING Outbox 引用的 staging 对象键。
     async def waiting_staging_keys(self) -> Sequence[str]:
         async with self._session_factory() as session:
             keys = await session.scalars(
@@ -665,7 +665,7 @@ class MySQLMetadataRepository:
             )
             return tuple(cast(str, key) for key in keys)
 
-    # 条件更新该方法负责的领域数据或基础设施状态。
+    # 在任务、Job 和文档状态仍有效时，记录正式对象并将 Outbox 置为 READY。
     async def mark_object_ready(self, event_id: str, object_key: str, now: datetime) -> bool:
         if not object_key.strip():
             raise ValueError("object_key must not be empty")
@@ -693,7 +693,7 @@ class MySQLMetadataRepository:
             aggregate.event.updated_at = now
             return True
 
-    # 持久记录该方法负责的领域数据或基础设施状态。
+    # 记录对象定稿失败次数；达到上限时终止关联 Task 和 Job。
     async def record_finalization_failure(
         self,
         event_id: str,
@@ -748,7 +748,7 @@ class MySQLMetadataRepository:
             )
             return True
 
-    # 条件更新该方法负责的领域数据或基础设施状态。
+    # 将仍处于 READY 状态的 Outbox 标记为已发布。
     async def mark_outbox_published(self, event_id: str, now: datetime) -> bool:
         async with self._session_factory() as session, session.begin():
             aggregate = await self._lock_event_aggregate(session, event_id)
@@ -825,7 +825,7 @@ class MySQLMetadataRepository:
                 ),
             )
 
-    # 条件完成该方法负责的领域数据或基础设施状态。
+    # 仅推进未取消 RUNNING Job 的进度，且不允许进度回退。
     # 只推进 RUNNING 任务的进度，且不回退已有进度：取消或终态后不得再更新。
     async def set_job_progress(self, task_id: str, progress: float, now: datetime) -> bool:
         if not 0.0 <= progress <= 1.0:
@@ -946,7 +946,7 @@ class MySQLMetadataRepository:
                 await self._schedule_version_cleanup(session, aggregate, now)
             return True
 
-    # 记录失败该方法负责的领域数据或基础设施状态。
+    # 将可执行 Task 和关联 Job 置为失败，并释放或保留摄取指纹。
     async def fail_task(self, task_id: str, failure: DomainFailure, now: datetime) -> bool:
         async with self._session_factory() as session, session.begin():
             aggregate = await self._lock_task_aggregate(session, task_id)
@@ -1261,7 +1261,7 @@ class MySQLMetadataRepository:
             )
             return result
 
-    # 取消该方法负责的领域数据或基础设施状态。
+    # 处理摄取 Job 取消请求，并通过幂等记录复用结果。
     async def cancel_job(self, request: CancelJobRequest) -> CancelJobResult:
         request_digest = self._command_digest(CANCEL_OPERATION, request.job_id)
         async with self._session_factory() as session, session.begin():
@@ -1637,7 +1637,7 @@ class MySQLMetadataRepository:
             )
             return result
 
-    # 条件完成该方法负责的领域数据或基础设施状态。
+    # 完成文档或索引版本清理 Task，并校验生命周期代际。
     async def complete_cleanup(self, task_id: str, now: datetime) -> bool:
         async with self._session_factory() as session, session.begin():
             aggregate = await self._lock_task_aggregate(session, task_id)
@@ -1678,7 +1678,7 @@ class MySQLMetadataRepository:
             aggregate.job.updated_at = now
             return True
 
-    # 实现 dataset_cleanup_object_keys 对应的局部职责。
+    # 返回正在删除的数据集关联的正式对象和 staging 对象键。
     async def dataset_cleanup_object_keys(self, task_id: str) -> Sequence[str]:
         async with self._session_factory() as session:
             dataset_id = await session.scalar(
@@ -1718,7 +1718,7 @@ class MySQLMetadataRepository:
             object_keys.update(staging_keys)
             return tuple(sorted(key for key in object_keys if key is not None))
 
-    # 实现 finalize_dataset_cleanup 对应的局部职责。
+    # 在数据集清理 Task 有效时，删除该数据集全部元数据记录。
     async def finalize_dataset_cleanup(self, task_id: str, now: datetime) -> bool:
         del now
         async with self._session_factory() as session, session.begin():
@@ -1800,7 +1800,7 @@ class MySQLMetadataRepository:
             )
             return True
 
-    # 实现 visible_document_versions 对应的局部职责。
+    # 返回租户内 READY 文档当前可检索的索引版本。
     async def visible_document_versions(self, document_ids: Sequence[str]) -> Mapping[str, int]:
         if not document_ids:
             return {}
@@ -1818,7 +1818,7 @@ class MySQLMetadataRepository:
             )
             return {document_id: cast(int, version) for document_id, version in rows}
 
-    # 内部辅助：完成 add_job_task_outbox 所需的局部转换或校验。
+    # 在同一事务新增 Job、首个 Task 及其 Outbox 事件。
     async def _add_job_task_outbox(
         self,
         session: AsyncSession,
@@ -1857,7 +1857,7 @@ class MySQLMetadataRepository:
         )
         return task
 
-    # 内部辅助：完成 cancel_running_ingestion 所需的局部转换或校验。
+    # 取消运行中的摄取任务，释放指纹并安排索引版本清理。
     async def _cancel_running_ingestion(
         self,
         session: AsyncSession,
@@ -1892,7 +1892,7 @@ class MySQLMetadataRepository:
         )
         await self._schedule_version_cleanup(session, aggregate, now)
 
-    # 内部辅助：完成 schedule_version_cleanup 所需的局部转换或校验。
+    # 若尚无活跃清理任务，为指定索引版本创建清理 Job、Task 和 Outbox。
     async def _schedule_version_cleanup(
         self,
         session: AsyncSession,
@@ -1981,7 +1981,7 @@ class MySQLMetadataRepository:
         return await self._lock_task_aggregate(session, task_id)
 
     @staticmethod
-    # 内部辅助：完成 command_digest 所需的局部转换或校验。
+    # 为操作类型和目标 ID 计算稳定的幂等请求摘要。
     def _command_digest(operation: str, target_id: str) -> str:
         payload = json.dumps(
             {"operation": operation, "target_id": target_id},
@@ -2002,7 +2002,7 @@ class MySQLMetadataRepository:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     @staticmethod
-    # 内部辅助：完成 validate_operation_record 所需的局部转换或校验。
+    # 确认复用的幂等键对应同一请求摘要。
     def _validate_operation_record(
         record: IdempotencyRecordTable,
         request_digest: str,

@@ -12,7 +12,7 @@ from rag_mvp.domain.models import Chunk, Locator
 from rag_mvp.ports.search_engine import IndexedChunk, SearchCandidate
 
 
-# 实现 index_definition 对应的局部职责。
+# 生成包含版本化 Chunk 字段和向量维度的严格 Elasticsearch Mapping。
 def index_definition(embedding_dimension: int) -> dict[str, Any]:
     """Return the strict mapping shared by provisioning and schema validation."""
 
@@ -58,7 +58,7 @@ def index_definition(embedding_dimension: int) -> dict[str, Any]:
     }
 
 
-# 实现 source_from_indexed_chunk 对应的局部职责。
+# 将版本化 Chunk 编码为 Elasticsearch `_source` 字段。
 def source_from_indexed_chunk(indexed: IndexedChunk) -> dict[str, Any]:
     """Encode one versioned chunk as an Elasticsearch `_source`."""
 
@@ -86,7 +86,7 @@ def source_from_indexed_chunk(indexed: IndexedChunk) -> dict[str, Any]:
     }
 
 
-# 实现 bulk_action 对应的局部职责。
+# 构建按物理 record_id 幂等写入单个 Chunk 的 Bulk index 操作。
 def bulk_action(
     index_name: str,
     indexed: IndexedChunk,
@@ -113,7 +113,7 @@ def bulk_action(
     }
 
 
-# 实现 candidate_from_hit 对应的局部职责。
+# 将 Elasticsearch 命中解析为保留原始检索分数的 SearchCandidate。
 def candidate_from_hit(hit: Mapping[str, Any]) -> SearchCandidate:
     """Decode an Elasticsearch hit without altering its raw route score."""
 
@@ -156,7 +156,7 @@ def candidate_from_hit(hit: Mapping[str, Any]) -> SearchCandidate:
         ) from exc
 
 
-# 内部辅助：完成 required_mapping 所需的局部转换或校验。
+# 读取并校验字典中的必填嵌套对象字段。
 def _required_mapping(value: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     nested = value[key]
     if not isinstance(nested, Mapping):
@@ -164,7 +164,7 @@ def _required_mapping(value: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     return nested
 
 
-# 内部辅助：完成 required_text 所需的局部转换或校验。
+# 读取并校验字典中的必填非空字符串字段。
 def _required_text(value: Mapping[str, Any], key: str) -> str:
     text = value[key]
     if not isinstance(text, str) or not text:
@@ -172,7 +172,7 @@ def _required_text(value: Mapping[str, Any], key: str) -> str:
     return text
 
 
-# 内部辅助：完成 optional_text 所需的局部转换或校验。
+# 读取可缺省的字符串字段，非字符串值视为无效。
 def _optional_text(value: Mapping[str, Any], key: str) -> str | None:
     text = value.get(key)
     if text is None:
@@ -182,7 +182,7 @@ def _optional_text(value: Mapping[str, Any], key: str) -> str | None:
     return text
 
 
-# 内部辅助：完成 required_int 所需的局部转换或校验。
+# 读取并校验字典中的必填整数字段。
 def _required_int(value: Mapping[str, Any], key: str) -> int:
     integer = value[key]
     if not isinstance(integer, int) or isinstance(integer, bool):
@@ -190,7 +190,7 @@ def _required_int(value: Mapping[str, Any], key: str) -> int:
     return integer
 
 
-# 内部辅助：完成 optional_int 所需的局部转换或校验。
+# 读取可缺省的整数字段，非整数值视为无效。
 def _optional_int(value: Mapping[str, Any], key: str) -> int | None:
     integer = value.get(key)
     if integer is None:
@@ -200,7 +200,7 @@ def _optional_int(value: Mapping[str, Any], key: str) -> int | None:
     return integer
 
 
-# 内部辅助：完成 string_mapping 所需的局部转换或校验。
+# 将元数据映射转换为字符串键和值，并拒绝其他类型。
 def _string_mapping(value: Any) -> dict[str, str]:
     if not isinstance(value, Mapping):
         raise TypeError("metadata must be an object")

@@ -47,7 +47,7 @@ async def _report_progress(
 
 
 class IngestionPipeline:
-    # 初始化该对象的依赖、配置或受控资源。
+    # 保存摄取各阶段所需的存储、解析、切块、模型和索引依赖。
     def __init__(
         self,
         storage: ObjectStorage,
@@ -169,7 +169,7 @@ class IngestionPipeline:
         await self._checkpoint(Checkpoint.AFTER_INDEX_WRITE)
         return chunks
 
-    # 内部辅助：完成 checkpoint 所需的局部转换或校验。
+    # 在流水线检查点触发测试故障注入，并通知上层更新任务进度。
     async def _checkpoint(self, checkpoint: Checkpoint) -> None:
         if self._failpoint is not None:
             await self._failpoint(checkpoint)

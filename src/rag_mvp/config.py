@@ -159,7 +159,7 @@ class Settings(BaseSettings):
     log_json: bool = True
 
     @property
-    # 实现 grpc_address 对应的局部职责。
+    # 将 gRPC 主机和端口组合为客户端可连接的地址。
     def grpc_address(self) -> str:
         """Return the host:port address accepted by gRPC."""
 
@@ -182,7 +182,7 @@ class Settings(BaseSettings):
             )
         )
 
-    # 实现 require_embedding_profile 对应的局部职责。
+    # 校验 Embedding 配置完整性，并构造适配器使用的连接配置。
     def require_embedding_profile(self) -> EmbeddingProfile:
         """Return complete model settings or reject missing/partial role configuration."""
 
@@ -215,7 +215,7 @@ class Settings(BaseSettings):
             max_chars_per_minute=self.embedding_max_chars_per_minute,
         )
 
-    # 实现 require_elasticsearch_profile 对应的局部职责。
+    # 校验 HTTPS 连接和凭据来源，并构造 Elasticsearch 连接配置。
     def require_elasticsearch_profile(self) -> ElasticsearchProfile:
         """Return fail-closed HTTPS credentials for the Elasticsearch adapter."""
 
@@ -254,7 +254,7 @@ class Settings(BaseSettings):
         )
 
     @property
-    # 实现 failpoint_checkpoint_names 对应的局部职责。
+    # 将逗号分隔的测试故障注入检查点解析为去重集合。
     def failpoint_checkpoint_names(self) -> frozenset[str]:
         """Return the explicitly configured test-only checkpoint names."""
 
@@ -263,7 +263,7 @@ class Settings(BaseSettings):
         )
 
     @model_validator(mode="after")
-    # 校验该方法负责的领域数据或基础设施状态。
+    # 校验切块、解析和生产环境安全相关的配置约束。
     def validate_production_safety(self) -> Self:
         """Reject development-only settings in production."""
 
@@ -298,7 +298,7 @@ class Settings(BaseSettings):
         return self
 
 
-# 加载该方法负责的领域数据或基础设施状态。
+# 在进程启动边界加载并校验环境配置。
 def load_settings() -> Settings:
     """Load settings at an explicit process boundary."""
 

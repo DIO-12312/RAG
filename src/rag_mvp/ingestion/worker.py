@@ -213,7 +213,7 @@ async def run_worker(
                 )
 
 
-# 内部辅助：完成 run 所需的局部转换或校验。
+# 装配 Worker 依赖、注册退出信号，并在退出时关闭容器。
 async def _run() -> None:
     settings = load_settings()
     container = await build_worker_container(settings)

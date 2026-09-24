@@ -38,7 +38,7 @@ RetrievalCandidate = HybridCandidate | RerankedCandidate
 
 
 class RetrievalService:
-    # 初始化该对象的依赖、配置或受控资源。
+    # 保存元数据、检索和模型端口，供一次检索编排复用。
     def __init__(
         self,
         metadata: MetadataRepository,
@@ -293,7 +293,7 @@ class RetrievalService:
             expanded.append(self._topic_reference_evidence(chunk, anchor))
         return tuple(expanded), tuple(referenced_chunks)
 
-    # 内部辅助：完成 evidence 所需的局部转换或校验。
+    # 视配置执行重排或降级为融合排序，并选出多样化的证据锚点。
     async def _evidence(
         self,
         query: RetrieveQuery,
@@ -570,7 +570,7 @@ class RetrievalService:
         )
 
     @staticmethod
-    # 内部辅助：完成 visible 所需的局部转换或校验。
+    # 仅保留属于目标数据集且索引版本仍为可见版本的候选记录。
     def _visible(
         candidates: Sequence[SearchCandidate],
         dataset_id: str,
