@@ -44,6 +44,14 @@ JWT 是 HttpOnly Cookie，有效期 24 小时，关闭标签页仍可恢复；�
 
 ## 验证
 
+### 管理员观测
+
+Go API、Python gRPC Server、Worker 和 Outbox 将脱敏 Metric/Trace 发往私网 Collector。管理员可在左侧“观测”页面查看固定时间窗口的指标、按服务筛选链路和查看脱敏 Span。Go API 从私网 Prometheus、Tempo 查询；浏览器不需要、也不应直接连接这些服务。普通用户无导航入口，直接访问页面或 API 也会被拒绝。管理员进入页面时重新读取 `/me`；离线撤权后，旧会话立即失去 API 权限。空结果、部分失败和后端不可用均单独显示。
+
+本地首次授予管理员可在产品 API 容器中运行 `product-admin-role --user-id <已有用户 ID> --role admin`；撤权将角色改为 `user`。命令需连接产品 MySQL 并使用现有密钥注入方式，详情见 [生产部署说明](../deployment-production.md)。角色不可通过注册请求设置。观测堆栈停止时业务请求仍可正常处理，仪表盘显示服务不可用。
+
+真实验收中的 Embedding 配置应从获授权的现有生产用户保存配置读取并只在运行时使用，不写入测试文件、日志或提交。测试应使用独立数据集并在结束后清理；实际维度必须与目标 ES 索引配置相符。
+
 ```powershell
 cd backend/go-api
 go test ./...

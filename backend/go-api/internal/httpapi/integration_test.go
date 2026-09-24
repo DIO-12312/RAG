@@ -19,6 +19,7 @@ import (
 	pb "rag-mvp/backend/go-api/internal/ragpb"
 	"rag-mvp/backend/go-api/internal/security"
 	"rag-mvp/backend/go-api/internal/storage"
+	"rag-mvp/backend/go-api/internal/telemetry"
 	"strings"
 	"testing"
 	"time"
@@ -55,6 +56,24 @@ func TestLiveProductFlow(t *testing.T) {
 	if dsn == "" {
 		t.Skip("PRODUCT_TEST_MYSQL_DSN required")
 	}
+	embeddingEmail := os.Getenv("PRODUCT_TEST_EMBEDDING_OWNER_EMAIL")
+	if embeddingEmail == "" {
+		t.Skip("PRODUCT_TEST_EMBEDDING_OWNER_EMAIL required for saved profile acceptance")
+	}
+	if os.Getenv("PRODUCT_TEST_OTEL_ENDPOINT") != "" {
+		t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", os.Getenv("PRODUCT_TEST_OTEL_ENDPOINT"))
+		shutdown, err := telemetry.Init(context.Background())
+		if err != nil {
+			t.Fatal("telemetry initialization failed")
+		}
+		defer func() {
+			flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := shutdown(flush); err != nil {
+				t.Log("telemetry shutdown unavailable; business result remains authoritative")
+			}
+		}()
+	}
 	store, e := storage.Open(dsn)
 	if e != nil {
 		t.Fatal(e)
@@ -82,11 +101,7 @@ func TestLiveProductFlow(t *testing.T) {
 		t.Fatal("deployment encryption key invalid")
 	}
 	var embeddingOwner string
-	var embeddingCount int
-	if e = store.DB.QueryRow("SELECT COUNT(*) FROM embedding_model_configs WHERE encrypted_api_key<>''").Scan(&embeddingCount); e != nil || embeddingCount != 1 {
-		t.Fatal("acceptance requires exactly one saved Embedding configuration")
-	}
-	if e = store.DB.QueryRow("SELECT user_id FROM embedding_model_configs WHERE encrypted_api_key<>'' LIMIT 1").Scan(&embeddingOwner); e != nil {
+	if e = store.DB.QueryRow("SELECT u.id FROM users u JOIN embedding_model_configs e ON e.user_id=u.id WHERE u.email=? AND e.encrypted_api_key<>''", embeddingEmail).Scan(&embeddingOwner); e != nil {
 		t.Fatal("saved Embedding configuration unavailable")
 	}
 	embeddingConfig, embeddingSecret, e := store.Model(ctx, embeddingOwner, "embedding")
@@ -318,14 +333,15 @@ func TestLiveProductFlow(t *testing.T) {
 	if _, e := time.Parse(time.RFC3339, details.UpdatedAt); e != nil {
 		t.Fatal("dataset timestamp missing")
 	}
-	stream := call("POST", "/chat/stream", strings.NewReader(fmt.Sprintf(`{"datasetId":%q,"question":"What is the Project Cobalt launch code?"}`, dataset.ID)), "application/json", 200)
+	conversationID := security.ID()
+	stream := call("POST", "/chat/stream", strings.NewReader(fmt.Sprintf(`{"conversationId":%q,"datasetId":%q,"question":"What is the Project Cobalt launch code?"}`, conversationID, dataset.ID)), "application/json", 200)
 	if !bytes.Contains(stream, []byte("event: final")) || !bytes.Contains(stream, []byte("COBALT-742")) ||
 		(!liveProvider && (chatCalls != 2 || assessCalls != 1)) || !bytes.Contains(stream, []byte("\"ordinal\":1")) {
 		t.Fatalf("chat loop failed: %s", stream)
 	}
 
 	// 普通交流必须既不检索也不产生引用，只输出 token 与 final。
-	greeting := call("POST", "/chat/stream", strings.NewReader(fmt.Sprintf(`{"datasetId":%q,"question":"你好"}`, dataset.ID)), "application/json", 200)
+	greeting := call("POST", "/chat/stream", strings.NewReader(fmt.Sprintf(`{"conversationId":%q,"datasetId":%q,"question":"你好"}`, conversationID, dataset.ID)), "application/json", 200)
 	if !bytes.Contains(greeting, []byte("event: final")) || bytes.Contains(greeting, []byte("event: retrieval")) || bytes.Contains(greeting, []byte("\"ordinal\"")) {
 		t.Fatalf("ordinary conversation must not retrieve or cite: %s", greeting)
 	}

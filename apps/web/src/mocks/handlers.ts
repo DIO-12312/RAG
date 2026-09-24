@@ -28,6 +28,7 @@ const currentUser: CurrentUser = {
   id: "user-demo",
   email: "demo@example.test",
   language: "zh-CN",
+  role: "user",
   maxUploadBytes: 64 * 1024 * 1024,
 };
 

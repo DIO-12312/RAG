@@ -1,10 +1,16 @@
 # 测试目录与职责清单
 
-`backend/go-api/internal/observability/query_test.go`：假 Prometheus/Tempo 验证固定查询、部分故障、超限响应、空链路、非法 ID 和原始敏感 Span 属性过滤。`backend/go-api/internal/httpapi/server_test.go::TestUnauthenticatedAndCrossOrigin` 同时覆盖管理员路由未登录返回 401。
+`backend/go-api/internal/telemetry/telemetry_test.go`：Go Agent 根 Span 与 gRPC 子 Span 同 trace、W3C metadata 传播、未知枚举和错误消息不会成为敏感 Span 属性；离线内存 exporter。
 
 `backend/go-api/internal/storage/admin_role_test.go`：角色枚举离线测试；设置 `PRODUCT_ROLE_TEST_MYSQL_DSN` 指向隔离 MySQL 时，检查注册默认普通用户、并发撤销最后管理员、无用户和非法角色。不能指向运行中的产品库。
 
-`backend/go-api/internal/telemetry/telemetry_test.go`：Go Agent 根 Span 与 gRPC 子 Span 同 trace、W3C metadata 传播、未知枚举和错误消息不会成为敏感 Span 属性；离线内存 exporter。
+`backend/go-api/internal/observability/query_test.go`：假 Prometheus/Tempo 验证固定查询、部分故障、超限响应、空链路、非法 ID 和原始敏感 Span 属性过滤。`backend/go-api/internal/httpapi/server_test.go::TestUnauthenticatedAndCrossOrigin` 同时覆盖管理员路由未登录返回 401。
+
+`backend/go-api/internal/httpapi/observability_test.go::TestObservabilityAuthorizationReadsCurrentRole`：在隔离 MySQL 上使用同一 Cookie 验证普通用户 403、授予管理员后进入后端查询、撤权立即 403；未配置 `PRODUCT_ROLE_TEST_MYSQL_DSN` 时跳过。
+
+`apps/web/tests/observability.spec.ts`：管理员路由进入和撤权后的重新校验、空指标/链路以及后端不可用展示；Vitest + MSW，不代替真实浏览器和 Compose 验收。
+
+`backend/go-api/internal/httpapi/integration_test.go::TestLiveProductFlow`：真实产品链路只从运行时 `PRODUCT_TEST_EMBEDDING_OWNER_EMAIL` 指定的已保存 Embedding 配置读取密文并解密；未指定时跳过，不能从任意用户配置中猜选。可选 `PRODUCT_TEST_OTEL_ENDPOINT` 启用真实 Go→Python Trace 输出。需要单独部署和隔离数据集，测试源文件中不保存真实邮箱或密钥。
 
 `tests/contract/test_container_artifacts.py::test_observability_backends_are_private_and_have_bounded_retention`：离线解析开发、产品、生产 Compose 及 Collector/Tempo 配置，检查私网、镜像 digest、保留策略、跨进程服务名和敏感属性删除。使用既有 `tests/contract/test_container_artifacts.py`，目录树未增删文件。
 
