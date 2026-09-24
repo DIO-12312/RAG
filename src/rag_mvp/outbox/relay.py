@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 from rag_mvp.ports.message_queue import TaskQueue
 from rag_mvp.ports.metadata import MetadataRepository
+from rag_mvp.telemetry import record_outbox, span
 
 
 # 关键语义：发布成功、标记已发布前崩溃会再次发布同一 task_id；Worker 必须幂等处理。
@@ -22,11 +23,19 @@ async def relay_once(
 ) -> int:
     published = 0
     for event in await metadata.list_ready_outbox(limit):
-        await queue.publish(event.task_id)
+        try:
+            with span("rag.outbox.publish", **{"task.id": event.task_id}):
+                await queue.publish(event.task_id)
+        except Exception:
+            record_outbox("failed")
+            raise
         if after_publish is not None:
             await after_publish()
         if await metadata.mark_outbox_published(event.id, now):
             published += 1
+            record_outbox("succeeded")
+        else:
+            record_outbox("retry")
     return published
 
 

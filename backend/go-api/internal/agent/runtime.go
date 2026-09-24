@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"rag-mvp/backend/go-api/internal/telemetry"
 	"strconv"
 	"strings"
 	"time"
@@ -36,12 +37,14 @@ func (h Harness) runStateMachine(ctx context.Context, state *RunState, emit Emit
 	if code == "" && err != nil {
 		code = "run_failed"
 	}
-	h.observe(ctx, state, RunEvent{
+	completeCtx, completeSpan := telemetry.StartPhase(ctx, RunStageComplete)
+	h.observe(completeCtx, state, RunEvent{
 		Stage:      RunStageComplete,
 		DurationMS: time.Since(started).Milliseconds(),
 		ErrorCode:  code,
 		StopReason: state.StopReason,
 	})
+	telemetry.EndPhase(completeCtx, completeSpan, RunStageComplete, 0, err)
 	return err
 }
 
@@ -53,23 +56,27 @@ func (h Harness) runPhases(ctx context.Context, state *RunState, emit Emit) erro
 			return err
 		}
 
+		phase := state.Phase
+		phaseCtx, phaseSpan := telemetry.StartPhase(ctx, string(phase))
+		beforeModelCalls := state.ModelCalls
 		var err error
-		switch state.Phase {
+		switch phase {
 		case RunPhaseRoute:
-			err = h.routePhase(ctx, state, emit)
+			err = h.routePhase(phaseCtx, state, emit)
 		case RunPhaseModel:
-			err = h.modelPhase(ctx, state, emit)
+			err = h.modelPhase(phaseCtx, state, emit)
 		case RunPhaseTool:
-			err = h.toolPhase(ctx, state, emit)
+			err = h.toolPhase(phaseCtx, state, emit)
 		case RunPhaseAssess:
-			err = h.assessPhase(ctx, state, emit)
+			err = h.assessPhase(phaseCtx, state, emit)
 		case RunPhaseRewrite:
-			err = h.rewritePhase(ctx, state, emit)
+			err = h.rewritePhase(phaseCtx, state, emit)
 		case RunPhaseFinalize:
-			err = h.finalizePhase(ctx, state, emit)
+			err = h.finalizePhase(phaseCtx, state, emit)
 		default:
-			return fmt.Errorf("unsupported run phase %s", state.Phase)
+			err = fmt.Errorf("unsupported run phase %s", phase)
 		}
+		telemetry.EndPhase(phaseCtx, phaseSpan, string(phase), state.ModelCalls-beforeModelCalls, err)
 		if err != nil {
 			return err
 		}

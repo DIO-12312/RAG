@@ -27,6 +27,10 @@ services:
       PRODUCT_KEY_DIR: /var/lib/product
       PRODUCT_COOKIE_SECURE: "false"
       PRODUCT_ALLOW_LOCAL_MODELS: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: rag-go-api
+      PRODUCT_PROMETHEUS_URL: http://prometheus:9090
+      PRODUCT_TEMPO_URL: http://tempo:3200
     volumes:
       - product-keys:/var/lib/product
     ports:

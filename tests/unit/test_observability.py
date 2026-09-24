@@ -36,6 +36,8 @@ def test_rag_event_always_contains_correlation_and_stage_fields() -> None:
         "error_code": None,
         "failure_message": "provider throttled the request",
         "retry_in_seconds": 15.0,
+        "trace_id": None,
+        "span_id": None,
     }
 
 

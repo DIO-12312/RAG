@@ -3,6 +3,7 @@ package agent
 
 import (
 	"context"
+	"rag-mvp/backend/go-api/internal/telemetry"
 	"regexp"
 )
 
@@ -155,8 +156,11 @@ func (h Harness) newRunState(dataset, question string, history []Message) *RunSt
 
 // Run 保持对外签名不变：内部走显式状态机，只返回答案与已校验引用。
 func (h Harness) Run(ctx context.Context, dataset, question string, history []Message, emit Emit) (string, []Citation, error) {
+	ctx, runSpan, started := telemetry.StartRun(ctx, h.RunID)
 	state := h.newRunState(dataset, question, history)
-	if err := h.runStateMachine(ctx, state, emit); err != nil {
+	err := h.runStateMachine(ctx, state, emit)
+	telemetry.EndRun(ctx, runSpan, started, string(state.StopReason), err)
+	if err != nil {
 		return "", nil, err
 	}
 	return state.Answer, state.Citations, nil

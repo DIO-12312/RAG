@@ -49,6 +49,13 @@ async function switchAccount(): Promise<void> {
           <AppIcon name="settings" />
           {{ messages[locale.value].settings }}
         </RouterLink>
+        <RouterLink
+          v-if="auth.isAdmin"
+          to="/admin/observability"
+        >
+          <AppIcon name="chart" />
+          {{ messages[locale.value].observability }}
+        </RouterLink>
       </nav>
       <div class="sidebar-note">
         <AppIcon name="shield" /><p>{{ locale.value === 'zh-CN' ? '你的知识，你的空间' : 'Your knowledge. Your space.' }}<small>{{ locale.value === 'zh-CN' ? '让每一个答案，都有据可循。' : 'Answers grounded in your sources.' }}</small></p>

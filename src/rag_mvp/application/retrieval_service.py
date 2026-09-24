@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from time import perf_counter
 from typing import overload
 
@@ -33,8 +33,14 @@ from rag_mvp.retrieval.hybrid import (
 from rag_mvp.retrieval.provenance import hybrid_evidence, reranked_evidence
 from rag_mvp.retrieval.query_analysis import QueryIntent, analyze_query
 from rag_mvp.retrieval.rerank import RerankedCandidate, apply_rerank_scores
+from rag_mvp.telemetry import stage
 
 RetrievalCandidate = HybridCandidate | RerankedCandidate
+
+
+async def _observe_retrieval[T](name: str, operation: Awaitable[T]) -> T:
+    async with stage(name, kind="retrieval"):
+        return await operation
 
 
 class RetrievalService:
@@ -82,24 +88,30 @@ class RetrievalService:
         candidate_limit = min(max(query.top_k * 4, 20), 100)
         route_results = await asyncio.gather(
             *(
-                self._search.dense_search(
-                    SearchRequest(
-                        dataset_id=query.dataset_id,
-                        top_k=candidate_limit,
-                        query_vector=vector,
-                        filters=query.filters,
-                    )
+                _observe_retrieval(
+                    "dense",
+                    self._search.dense_search(
+                        SearchRequest(
+                            dataset_id=query.dataset_id,
+                            top_k=candidate_limit,
+                            query_vector=vector,
+                            filters=query.filters,
+                        )
+                    ),
                 )
                 for vector in vectors
             ),
             *(
-                self._search.sparse_search(
-                    SearchRequest(
-                        dataset_id=query.dataset_id,
-                        top_k=candidate_limit,
-                        query=search_query,
-                        filters=query.filters,
-                    )
+                _observe_retrieval(
+                    "sparse",
+                    self._search.sparse_search(
+                        SearchRequest(
+                            dataset_id=query.dataset_id,
+                            top_k=candidate_limit,
+                            query=search_query,
+                            filters=query.filters,
+                        )
+                    ),
                 )
                 for search_query in search_queries
             ),
@@ -108,9 +120,10 @@ class RetrievalService:
         dense_routes = route_results[:route_count]
         sparse_routes = route_results[route_count:]
         all_candidates = tuple(candidate for route in route_results for candidate in route)
-        visible_versions = await self._metadata.visible_document_versions(
-            tuple(dict.fromkeys(candidate.chunk.document_id for candidate in all_candidates))
-        )
+        async with stage("visibility", kind="retrieval"):
+            visible_versions = await self._metadata.visible_document_versions(
+                tuple(dict.fromkeys(candidate.chunk.document_id for candidate in all_candidates))
+            )
         visible_dense_routes = tuple(
             self._visible(route, query.dataset_id, visible_versions) for route in dense_routes
         )
@@ -139,7 +152,8 @@ class RetrievalService:
                 *referenced_chunks,
             ),
         )
-        result = build_context_plan(evidence, max_context_tokens=query.max_context_tokens)
+        async with stage("evidence", kind="retrieval"):
+            result = build_context_plan(evidence, max_context_tokens=query.max_context_tokens)
         emit_event(
             "retrieval_completed",
             request_id=query.request_id,
@@ -307,11 +321,14 @@ class RetrievalService:
 
         candidates = tuple(fused[:20])
         try:
-            scores = await model_for_rerank(
-                self._model, query.encrypted_rerank_profile, query.dataset_id
-            ).rerank(
-                query.query,
-                [candidate.chunk.content_with_weight for candidate in candidates],
+            scores = await _observe_retrieval(
+                "rerank",
+                model_for_rerank(
+                    self._model, query.encrypted_rerank_profile, query.dataset_id
+                ).rerank(
+                    query.query,
+                    [candidate.chunk.content_with_weight for candidate in candidates],
+                ),
             )
         except DomainError as error:
             if not error.failure.retryable:

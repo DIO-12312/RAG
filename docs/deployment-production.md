@@ -5,6 +5,22 @@ main 分支 GHCR 发布与应用镜像回退见 [自动发布手册](deployment-
 
 这份手册对应单机 `compose.production.yml`，不替代高可用、Kubernetes 或托管数据库方案。只有公网 IP 时可以启动 Caddy 的 HTTP 入口并通过 `http://49.235.110.118` 验收页面，但不能完成浏览器认可的公网 HTTPS 验收。域名模式必须使用真实域名的 A/AAAA 记录，不得将公网 IP 填入域名 HTTPS 配置。
 
+## 观测服务与数据保留
+
+管理员观测权限由产品 MySQL 的 `users.role` 控制，注册用户默认 `user`。首次部署时先正常注册，记下该账号 `GET /api/me` 的 `id`，再由运维在私网 API 容器执行离线授权：
+
+```bash
+docker compose --env-file "$PRODUCTION_ENV_FILE" -f compose.production.yml exec -T api /usr/local/bin/product-admin-role --user-id USER_ID --role admin
+```
+
+撤权使用相同命令并将 `--role` 改为 `user`。命令只接受已存在的用户 ID，拒绝撤销最后一名管理员，成功时输出不含邮箱与凭据的 JSON 操作审计；应将该输出纳入受控运维记录。命令从容器内只读 Secret 文件读取产品 MySQL DSN，不需要在命令行暴露密码。旧 Cookie 的角色不会被信任，撤权后下一次管理员请求即被拒绝。
+
+同一生产 Compose 在 `backend` 私网运行 OpenTelemetry Collector、Prometheus 和 Tempo；它们没有宿主端口，Caddy 也不代理原生查询接口。Go API 与三个 Python 进程只通过私网 `otel-collector:4318` 发送 OTLP。Collector 将脱敏后的指标供 Prometheus 抓取，将 Trace 发往 Tempo；保留原 JSON 日志和数据库业务状态。Collector、Prometheus 或 Tempo 不可用时，业务服务仍应正常运行，仪表盘显示后端不可用。
+
+Prometheus 使用独立命名卷 `prometheus-data`，最长保留 15 天，并以 `OBS_PROMETHEUS_RETENTION_SIZE` 设置数据块容量上限（默认 `2GB`，实际部署须按磁盘预算调整）。Tempo 的 `tempo-data` 命名卷最长保留 7 天；`OBS_TEMPO_BUDGET_BYTES` 默认 3 GiB。独立的 `observability-retention` 进程每分钟计算 Tempo 卷占用和宿主剩余空间：80% 水位开始逐级缩短 Tempo 的运行时保留期，70% 以下逐级恢复，90% 或宿主剩余不足 10% 时拒绝新 Trace，并向 Prometheus 暴露容量/暂停状态。该进程只改写专用 `tempo-overrides` 卷中的配置，不直接删除数据文件。Tempo 的租户级覆盖会替换整组默认值，因此控制进程在写入保留期时同时固定摄取速率、突发大小、活跃 Trace 数和单条 Trace 大小限制；升级 Tempo 时须重新核对这些字段。Tempo 自身异步淘汰最旧块，因而预算不是严格硬配额；须为 WAL、压缩和回收延迟留余量。控制进程不可用时 Trace 可丢失，但业务不中断。生产长期运行宜将 Tempo 换为受支持的对象存储后端；当前本地卷部署需先完成真实负载容量验收。
+
+备份和升级时将观测卷视为可重建的短期运营数据，按实际审计需求决定是否做一致性备份；不得运行 `docker compose down -v`。更新 Collector/Prometheus/Tempo 镜像前，检查固定版本的来源和 digest，在隔离环境验证配置兼容和旧卷读取，然后逐项升级。采集属性不得包含凭据、Prompt、Evidence、问题正文或模型输入输出。
+
 ## 主机预检
 
 以有 sudo 权限的运维账号检查 Ubuntu、Docker、Compose、磁盘与内存：

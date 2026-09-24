@@ -38,6 +38,8 @@ from rag_mvp.ports.model import ModelGateway
 from rag_mvp.ports.search_engine import SearchEngine
 from rag_mvp.ports.storage import ObjectStorage
 from rag_mvp.rpc.rag_service import RagService
+from rag_mvp.telemetry import configure as configure_telemetry
+from rag_mvp.telemetry import shutdown as shutdown_telemetry
 
 AsyncCloser = Callable[[], Awaitable[None]]
 ProcessRole = Literal["server", "worker", "outbox"]
@@ -142,6 +144,8 @@ async def build_server_container(
 
     selected = factories or default_adapter_factories()
     container = Container(settings, "server")
+    configure_telemetry("server")
+    container.register(ManagedResource(None, shutdown_telemetry))
     try:
         metadata = container.register(await selected.metadata(settings))
         storage = container.register(await selected.storage(settings))
@@ -208,6 +212,8 @@ async def build_worker_container(
 
     selected = factories or default_adapter_factories()
     container = Container(settings, "worker")
+    configure_telemetry("worker")
+    container.register(ManagedResource(None, shutdown_telemetry))
     try:
         metadata = container.register(await selected.metadata(settings))
         storage = container.register(await selected.storage(settings))
@@ -266,6 +272,8 @@ async def build_outbox_container(
 
     selected = factories or default_adapter_factories()
     container = Container(settings, "outbox")
+    configure_telemetry("outbox")
+    container.register(ManagedResource(None, shutdown_telemetry))
     try:
         container.metadata = container.register(await selected.metadata(settings))
         container.storage = container.register(await selected.storage(settings))

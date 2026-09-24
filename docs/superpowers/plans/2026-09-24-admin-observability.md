@@ -10,6 +10,8 @@
 
 **Spec:** `SPEC.md`（§1、§2.2、§2.3、§2.5、§3.1、§4、§5.7）。当前规格先约定 JSON 日志和未来 trace context；Task 1--6 必须同步修订对应章节后才能验收。
 
+**2026-09-24 执行顺序调整（用户确认）：** Task 1、1A、2 已完成验证并分别提交。从 Task 3 起，先连续完成 Task 3--6 的实现、配置、`SPEC.md` 与文档，不在每个 Task 结束时停下来跑测试。全部功能完成后集中补齐/调整测试并统一运行离线、前端及真实 Docker 验证；验证收敛后仍按工作包分别提交。下文各 Task 的测试步骤统一顺延到这一最终验证阶段，原有覆盖范围和验收标准不降低。
+
 ## Global Constraints
 
 - Python 只提供版本化 gRPC 业务接口；OTLP 仅为出站私网观测流量，不新增 Python HTTP/FastAPI adapter。
@@ -19,7 +21,7 @@
 - Prometheus、Tempo、Collector 仅私网可达。浏览器不直连，Go 不接受任意 PromQL、TraceQL、URL 或高基数标签。
 - 不采集问题/Prompt/Evidence/凭据/私有推理；ID 仅在脱敏 Span/日志中，Metric 标签限枚举。观测后端故障不改变回答、SSE、ACK/NAK 或状态机。
 - Metric 与 Trace 分别配置容量预算、独立持久卷和宿主机预留空间；容量治理属于观测部署，不由 Go/Python 业务进程扫描或删除后端数据文件。容量不足时允许丢失旧观测数据或暂停新 Trace 摄取，但不能影响业务。
-- 每个 Task 先完成实现、配置、必要文档及 `SPEC.md`，最后调整对应测试并运行验证。新增/移动测试同步 `tests/TEST.md`；修改 Compose/Make/Earthfile 运行 `tests/contract/test_build_entrypoints.py`。
+- Task 3--6 先完成实现、配置、必要文档及 `SPEC.md`，全部完成后再集中调整对应测试并运行验证。新增/移动测试同步 `tests/TEST.md`；修改 Compose/Make/Earthfile 运行 `tests/contract/test_build_entrypoints.py`。
 - 已验收计划的小模块验证后各自单独提交；提交前检查 `git status`，只暂存本模块文件，不推送。
 
 ## Review Focus
@@ -35,7 +37,11 @@
 
 ## 交付范围和执行顺序
 
-本计划有七个独立工作包：Task 1 私网管道，Task 1A 容量控制，Task 2 Python 埋点，Task 3 Go 埋点和跨语言传播，Task 4 角色，Task 5 只读 API，Task 6 仪表盘。Task 1A、2--3 依赖 Task 1；Task 5 依赖 Task 1/4；Task 6 依赖 Task 1A/5。Ragas 的原 Task 1--3 不在本轮实施、验收或提交范围。
+本计划有七个独立观测工作包：Task 1 私网管道，Task 1A 容量控制，Task 2 Python 埋点，Task 3 Go 埋点和跨语言传播，Task 4 角色，Task 5 只读 API，Task 6 仪表盘。Task 1A、2--3 依赖 Task 1；Task 5 依赖 Task 1/4；Task 6 依赖 Task 1A/5。Ragas 的原 Task 1--3 不在本轮实施、验收或提交范围。
+
+### 前置修复 P0：恢复既有格式门禁
+
+实施时发现当前主线 7 个 `src/rag_mvp/ports/*.py` 文件的中文注释混用 LF/CRLF，未改动的 `HEAD` 内容即被 `ruff format --check` 拒绝。该基线问题阻断 `make ci`，因此先作为独立的小模块统一其行尾，范围仅限这 7 个文件。最后运行 `uv run ruff format --check src/rag_mvp/ports`、`uv run pytest tests/contract/test_container_artifacts.py -q` 和 `make ci`；门禁通过后检查 `git status`，只暂存这 7 个文件，提交 `style(ports): 修复既有格式门禁`。若还有其他基线失败，先定位而不将无关改动并入观测提交。
 
 ### Task 1: 私网 Collector、Prometheus 与 Tempo 管道
 
@@ -51,12 +57,12 @@
 
 ### Task 1A: Metric/Trace 存储预算与旧数据淘汰
 
-**Files:** Modify `deploy/observability/{prometheus,tempo}.yaml`、三套 Compose、`docs/deployment-production.md`、`SPEC.md`；按经验证的 Tempo 版本添加独立观测容量控制进程及其测试；同步 `tests/TEST.md`。
+**Files:** Create `backend/go-api/cmd/observability-retention/main.go`、`backend/go-api/internal/retention/{controller.go,controller_test.go}`；Modify `backend/go-api/Dockerfile`、`deploy/observability/{collector,prometheus,tempo}.yaml`、`docker-compose.yml`、`compose.production.yml`、`deploy/production/boot-start.sh`、`.env.production.example`、`docs/deployment-production.md`、`SPEC.md`、`tests/contract/test_container_artifacts.py`、`tests/TEST.md`。
 
 **Policy:** 部署时为 Prometheus 和 Tempo 分配各自的字节预算，并保留宿主机余量。统计各自数据卷实际占用，同时监控宿主文件系统剩余空间；仪表盘展示占用、预算、清理动作及 Trace 丢弃状态。Prometheus 使用原生时间/容量保留策略。Tempo 没有与 Prometheus 等价的容量保留开关；先验证所锁定版本的运行时保留期覆盖与后台清理机制，容量超阈值时缩短保留期，让 Tempo 自己按时间清理最旧的完整 Trace 数据块。业务程序、控制进程均不得直接 `rm` 后端文件或改写 Parquet/WAL。
 
 - [ ] **Step 1: 定义容量契约和测量口径。** 以可配置的每卷预算为上限目标，预留至少 20% 给 WAL、压缩和清理滞后；记录数据卷总占用、可用空间、近 24 小时增长率。容量按高水位 80%、低水位 70%、紧急水位 90% 处理；预算和阈值在三套 Compose/部署文档中明示，不以宿主机总容量代替卷预算。
-- [ ] **Step 2: 验证 Tempo 淘汰能力后实现独立控制。** 在确定版本的真实 Compose 中证明运行时缩短 retention 能触发 Tempo 自身删除最旧数据块、查询不报错，且恢复保留期不会让已删除 Trace 复活；控制进程只读取容量数据并通过受控运行时配置修改 retention，具备原子写入、单实例执行、重启恢复和最短保留期下限。高水位逐级缩短到低水位或最短保留期；不能保证“刚超限立即删除”，须把后台清理延迟作为验收项。若当前版本或部署方式不能可靠动态调整，则先改用经验证、具容量回收能力的 Trace 后端或部署方式，并修订计划后实施，不以文件级删除充数。
+- [ ] **Step 2: 验证 Tempo 淘汰能力后实现独立控制。** 在确定版本的真实 Compose 中证明运行时缩短 retention 能触发 Tempo 自身删除最旧数据块、查询不报错，且恢复保留期不会让已删除 Trace 复活；控制进程只读取容量数据并通过受控运行时配置修改 retention，具备原子写入、单实例执行、重启恢复和最短保留期下限。Tempo 租户覆盖会替换摄取限制，写入 retention 时须同时固定非零速率/突发/单 Trace 上限并用真实 OTLP 验证。高水位逐级缩短到低水位或最短保留期；不能保证“刚超限立即删除”，须把后台清理延迟作为验收项。若当前版本或部署方式不能可靠动态调整，则先改用经验证、具容量回收能力的 Trace 后端或部署方式，并修订计划后实施，不以文件级删除充数。
 - [ ] **Step 3: 设置紧急兜底。** 达到紧急水位、清理失效或宿主机剩余空间不足时，停止接收新的 Trace/提高采样丢弃率，保留业务和现有 JSON 日志；Metric 保留 Prometheus 原生回收能力。记录稳定错误状态并告警，容量恢复后自动恢复 Trace 摄取。Go/Python 不因该降级改变 RPC、Chat、摄取或状态机结果。
 - [ ] **Step 4: 最后增加容量契约和真实后端验证。** 覆盖超限淘汰顺序、异步清理、WAL/压缩余量、控制进程重启、Tempo 查询完整性、紧急暂停与恢复、Prometheus 时间/容量策略、业务不受影响；更新 `tests/TEST.md`。运行对应控制进程测试、`uv run pytest tests/contract/test_container_artifacts.py tests/contract/test_build_entrypoints.py -v`、`make ci` 和真实 Docker 容量验收；不可用的验证明确列为未运行。
 - [ ] **Step 5: 检查 `git status`，只暂存本 Task 文件，单独提交 `feat(observability): 增加观测存储容量控制`；报告预算值、实际验证和未运行项。**

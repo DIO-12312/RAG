@@ -1,5 +1,23 @@
 # 测试目录与职责清单
 
+`backend/go-api/internal/telemetry/telemetry_test.go`：Go Agent 根 Span 与 gRPC 子 Span 同 trace、W3C metadata 传播、未知枚举和错误消息不会成为敏感 Span 属性；离线内存 exporter。
+
+`backend/go-api/internal/storage/admin_role_test.go`：角色枚举离线测试；设置 `PRODUCT_ROLE_TEST_MYSQL_DSN` 指向隔离 MySQL 时，检查注册默认普通用户、并发撤销最后管理员、无用户和非法角色。不能指向运行中的产品库。
+
+`backend/go-api/internal/observability/query_test.go`：假 Prometheus/Tempo 验证固定查询、部分故障、超限响应、空链路、非法 ID 和原始敏感 Span 属性过滤。`backend/go-api/internal/httpapi/server_test.go::TestUnauthenticatedAndCrossOrigin` 同时覆盖管理员路由未登录返回 401。
+
+`backend/go-api/internal/httpapi/observability_test.go::TestObservabilityAuthorizationReadsCurrentRole`：在隔离 MySQL 上使用同一 Cookie 验证普通用户 403、授予管理员后进入后端查询、撤权立即 403；未配置 `PRODUCT_ROLE_TEST_MYSQL_DSN` 时跳过。
+
+`apps/web/tests/observability.spec.ts`：管理员路由进入和撤权后的重新校验、空指标/链路以及后端不可用展示；Vitest + MSW，不代替真实浏览器和 Compose 验收。
+
+`backend/go-api/internal/httpapi/integration_test.go::TestLiveProductFlow`：真实产品链路只从运行时 `PRODUCT_TEST_EMBEDDING_OWNER_EMAIL` 指定的已保存 Embedding 配置读取密文并解密；未指定时跳过，不能从任意用户配置中猜选。可选 `PRODUCT_TEST_OTEL_ENDPOINT` 启用真实 Go→Python Trace 输出。需要单独部署和隔离数据集，测试源文件中不保存真实邮箱或密钥。
+
+`tests/contract/test_container_artifacts.py::test_observability_backends_are_private_and_have_bounded_retention`：离线解析开发、产品、生产 Compose 及 Collector/Tempo 配置，检查私网、镜像 digest、保留策略、跨进程服务名和敏感属性删除。使用既有 `tests/contract/test_container_artifacts.py`，目录树未增删文件。
+
+`backend/go-api/internal/retention/controller_test.go`：验证 Tempo 容量高/低/紧急水位、原子写入的运行时保留期、Trace 转发/暂停、容量恢复及扫描失败时拒绝摄取。Go 测试位于产品控制面目录，不改变下方 `tests/` 目录树。
+
+`tests/unit/test_telemetry.py`：内存 exporter 和真实 gRPC aio 连接验证 `traceparent` 继承、父子 Span、日志 ID、属性脱敏，以及固定 Metric 标签。新增于下方 `tests/unit/` 目录树；`tests/unit/test_observability.py` 同步校验新增的 trace/span 日志字段。
+
 本文件是 `tests/` 的索引和维护清单。新增、删除、重命名测试文件或 `test_*` 函数时，必须在同一改动中更新本文件的目录树和对应职责表。参数化测试在表中按一个测试函数记录，pytest 的实际用例数可能更多。
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
@@ -313,6 +331,7 @@ tests/
    ├─ test_generated_comparison.py
    ├─ test_import_boundaries.py
    ├─ test_observability.py
+   ├─ test_telemetry.py
    └─ test_process_lifecycle.py
 ```
 
@@ -506,6 +525,9 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_all_declared_ports_are_protocols` | 所有 Port 均以 Protocol 声明。 |
 | `test_observability.py` | `test_rag_event_always_contains_correlation_and_stage_fields` | 结构化事件包含关联 ID 与阶段字段。 |
 | 同上 | `test_rag_event_records_absent_optional_fields_explicitly` | 可选字段缺省时仍以同一 schema 输出，便于按字段查询日志。 |
+| `test_telemetry.py` | `test_grpc_server_inherits_traceparent_and_logs_safe_span_ids` | 真实 gRPC aio 拦截器继承 traceparent，验证父子 Span、日志关联和脱敏。 |
+| 同上 | `test_metrics_have_only_fixed_stage_and_outcome_labels` | 内存 Metric reader 验证阶段和结果标签受固定枚举限制。 |
+| 同上 | `test_metric_exporter_failure_does_not_interrupt_business` | 采集器故障时 Metric 记录失败不打断业务阶段。 |
 | `test_process_lifecycle.py` | `test_empty_background_process_stops_without_external_connections` | Worker/Outbox 即使处于长轮询等待，也可由 stop event 立即退出且不连接外部服务。 |
 | 同上 | `test_grpc_server_starts_and_stops_cleanly` | gRPC Server 可启动并优雅停止。 |
 | 同上 | `test_all_unopened_rpc_methods_return_feature_not_available` | 未开放 RPC 返回 `FEATURE_NOT_AVAILABLE`。 |

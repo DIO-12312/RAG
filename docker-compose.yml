@@ -9,6 +9,7 @@ x-rag-environment: &rag-environment
   RAG_ELASTICSEARCH_CA_CERT: /run/secrets/ca.pem
   RAG_NATS_URL: nats://nats:4222
   RAG_OBJECT_ROOT: /app/data/objects
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
   RAG_PARSER_VERSION: "${RAG_PARSER_VERSION:-source-router-v10}"
   RAG_PDF_PARSER_MODE: "${RAG_PDF_PARSER_MODE:-auto}"
   RAG_PDF_NATIVE_TEXT_MIN_CHARS_PER_PAGE: "${RAG_PDF_NATIVE_TEXT_MIN_CHARS_PER_PAGE:-40}"
@@ -23,6 +24,52 @@ x-rag-environment: &rag-environment
   RAG_EMBEDDING_MAX_RETRIES: "${RAG_EMBEDDING_MAX_RETRIES:-3}"
 
 services:
+  observability-retention:
+    build: backend/go-api
+    entrypoint: ["/usr/local/bin/observability-retention"]
+    environment:
+      OBS_TEMPO_BUDGET_BYTES: ${OBS_TEMPO_BUDGET_BYTES:-3221225472}
+    volumes:
+      - tempo-data:/var/tempo-data:ro
+      - tempo-overrides:/var/tempo-overrides
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9470/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.132.0@sha256:e0f565815b2b8e78eb9fdbb80f6190c921ab323aaa8ccceab3255c6d4225f4af
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./deploy/observability/collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=${OBS_PROMETHEUS_RETENTION_SIZE:-2GB}
+    volumes:
+      - ./deploy/observability/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.8.2@sha256:0ef775495967cd5d7a6b2e146b6ea695d624803c8db8349fb8ce4164f719f9b7
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./deploy/observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+      - tempo-overrides:/var/tempo-overrides:ro
+    depends_on:
+      observability-retention:
+        condition: service_healthy
+    restart: unless-stopped
+
   mysql:
     image: mysql:8.4.6
     environment:
@@ -132,6 +179,7 @@ services:
       RAG_ELASTICSEARCH_PASSWORD_FILE: /run/secrets/rag_mvp_password
       RAG_MODEL_ENCRYPTION_KEY_FILE: /run/model-keys/encryption.key
       RAG_MAX_UPLOAD_BYTES: 67108864
+      OTEL_SERVICE_NAME: rag-python-server
     ports:
       - "50051:50051"
     group_add: ["10001"]
@@ -168,6 +216,7 @@ services:
       RAG_MODEL_ENCRYPTION_KEY_FILE: /run/model-keys/encryption.key
       RAG_ALLOW_LOCAL_MODELS: ${RAG_ALLOW_LOCAL_MODELS:-false}
       RAG_MAX_UPLOAD_BYTES: 67108864
+      OTEL_SERVICE_NAME: rag-python-worker
     group_add: ["10001"]
     volumes:
       - product-model-keys:/run/model-keys:ro
@@ -198,7 +247,9 @@ services:
       dockerfile: Dockerfile
       target: runtime
     command: ["rag-outbox"]
-    environment: *rag-environment
+    environment:
+      <<: *rag-environment
+      OTEL_SERVICE_NAME: rag-python-outbox
     volumes:
       - object-data:/app/data/objects
     depends_on:
@@ -253,6 +304,9 @@ services:
         condition: service_completed_successfully
 
 volumes:
+  prometheus-data:
+  tempo-data:
+  tempo-overrides:
   mysql-data:
   elasticsearch-data:
   nats-data:

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
+	"rag-mvp/backend/go-api/internal/telemetry"
 )
 
 // Run 观测阶段；成功路径按 route → model → tool → assess → finalize → complete 顺序出现。
@@ -62,13 +63,16 @@ type JSONLogObserver struct {
 }
 
 // Observe 只输出脱敏字段；日志设施自身的失败不会回传给 Agent。
-func (o JSONLogObserver) Observe(_ context.Context, event RunEvent) {
+func (o JSONLogObserver) Observe(ctx context.Context, event RunEvent) {
 	logger := o.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
+	traceID, spanID := telemetry.IDs(ctx)
 	logger.Info("agent_run",
 		"run_id", event.RunID,
+		"trace_id", traceID,
+		"span_id", spanID,
 		"stage", event.Stage,
 		"round", event.Round,
 		"action", event.Action,

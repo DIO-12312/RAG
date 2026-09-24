@@ -825,7 +825,21 @@ PDF 运行参数包括 `plain/deepdoc/auto` 模式、原生文字阈值、OCR �
 
 真实模型 integration 和 Docker E2E 被显式选择时，缺少模型配置必须使门禁失败，不得静默 skip 或回退 Fake。Unit、快速 Contract 与 pre-commit 继续使用确定性 Fake，避免将外部网络抖动和费用引入每次提交；Fake 结果仍不能替代真实发布验收。
 
-每个 Job 与检索请求写结构化日志：`request_id/job_id/document_id/dataset_id/stage/duration_ms/model/index_version/error_code`。MVP 先输出 JSON 日志和 DB 简单审计记录；未来 Go 层接入 OpenTelemetry/Langfuse 时，Python 通过 trace context 继续传播。
+每个 Job 与检索请求写结构化日志：`request_id/job_id/document_id/dataset_id/stage/duration_ms/model/index_version/error_code`。JSON 日志和 DB 简单审计记录保留；Go/Python 的 OpenTelemetry 观测按下述私网链路工作。
+
+管理员观测迭代采用 OpenTelemetry SDK/OTLP 作为 Go/Python 进程的遥测出口，私网 Collector 接收并脱敏，Prometheus 存储 Metric，Tempo 存储 Trace。JSON 日志和 MySQL Job/Task 状态仍保留原有职责；观测后端不是业务状态或审计记录的权威来源。Go→Python 同步 gRPC 传播 W3C `traceparent`；异步 Worker 只从 `task_id` 读取任务并创建独立 Trace，不向 NATS 消息加入遥测字段。OTLP 失败不能改变 RPC、Chat/SSE 或 Worker ACK/NAK 结果。
+
+Go 产品控制面在单租户阶段只定义 `user` 与 `admin` 两级角色，`users.role` 默认为 `user`；新注册永远不能提交角色或自助提权。旧库迁移给现有用户默认 `user`。管理员只能由离线 `product-admin-role` 命令对已存在的用户 ID 授予或撤销；命令在事务中锁定当前管理员并拒绝撤销最后一名管理员，成功时输出不含邮箱和凭据的 JSON 操作审计。`GET /me` 返回当前 MySQL 角色，管理员 API 每次请求均在认证后重新读取 MySQL 角色；JWT/Cookie 与前端缓存都不是角色来源。数据库或角色读取失败时拒绝授权，撤权立即对旧 Cookie 生效。Python gRPC 服务不管理产品用户角色。
+
+默认开发、产品及生产 Compose 均将 Collector、Prometheus、Tempo 置于私网，禁止发布其端口或由 Caddy 代理；浏览器只能经 Go 的管理员授权只读 API 查询预设 Metric/Trace。应用在出口使用允许列表，Collector 再清除请求头、查询参数、数据库语句、Prompt、Evidence、模型输入输出和正文；Metric 标签不得使用用户/请求/文档 ID 或其他高基数值。Prometheus 保留最多 15 天且另设字节上限，先触发的保留条件生效；Tempo 保留最多 7 天，容量预算与回收由独立观测控制进程负责。两种存储的后台清理均可能滞后，卷和宿主磁盘需留出 WAL、压缩及故障恢复余量；容量紧急状态只降级遥测摄取，不能中断业务。
+
+Go 的只读管理员接口为 `GET /admin/observability/metrics?window=15m|1h|6h|24h`、`GET /admin/observability/traces?service=<固定服务>&window=<固定窗口>` 和 `GET /admin/observability/traces/:trace_id`。仅 Go 使用固定私网 `PRODUCT_PROMETHEUS_URL` 与 `PRODUCT_TEMPO_URL`；所有接口均经 `authenticate + requireAdmin`。PromQL/TraceQL 由 Go 预定义，不接受任意查询、URL、标签或枚举外筛选值。请求限时 3 秒，响应限 1 MiB，Metric 每个序列至多 100 个点、Trace 列表至多 100 条、详情至多 200 个 Span。响应区分 `ok`、`empty`、`partial` 与后端不可用；详情只输出服务、阶段、时间、耗时、结果、稳定错误码和安全格式的 run/job/task ID，不输出原始 Span 属性。管理员页面每次进入都重新读取 `/me`，只在当前角色为 admin 时显示。
+
+独立 `observability-retention` 进程按 Tempo 数据卷字节占用和宿主可用空间计算容量水位，超过 80% 预算逐级缩短 Tempo 的运行时保留期，让 Tempo 自己按时间淘汰最旧完整块；低于 70% 可逐级恢复，达到 90% 或宿主剩余不足 10% 时拒绝新 Trace。该进程只向其专用共享卷原子写入 `single-tenant` retention override，不能直接删除 Tempo/Prometheus 文件；私网 Trace 通过它转发到 Tempo。该策略的清理是异步的，不保证精确字节硬限。Prometheus 自身按时间/容量清理最旧块，并预留 WAL 与压缩空间。控制进程停机时 Trace 发送可失败，但不能影响任何业务结果。
+
+Python 进程在组合根初始化 OpenTelemetry SDK，通过 OTLP/HTTP 只向私网 Collector 出站发送数据；未配置 endpoint 时保留原日志且不启动 exporter。gRPC aio server interceptor 从 `traceparent` 继承 Go 同步调用的 trace，Worker 每次实际 delivery 自建独立 trace，Outbox Finalizer/Relay 只记录本进程活动；NATS payload 仍仅为 `task_id`。JSON 事件在有效 Span 内追加 `trace_id/span_id`，原有业务关联字段不变。摄取阶段只记录 object_read、parse、chunk、embedding、index 耗时与完成/失败/重试/跳过计数；检索只记录 dense、sparse、visibility、rerank、evidence 耗时；Outbox 只记录 publish 结果计数。Metric 标签只能使用固定 stage/outcome 枚举，不含 ID；Span 属性只允许 task/job/run ID、枚举状态、稳定错误码、计数，绝不包含来源正文、文件名、问题、Prompt、Evidence 或模型输入输出。
+
+Go API 启动时仅在配置私网 OTLP endpoint 后初始化 SDK；Chat Agent `Run` 建立根 Span，各 Route/Model/Tool/Assess/Rewrite/Finalize 阶段为子 Span。RAG gRPC client 从当前 Span 向 metadata 注入 W3C `traceparent`，Python gRPC server Span 必须继承相同 `trace_id` 且以 Go client Span 为父；流式上传同样传播。`run_id` 是独立的业务关联 ID，不能替代 `trace_id`。`agent_run` JSON 日志保留原字段并追加当前 `trace_id/span_id`。Go 指标固定为 `rag_chat_runs_total{outcome,stop_reason}`、`rag_chat_duration_seconds`、`rag_grpc_client_duration_seconds{method,outcome}`、`rag_agent_model_calls_total{phase}`；标签只接受固定枚举，Span 只记录 run ID、阶段、结果和固定 RPC 方法，不写问题、模型输入输出、工具参数、Evidence 或凭据。Collector/exporter 故障不得改变 Chat、SSE、持久化和 gRPC 调用结果。
 
 ---
 

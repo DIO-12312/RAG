@@ -7,6 +7,7 @@ import LoginView from "@/views/LoginView.vue";
 import OverviewView from "@/views/OverviewView.vue";
 import SettingsView from "@/views/SettingsView.vue";
 import ChatView from "@/views/ChatView.vue";
+import ObservabilityView from "@/views/ObservabilityView.vue";
 
 export function createAppRouter(auth: AuthGate = { isAuthenticated: false, restore: async () => {} }): Router {
   const router = createRouter({
@@ -18,12 +19,20 @@ export function createAppRouter(auth: AuthGate = { isAuthenticated: false, resto
       { path: "/datasets/:id", name: "dataset-detail", component: DatasetDetailView, meta: { requiresAuth: true } },
       { path: "/chat", name: "chat", component: ChatView, meta: { requiresAuth: true } },
       { path: "/settings", name: "settings", component: SettingsView, meta: { requiresAuth: true } },
+      { path: "/admin/observability", name: "observability", component: ObservabilityView, meta: { requiresAuth: true, requiresAdmin: true } },
     ],
   });
 
   router.beforeEach(async (to) => {
     await auth.restore();
-    return to.meta.requiresAuth && !auth.isAuthenticated ? { name: "login" } : true;
+    if (to.meta.requiresAuth && !auth.isAuthenticated) return { name: "login" };
+    if (to.meta.requiresAdmin) {
+      try { await auth.refresh?.(); }
+      catch { return auth.isAuthenticated ? { name: "overview" } : { name: "login" }; }
+      if (!auth.isAuthenticated) return { name: "login" };
+      if (!auth.isAdmin) return { name: "overview" };
+    }
+    return true;
   });
 
   return router;

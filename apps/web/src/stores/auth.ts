@@ -6,7 +6,9 @@ import { ApiError } from "@/api/http";
 
 export interface AuthGate {
   readonly isAuthenticated: boolean;
+  readonly isAdmin?: boolean;
   restore(): Promise<void>;
+  refresh?(): Promise<void>;
 }
 
 export const useAuthStore = defineStore("auth", {
@@ -14,14 +16,26 @@ export const useAuthStore = defineStore("auth", {
     user: null as CurrentUser | null,
     expirationNotice: "",
   }),
-  getters: { isAuthenticated: (state) => state.user !== null },
+  getters: {
+    isAuthenticated: (state) => state.user !== null,
+    isAdmin: (state) => state.user?.role === "admin",
+  },
   actions: {
-    async restore(): Promise<void> {
-      if (this.user) return;
+    async refresh(): Promise<void> {
       try { this.user = await getCurrentUser(); this.expirationNotice = ""; }
       catch (error) {
-        this.user = null;
-        if (error instanceof ApiError && error.code === "AUTH_EXPIRED") this.expirationNotice = error.message;
+        if (error instanceof ApiError && error.status === 401) {
+          this.user = null;
+          this.expirationNotice = error.message;
+        }
+        throw error;
+      }
+    },
+    async restore(): Promise<void> {
+      if (this.user) return;
+      try { await this.refresh(); }
+      catch {
+        // Unauthenticated public routes may continue without a session.
       }
     },
     async login(payload: LoginRequest): Promise<void> { this.user = await loginRequest(payload); this.expirationNotice = ""; },

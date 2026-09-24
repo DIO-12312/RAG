@@ -9,9 +9,11 @@ import (
 	"os"
 	"os/signal"
 	"rag-mvp/backend/go-api/internal/httpapi"
+	"rag-mvp/backend/go-api/internal/observability"
 	"rag-mvp/backend/go-api/internal/ragclient"
 	"rag-mvp/backend/go-api/internal/security"
 	"rag-mvp/backend/go-api/internal/storage"
+	"rag-mvp/backend/go-api/internal/telemetry"
 	"time"
 )
 
@@ -25,6 +27,20 @@ func main() {
 	// Agent 观测事件（agent_run）必须可按字段采集：SPEC 要求单行 JSON，
 	// 而 slog 默认是文本 handler，因此进程启动即安装 JSON handler。
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	telemetryInitCtx, telemetryInitCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	shutdownTelemetry, telemetryErr := telemetry.Init(telemetryInitCtx)
+	telemetryInitCancel()
+	if telemetryErr != nil {
+		slog.Warn("telemetry_init_failed", "error_code", "OTEL_INIT_FAILED")
+	} else {
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := shutdownTelemetry(ctx); err != nil {
+				slog.Warn("telemetry_shutdown_failed", "error_code", "OTEL_SHUTDOWN_FAILED")
+			}
+		}()
+	}
 	encoded, e := loadKey("PRODUCT_ENCRYPTION_KEY", "encryption.key")
 	if e != nil {
 		log.Fatal(e)
@@ -64,7 +80,11 @@ func main() {
 		log.Fatal(e)
 	}
 	defer rag.Conn.Close()
-	app := &httpapi.Server{Store: store, RAG: rag, Vault: vault, JWTKey: jwtKey, Origin: env("PRODUCT_ORIGIN", "http://127.0.0.1:5173"), Secure: env("PRODUCT_COOKIE_SECURE", "false") == "true", AllowLocalModels: os.Getenv("PRODUCT_ALLOW_LOCAL_MODELS") == "true"}
+	obs, obsErr := observability.New(os.Getenv("PRODUCT_PROMETHEUS_URL"), os.Getenv("PRODUCT_TEMPO_URL"))
+	if obsErr != nil {
+		slog.Warn("observability_config_invalid", "error_code", "OBSERVABILITY_CONFIG_INVALID")
+	}
+	app := &httpapi.Server{Store: store, RAG: rag, Observability: obs, Vault: vault, JWTKey: jwtKey, Origin: env("PRODUCT_ORIGIN", "http://127.0.0.1:5173"), Secure: env("PRODUCT_COOKIE_SECURE", "false") == "true", AllowLocalModels: os.Getenv("PRODUCT_ALLOW_LOCAL_MODELS") == "true"}
 	srv := &http.Server{Addr: env("PRODUCT_HTTP_ADDR", "127.0.0.1:8080"), Handler: app.Router(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	stop, done := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer done()

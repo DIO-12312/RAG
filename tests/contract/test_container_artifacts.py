@@ -153,6 +153,69 @@ def test_compose_keeps_infrastructure_private_and_orders_search_guard_bootstrap(
     assert "RAG_ELASTICSEARCH_PASSWORD_FILE" not in outbox
 
 
+def test_observability_backends_are_private_and_have_bounded_retention() -> None:
+    """三套 Compose 的观测后端只走私网，Metric 和 Trace 均有保留策略。"""
+
+    root = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    product = yaml.safe_load((ROOT / "compose.product.yml").read_text(encoding="utf-8"))
+    production = yaml.safe_load((ROOT / "compose.production.yml").read_text(encoding="utf-8"))
+
+    for manifest in (root, production):
+        services = manifest["services"]
+        for name in ("otel-collector", "prometheus", "tempo", "observability-retention"):
+            assert "ports" not in services[name]
+        for name in ("otel-collector", "prometheus", "tempo"):
+            assert "@sha256:" in services[name]["image"]
+        assert any(
+            arg == "--storage.tsdb.retention.time=15d" for arg in services["prometheus"]["command"]
+        )
+        assert any(
+            arg.startswith("--storage.tsdb.retention.size=")
+            for arg in services["prometheus"]["command"]
+        )
+        assert services["rag-server"]["environment"]["OTEL_SERVICE_NAME"] == "rag-python-server"
+        assert services["rag-worker"]["environment"]["OTEL_SERVICE_NAME"] == "rag-python-worker"
+        assert services["rag-outbox"]["environment"]["OTEL_SERVICE_NAME"] == "rag-python-outbox"
+
+    assert production["services"]["tempo"]["networks"] == ["backend"]
+    assert production["services"]["prometheus"]["networks"] == ["backend"]
+    assert production["services"]["otel-collector"]["networks"] == ["backend"]
+    assert production["services"]["observability-retention"]["networks"] == ["backend"]
+    assert (
+        production["services"]["tempo"]["depends_on"]["observability-retention"]["condition"]
+        == "service_healthy"
+    )
+    assert "tempo-overrides" in production["volumes"]
+    assert product["services"]["api"]["environment"]["OTEL_SERVICE_NAME"] == "rag-go-api"
+    assert (
+        product["services"]["api"]["environment"]["OTEL_EXPORTER_OTLP_ENDPOINT"]
+        == "http://otel-collector:4318"
+    )
+
+    collector = yaml.safe_load(
+        (ROOT / "deploy/observability/collector.yaml").read_text(encoding="utf-8")
+    )
+    tempo = yaml.safe_load((ROOT / "deploy/observability/tempo.yaml").read_text(encoding="utf-8"))
+    assert (
+        collector["exporters"]["otlphttp/tempo"]["endpoint"]
+        == "http://observability-retention:9470"
+    )
+    assert tempo["overrides"]["per_tenant_override_config"] == "/var/tempo-overrides/overrides.yaml"
+    actions = collector["processors"]["attributes/redact"]["actions"]
+    redacted = {action["key"] for action in actions if action["action"] == "delete"}
+    assert {
+        "url.query",
+        "db.query.text",
+        "gen_ai.input.messages",
+        "gen_ai.output.messages",
+        "prompt",
+        "evidence",
+    } <= redacted
+    assert tempo["compactor"]["compaction"]["block_retention"] == "168h"
+    boot_start = (ROOT / "deploy/production/boot-start.sh").read_text(encoding="utf-8")
+    assert "for service in observability-retention otel-collector prometheus tempo" in boot_start
+
+
 def test_debug_override_binds_elasticsearch_to_loopback_only() -> None:
     """排障 override 只能将已认证 HTTPS ES 绑定到本机回环地址。"""
 
