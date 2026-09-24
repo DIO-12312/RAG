@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 from rag_mvp.ports.metadata import MetadataRepository
 from rag_mvp.ports.storage import ObjectStorage
+from rag_mvp.telemetry import span
 
 
 # 关键语义：只有对象提升成功并完成 MySQL 条件更新后，Relay 才能看见 READY 事件；
@@ -39,7 +40,8 @@ async def finalize_once(
             continue
         final_key = f"objects/{document.id}/source"
         try:
-            await storage.promote(event.staging_key, final_key)
+            with span("rag.outbox.finalize", **{"task.id": event.task_id}):
+                await storage.promote(event.staging_key, final_key)
         except Exception:
             await metadata.record_finalization_failure(event.id, max_finalize_attempts, now)
             continue

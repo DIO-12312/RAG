@@ -833,6 +833,8 @@ PDF 运行参数包括 `plain/deepdoc/auto` 模式、原生文字阈值、OCR �
 
 独立 `observability-retention` 进程按 Tempo 数据卷字节占用和宿主可用空间计算容量水位，超过 80% 预算逐级缩短 Tempo 的运行时保留期，让 Tempo 自己按时间淘汰最旧完整块；低于 70% 可逐级恢复，达到 90% 或宿主剩余不足 10% 时拒绝新 Trace。该进程只向其专用共享卷原子写入 `single-tenant` retention override，不能直接删除 Tempo/Prometheus 文件；私网 Trace 通过它转发到 Tempo。该策略的清理是异步的，不保证精确字节硬限。Prometheus 自身按时间/容量清理最旧块，并预留 WAL 与压缩空间。控制进程停机时 Trace 发送可失败，但不能影响任何业务结果。
 
+Python 进程在组合根初始化 OpenTelemetry SDK，通过 OTLP/HTTP 只向私网 Collector 出站发送数据；未配置 endpoint 时保留原日志且不启动 exporter。gRPC aio server interceptor 从 `traceparent` 继承 Go 同步调用的 trace，Worker 每次实际 delivery 自建独立 trace，Outbox Finalizer/Relay 只记录本进程活动；NATS payload 仍仅为 `task_id`。JSON 事件在有效 Span 内追加 `trace_id/span_id`，原有业务关联字段不变。摄取阶段只记录 object_read、parse、chunk、embedding、index 耗时与完成/失败/重试/跳过计数；检索只记录 dense、sparse、visibility、rerank、evidence 耗时；Outbox 只记录 publish 结果计数。Metric 标签只能使用固定 stage/outcome 枚举，不含 ID；Span 属性只允许 task/job/run ID、枚举状态、稳定错误码、计数，绝不包含来源正文、文件名、问题、Prompt、Evidence 或模型输入输出。
+
 ---
 
 ## 6. 项目排期

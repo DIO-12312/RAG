@@ -4,6 +4,8 @@
 
 `backend/go-api/internal/retention/controller_test.go`：验证 Tempo 容量高/低/紧急水位、原子写入的运行时保留期、Trace 转发/暂停、容量恢复及扫描失败时拒绝摄取。Go 测试位于产品控制面目录，不改变下方 `tests/` 目录树。
 
+`tests/unit/test_telemetry.py`：内存 exporter 和真实 gRPC aio 连接验证 `traceparent` 继承、父子 Span、日志 ID、属性脱敏，以及固定 Metric 标签。新增于下方 `tests/unit/` 目录树；`tests/unit/test_observability.py` 同步校验新增的 trace/span 日志字段。
+
 本文件是 `tests/` 的索引和维护清单。新增、删除、重命名测试文件或 `test_*` 函数时，必须在同一改动中更新本文件的目录树和对应职责表。参数化测试在表中按一个测试函数记录，pytest 的实际用例数可能更多。
 
 完整的执行命令、门禁和故障排查见 [`../docs/test/testing-guide.md`](../docs/test/testing-guide.md)。本仓库当前的 Functional 与 Resilience 测试使用测试专用 Fake ports；其结果只能证明 Mock Functional / Mock Reliability，不替代真实 MySQL、Elasticsearch、NATS JetStream 或 Docker KILL 验收。
@@ -317,6 +319,7 @@ tests/
    ├─ test_generated_comparison.py
    ├─ test_import_boundaries.py
    ├─ test_observability.py
+   ├─ test_telemetry.py
    └─ test_process_lifecycle.py
 ```
 
@@ -510,6 +513,9 @@ Unit 测试负责验证不依赖真实基础设施的最小规则和组件行为
 | 同上 | `test_all_declared_ports_are_protocols` | 所有 Port 均以 Protocol 声明。 |
 | `test_observability.py` | `test_rag_event_always_contains_correlation_and_stage_fields` | 结构化事件包含关联 ID 与阶段字段。 |
 | 同上 | `test_rag_event_records_absent_optional_fields_explicitly` | 可选字段缺省时仍以同一 schema 输出，便于按字段查询日志。 |
+| `test_telemetry.py` | `test_grpc_server_inherits_traceparent_and_logs_safe_span_ids` | 真实 gRPC aio 拦截器继承 traceparent，验证父子 Span、日志关联和脱敏。 |
+| 同上 | `test_metrics_have_only_fixed_stage_and_outcome_labels` | 内存 Metric reader 验证阶段和结果标签受固定枚举限制。 |
+| 同上 | `test_metric_exporter_failure_does_not_interrupt_business` | 采集器故障时 Metric 记录失败不打断业务阶段。 |
 | `test_process_lifecycle.py` | `test_empty_background_process_stops_without_external_connections` | Worker/Outbox 即使处于长轮询等待，也可由 stop event 立即退出且不连接外部服务。 |
 | 同上 | `test_grpc_server_starts_and_stops_cleanly` | gRPC Server 可启动并优雅停止。 |
 | 同上 | `test_all_unopened_rpc_methods_return_feature_not_available` | 未开放 RPC 返回 `FEATURE_NOT_AVAILABLE`。 |

@@ -6,6 +6,7 @@ import asyncio
 
 import grpc
 from grpc_reflection.v1alpha import reflection
+from opentelemetry.instrumentation.grpc import aio_server_interceptor
 
 from rag_mvp.bootstrap.container import (
     Container,
@@ -24,7 +25,7 @@ async def serve(
 ) -> None:
     """Start the private gRPC server and stop it gracefully."""
 
-    server = grpc.aio.server()
+    server = grpc.aio.server(interceptors=[aio_server_interceptor()])  # type: ignore[no-untyped-call]
     service = container.rag_service
     if service is None:
         raise RuntimeError("server container does not have RagService")

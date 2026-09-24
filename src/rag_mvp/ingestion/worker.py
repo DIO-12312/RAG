@@ -22,6 +22,7 @@ from rag_mvp.ingestion.checkpoints import Checkpoint
 from rag_mvp.observability import emit_event
 from rag_mvp.ports.message_queue import Delivery, TaskQueue
 from rag_mvp.ports.metadata import MetadataRepository
+from rag_mvp.telemetry import record_task, span
 
 
 # 关键语义：无法条件认领的投递直接 ACK；已认领但可重试的失败才 NAK，
@@ -39,7 +40,7 @@ async def worker_once(
     keepalive_interval_seconds: float = 20.0,
     retry_backoff_seconds: float = 5.0,
 ) -> bool:
-    """Consume one delivery and remain the sole owner of ACK/NAK decisions."""
+    """Keep one independent trace open through execution, ACK/NAK, and logs."""
 
     if max_deliveries < 1:
         raise ValueError("max_deliveries must be at least 1")
@@ -50,6 +51,38 @@ async def worker_once(
     delivery = await queue.consume(worker_id, timeout_seconds=0.0)
     if delivery is None:
         return False
+
+    with span("rag.worker.delivery"):
+        return await _worker_once(
+            queue,
+            metadata,
+            ingestion,
+            worker_id,
+            now,
+            delivery,
+            max_deliveries=max_deliveries,
+            after_complete=after_complete,
+            cleanup=cleanup,
+            keepalive_interval_seconds=keepalive_interval_seconds,
+            retry_backoff_seconds=retry_backoff_seconds,
+        )
+
+
+async def _worker_once(
+    queue: TaskQueue,
+    metadata: MetadataRepository,
+    ingestion: IngestionService,
+    worker_id: str,
+    now: datetime,
+    delivery: Delivery,
+    *,
+    max_deliveries: int = 3,
+    after_complete: Callable[[], Awaitable[None]] | None = None,
+    cleanup: CleanupService | None = None,
+    keepalive_interval_seconds: float = 20.0,
+    retry_backoff_seconds: float = 5.0,
+) -> bool:
+    """Consume one delivery and remain the sole owner of ACK/NAK decisions."""
 
     task = await metadata.get_task(delivery.task_id)
     # 长文档摄取会跑满数分钟；不续约时 JetStream 会在 ack_wait 后重投同一 Task，
@@ -75,9 +108,19 @@ async def worker_once(
                     job_id=task.job_id,
                 )
             else:
-                result = await cleanup.execute(delivery.task_id, delivery.delivery_sequence, now)
+                with span(
+                    "rag.worker.cleanup",
+                    **{"task.id": delivery.task_id, "delivery.count": delivery.redelivery_count},
+                ):
+                    result = await cleanup.execute(
+                        delivery.task_id, delivery.delivery_sequence, now
+                    )
         else:
-            result = await ingestion.execute(delivery.task_id, delivery.delivery_sequence, now)
+            with span(
+                "rag.worker.ingestion",
+                **{"task.id": delivery.task_id, "delivery.count": delivery.redelivery_count},
+            ):
+                result = await ingestion.execute(delivery.task_id, delivery.delivery_sequence, now)
     finally:
         keepalive.cancel()
         with suppress(asyncio.CancelledError):
@@ -86,6 +129,7 @@ async def worker_once(
     job_id = result.job_id or (task.job_id if task is not None else None)
     if not result.claimed:
         await queue.ack(delivery)
+        record_task("complete", "skipped")
         emit_event(
             "delivery_skipped",
             stage="worker_ack_terminal",
@@ -100,6 +144,7 @@ async def worker_once(
         if after_complete is not None:
             await after_complete()
         await queue.ack(delivery)
+        record_task("complete", "succeeded")
         emit_event(
             "ingestion_completed",
             stage="worker_complete",
@@ -120,6 +165,7 @@ async def worker_once(
     delay = retry_backoff_seconds * (2 ** (delivery_number - 1))
     if task is not None and task.type is TaskType.CLEANUP_DATASET and failure.retryable:
         await queue.nak(delivery, delay_seconds=delay, error=failure)
+        record_task("complete", "retry")
         emit_event(
             "dataset_cleanup_retry_scheduled",
             stage="worker_nak",
@@ -133,6 +179,7 @@ async def worker_once(
         return True
     if failure.retryable and delivery_number < max_deliveries:
         await queue.nak(delivery, delay_seconds=delay, error=failure)
+        record_task("complete", "retry")
         emit_event(
             "ingestion_retry_scheduled",
             stage="worker_nak",
@@ -149,6 +196,7 @@ async def worker_once(
 
     await metadata.fail_task(delivery.task_id, failure, now)
     await queue.ack(delivery)
+    record_task("complete", "failed")
     emit_event(
         "ingestion_failed",
         stage="worker_failed",

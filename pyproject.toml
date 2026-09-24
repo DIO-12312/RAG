@@ -25,6 +25,9 @@ dependencies = [
     "structlog>=25.4.0,<26.0.0",
     "xxhash>=3.5.0,<4.0.0",
     "pdfplumber>=0.11.10,<0.12.0",
+    "opentelemetry-sdk>=1.37.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.37.0,<2.0.0",
+    "opentelemetry-instrumentation-grpc>=0.58b0,<1.0.0",
 ]
 
 [project.scripts]

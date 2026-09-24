@@ -19,6 +19,7 @@ from rag_mvp.ports.model import ModelGateway, model_for_dataset
 from rag_mvp.ports.parser import Parser
 from rag_mvp.ports.search_engine import IndexedChunk, SearchEngine
 from rag_mvp.ports.storage import ObjectStorage
+from rag_mvp.telemetry import stage
 
 # 进度只用于展示：解析后 5%，Embedding 期间 5%→90%，写入索引后 95%，
 # 终态仍由 Job 状态机在完成事务里写为 100%。
@@ -86,11 +87,14 @@ class IngestionPipeline:
                 )
             )
 
-        source = await self._storage.read(object_key)
-        segments = await self._parser.parse(document.source_name, source)
+        async with stage("object_read"):
+            source = await self._storage.read(object_key)
+        async with stage("parse"):
+            segments = await self._parser.parse(document.source_name, source)
         await _report_progress(on_progress, _PROGRESS_AFTER_PARSE)
         await self._checkpoint(Checkpoint.AFTER_PARSE)
-        drafts = await self._chunker.split(segments)
+        async with stage("chunk"):
+            drafts = await self._chunker.split(segments)
         if not drafts:
             raise DomainError(
                 DomainFailure(
@@ -125,7 +129,8 @@ class IngestionPipeline:
         vectors: list[tuple[float, ...]] = []
         for offset in range(0, len(contents), _EMBEDDING_PROGRESS_CHUNKS):
             group = contents[offset : offset + _EMBEDDING_PROGRESS_CHUNKS]
-            vectors.extend(await model.embed(group))
+            async with stage("embedding"):
+                vectors.extend(await model.embed(group))
             done = offset + len(group)
             await _report_progress(
                 on_progress,
@@ -164,7 +169,8 @@ class IngestionPipeline:
             )
             for chunk, vector in zip(chunks, vectors, strict=True)
         )
-        await self._search.upsert_chunks(indexed)
+        async with stage("index"):
+            await self._search.upsert_chunks(indexed)
         await _report_progress(on_progress, _PROGRESS_AFTER_INDEX)
         await self._checkpoint(Checkpoint.AFTER_INDEX_WRITE)
         return chunks

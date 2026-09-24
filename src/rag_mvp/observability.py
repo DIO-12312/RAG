@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import structlog
 
+from rag_mvp.telemetry import current_ids
+
 _LOGGER = structlog.get_logger("rag_mvp")
 
 
@@ -24,6 +26,7 @@ def emit_event(
 ) -> None:
     """Emit one event with the complete correlation schema, including absent values."""
 
+    trace_id, span_id = current_ids()
     _LOGGER.info(
         event,
         request_id=request_id,
@@ -36,4 +39,6 @@ def emit_event(
         error_code=error_code,
         failure_message=failure_message,
         retry_in_seconds=retry_in_seconds,
+        trace_id=trace_id,
+        span_id=span_id,
     )
