@@ -9,3 +9,7 @@ scrape_configs:
   - job_name: observability-retention
     static_configs:
       - targets: [observability-retention:9470]
+  - job_name: tempo
+    metrics_path: /metrics
+    static_configs:
+      - targets: [tempo:3200]

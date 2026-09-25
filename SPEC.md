@@ -834,6 +834,9 @@ Go 产品控制面在单租户阶段只定义 `user` 与 `admin` 两级角色，
 默认开发、产品及生产 Compose 均将 Collector、Prometheus、Tempo 置于私网，禁止发布其端口或由 Caddy 代理；浏览器只能经 Go 的管理员授权只读 API 查询预设 Metric/Trace。应用在出口使用允许列表，Collector 再清除请求头、查询参数、数据库语句、Prompt、Evidence、模型输入输出和正文；Metric 标签不得使用用户/请求/文档 ID 或其他高基数值。Prometheus 保留最多 15 天且另设字节上限，先触发的保留条件生效；Tempo 保留最多 7 天，容量预算与回收由独立观测控制进程负责。两种存储的后台清理均可能滞后，卷和宿主磁盘需留出 WAL、压缩及故障恢复余量；容量紧急状态只降级遥测摄取，不能中断业务。
 
 Go 的只读管理员接口为 `GET /admin/observability/metrics?window=15m|1h|6h|24h`、`GET /admin/observability/traces?service=<固定服务>&window=<固定窗口>` 和 `GET /admin/observability/traces/:trace_id`。仅 Go 使用固定私网 `PRODUCT_PROMETHEUS_URL` 与 `PRODUCT_TEMPO_URL`；所有接口均经 `authenticate + requireAdmin`。PromQL/TraceQL 由 Go 预定义，不接受任意查询、URL、标签或枚举外筛选值。请求限时 3 秒，响应限 1 MiB，Metric 每个序列至多 100 个点、Trace 列表至多 100 条、详情至多 200 个 Span。响应区分 `ok`、`empty`、`partial` 与后端不可用；详情只输出服务、阶段、时间、耗时、结果、稳定错误码和安全格式的 run/job/task ID，不输出原始 Span 属性。管理员页面每次进入都重新读取 `/me`，只在当前角色为 admin 时显示。
+容器化 Web 与开发代理须将上述管理员观测数据接口转发给 Go API，保留 `/admin/observability` 页面深链由 SPA 处理；不得让数据接口落入 SPA fallback 并返回 HTML。
+
+管理员页面的健康视图从 Prometheus `up` 读取 Collector 指标出口、Trace 接收进程和 Tempo 的固定抓取目标；`up=1` 只说明对应端点可抓取，不能作为业务健康或遥测零丢失保证。指标汇总不受链路服务筛选影响，筛选只用于 Trace 列表。页面按固定 stage 枚举展示摄取与检索阶段 P95，以及 Agent 模型调用速率；无样本时显示暂无数据，不将其判为零耗时。Trace 详情在居中弹窗中按 Span 时间排列瀑布图并保留脱敏明细。Go 查询层只允许固定 job、stage、phase、outcome 值进入响应，不透传任意 Prometheus 标签。
 
 独立 `observability-retention` 进程按 Tempo 数据卷字节占用和宿主可用空间计算容量水位，超过 80% 预算逐级缩短 Tempo 的运行时保留期，让 Tempo 自己按时间淘汰最旧完整块；低于 70% 可逐级恢复，达到 90% 或宿主剩余不足 10% 时拒绝新 Trace。该进程只向其专用共享卷原子写入 `single-tenant` retention override，不能直接删除 Tempo/Prometheus 文件；私网 Trace 通过它转发到 Tempo。该策略的清理是异步的，不保证精确字节硬限。Prometheus 自身按时间/容量清理最旧块，并预留 WAL 与压缩空间。控制进程停机时 Trace 发送可失败，但不能影响任何业务结果。
 

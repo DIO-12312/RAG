@@ -4,11 +4,11 @@
 
 `backend/go-api/internal/storage/admin_role_test.go`：角色枚举离线测试；设置 `PRODUCT_ROLE_TEST_MYSQL_DSN` 指向隔离 MySQL 时，检查注册默认普通用户、并发撤销最后管理员、无用户和非法角色。不能指向运行中的产品库。
 
-`backend/go-api/internal/observability/query_test.go`：假 Prometheus/Tempo 验证固定查询、部分故障、超限响应、空链路、非法 ID 和原始敏感 Span 属性过滤。`backend/go-api/internal/httpapi/server_test.go::TestUnauthenticatedAndCrossOrigin` 同时覆盖管理员路由未登录返回 401。
+`backend/go-api/internal/observability/query_test.go`：假 Prometheus/Tempo 验证固定查询、健康目标与阶段标签允许列表、部分故障、超限响应、空链路、非法 ID 和原始敏感 Span 属性过滤。`backend/go-api/internal/httpapi/server_test.go::TestUnauthenticatedAndCrossOrigin` 同时覆盖管理员路由未登录返回 401。
 
 `backend/go-api/internal/httpapi/observability_test.go::TestObservabilityAuthorizationReadsCurrentRole`：在隔离 MySQL 上使用同一 Cookie 验证普通用户 403、授予管理员后进入后端查询、撤权立即 403；未配置 `PRODUCT_ROLE_TEST_MYSQL_DSN` 时跳过。
 
-`apps/web/tests/observability.spec.ts`：管理员路由进入和撤权后的重新校验、空指标/链路以及后端不可用展示；Vitest + MSW，不代替真实浏览器和 Compose 验收。
+`apps/web/tests/observability.spec.ts`：管理员路由进入和撤权后的重新校验、空指标/链路以及后端不可用展示；健康目标、RAG 阶段指标和链路瀑布图；链路详情居中弹窗、背景滚动锁定、关闭后恢复焦点；Vitest + MSW，不代替真实浏览器和 Compose 验收。
 
 `backend/go-api/internal/httpapi/integration_test.go::TestLiveProductFlow`：真实产品链路只从运行时 `PRODUCT_TEST_EMBEDDING_OWNER_EMAIL` 指定的已保存 Embedding 配置读取密文并解密；未指定时跳过，不能从任意用户配置中猜选。可选 `PRODUCT_TEST_OTEL_ENDPOINT` 启用真实 Go→Python Trace 输出。需要单独部署和隔离数据集，测试源文件中不保存真实邮箱或密钥。
 
@@ -547,7 +547,7 @@ Contract 测试负责固定 protobuf、gRPC 及各基础设施 Port 的可替换
 | 同上 | `test_docker_entrypoints_validate_suites_and_preserve_volumes` | Docker 公共入口复用 Function；run 统一由 Earthfile 顺序准备共享卷、等待 RAG、启动产品服务与容器化 Vue 前端；验证 suite、静默校验 Compose、关闭两套开发栈、清理本地镜像和持久卷保护。eval 同时收集既有 30 问与 PDF 五十问。此离线静态契约不替代 Windows/WSL/Linux 的实际启动验收。 |
 | 同上 | `test_docker_entrypoints_build_search_guard_and_pass_file_secret_paths` | Docker 入口构建安全材料/ES/bootstrap 服务，并仅向测试容器传递 ES password file 与 CA path。 |
 | 同上 | `test_containerized_web_upload_limits_match_supported_rag_sources` | 前端与 Go 白名单一致接纳 PDF、PPTX、CHM/CHI、Markdown、文本和代码；Nginx 为 64 MiB 文件及 multipart 开销设置 70 MiB 请求上限。 |
-| 同上 | `test_containerized_web_proxies_product_health_checks` | 容器化 Nginx 必须将 `/healthz`、`/readyz` 转发到 Go API，防止 SPA fallback 返回 HTML 造成公网健康假阳性。 |
+| 同上 | `test_containerized_web_proxies_product_health_checks` | 容器化 Nginx 必须将 `/healthz`、`/readyz` 和管理员观测数据接口转发到 Go API，开发代理同步覆盖观测接口；观测页面深链由 SPA 处理，避免 HTML 被误当作 API JSON。 |
 | 同上 | `test_web_lockfile_is_complete_and_single_toolchain` | 前端 `package-lock.json` 必须为完整 npm v3 锁（npmjs 条目均带 integrity，且含 Linux rollup/esbuild 原生包），不得并存 pnpm 锁或 pnpm 专属 `.npmrc`，并核对 Dockerfile/Earthfile 使用 `npm ci`；静态契约，不执行安装。 |
 | `test_container_artifacts.py` | `test_package_and_container_use_canonical_root_readme` | GitHub 首页、Python package、Docker 镜像与 Earthly 依赖安装统一使用仓库根 README，禁止保留重复入口。 |
 | `test_search_guard_assets.py` | `test_development_material_generator_creates_separate_node_and_client_secrets` | development 材料生成器使用独立 node/admin 私钥，客户端密码不回显到进程输出。 |

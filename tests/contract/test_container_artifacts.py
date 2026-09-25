@@ -196,6 +196,15 @@ def test_observability_backends_are_private_and_have_bounded_retention() -> None
         (ROOT / "deploy/observability/collector.yaml").read_text(encoding="utf-8")
     )
     tempo = yaml.safe_load((ROOT / "deploy/observability/tempo.yaml").read_text(encoding="utf-8"))
+    prometheus = yaml.safe_load(
+        (ROOT / "deploy/observability/prometheus.yaml").read_text(encoding="utf-8")
+    )
+    scrape_targets = {
+        job["job_name"]: job["static_configs"][0]["targets"] for job in prometheus["scrape_configs"]
+    }
+    assert scrape_targets["otel-collector"] == ["otel-collector:9464"]
+    assert scrape_targets["observability-retention"] == ["observability-retention:9470"]
+    assert scrape_targets["tempo"] == ["tempo:3200"]
     assert (
         collector["exporters"]["otlphttp/tempo"]["endpoint"]
         == "http://observability-retention:9470"

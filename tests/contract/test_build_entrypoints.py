@@ -375,14 +375,23 @@ def test_containerized_web_upload_limits_match_supported_rag_sources() -> None:
 
 
 def test_containerized_web_proxies_product_health_checks() -> None:
-    """公网健康路径必须到达 Go API，不能被 SPA fallback 伪装成成功。"""
+    """健康与管理员观测 API 必须到达 Go，页面深链仍由 SPA 处理。"""
 
     nginx = _text("apps/web/nginx.conf")
 
-    assert (
-        "location ~ ^/(healthz|readyz|auth|me|datasets|jobs|documents|settings|chat|conversations)"
-        in nginx
-    )
+    pattern = re.search(r"location ~ (\S+) \{\s+proxy_pass http://api:8080;", nginx)
+    assert pattern is not None
+    for path in (
+        "/healthz",
+        "/readyz",
+        "/admin/observability/metrics",
+        "/admin/observability/traces",
+        "/admin/observability/traces/0123456789abcdef0123456789abcdef",
+    ):
+        assert re.match(pattern.group(1), path)
+    assert not re.match(pattern.group(1), "/admin/observability")
+    assert '"/admin/observability/metrics"' in _text("apps/web/vite.config.ts")
+    assert '"/admin/observability/traces"' in _text("apps/web/vite.config.ts")
 
 
 def test_web_lockfile_is_complete_and_single_toolchain() -> None:

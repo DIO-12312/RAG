@@ -36,8 +36,40 @@ func TestMetricsUsesFixedQueriesAndReportsPartialResults(t *testing.T) {
 	if got.Status != "partial" || len(got.Panels) != len(metricSpecs) {
 		t.Fatalf("%+v", got)
 	}
-	if got.Panels[len(got.Panels)-1].Code != "PROMETHEUS_QUERY_FAILED" {
-		t.Fatal(got.Panels)
+	for _, panel := range got.Panels {
+		if panel.Key == "outbox_results" && panel.Code == "PROMETHEUS_QUERY_FAILED" {
+			return
+		}
+	}
+	t.Fatal(got.Panels)
+}
+
+func TestMetricSeriesOnlyExposesFixedStageAndTargetLabels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		label := "stage"
+		allowed := "embedding"
+		if strings.HasPrefix(query, "up{") {
+			label, allowed = "job", "tempo"
+		}
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"` + label + `":"` + allowed + `"},"values":[[100,"1.5"]]},{"metric":{"` + label + `":"private-user-id"},"values":[[100,"2"]]}]}}`))
+	}))
+	defer server.Close()
+	client, err := New(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range metricSpecs {
+		if spec.label != "ingestion_stage" && spec.label != "job" {
+			continue
+		}
+		series, err := client.queryRange(context.Background(), "1h", spec)
+		if err != nil || len(series) != 1 {
+			t.Fatalf("%s: %+v %v", spec.key, series, err)
+		}
+		if series[0].Name != "embedding" && series[0].Name != "tempo" {
+			t.Fatalf("unexpected label: %q", series[0].Name)
+		}
 	}
 }
 

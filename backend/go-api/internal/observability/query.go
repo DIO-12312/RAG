@@ -131,21 +131,25 @@ type TraceDetail struct {
 }
 
 type metricSpec struct {
-	key      string
-	query    string
-	byResult bool
+	key   string
+	query string
+	label string
 }
 
 var metricSpecs = []metricSpec{
-	{"chat_throughput", `sum(rate(rag_chat_runs_total[5m]))`, false},
-	{"chat_error_rate", `sum(rate(rag_chat_runs_total{outcome="failed"}[5m])) / clamp_min(sum(rate(rag_chat_runs_total[5m])), 1e-9)`, false},
-	{"chat_p50", `histogram_quantile(0.5, sum(rate(rag_chat_duration_seconds_bucket[5m])) by (le))`, false},
-	{"chat_p95", `histogram_quantile(0.95, sum(rate(rag_chat_duration_seconds_bucket[5m])) by (le))`, false},
-	{"retrieval_p95", `histogram_quantile(0.95, sum(rate(rag_retrieval_duration_seconds_bucket[5m])) by (le))`, false},
-	{"grpc_p95", `histogram_quantile(0.95, sum(rate(rag_grpc_client_duration_seconds_bucket[5m])) by (le))`, false},
-	{"ingestion_throughput", `sum(rate(rag_ingestion_tasks_total[5m]))`, false},
-	{"ingestion_results", `sum by (outcome) (rate(rag_ingestion_tasks_total[5m]))`, true},
-	{"outbox_results", `sum by (outcome) (rate(rag_outbox_publish_total[5m]))`, true},
+	{"telemetry_targets", `up{job=~"otel-collector|observability-retention|tempo"}`, "job"},
+	{"chat_throughput", `sum(rate(rag_chat_runs_total[5m]))`, ""},
+	{"chat_error_rate", `sum(rate(rag_chat_runs_total{outcome="failed"}[5m])) / clamp_min(sum(rate(rag_chat_runs_total[5m])), 1e-9)`, ""},
+	{"chat_p50", `histogram_quantile(0.5, sum(rate(rag_chat_duration_seconds_bucket[5m])) by (le))`, ""},
+	{"chat_p95", `histogram_quantile(0.95, sum(rate(rag_chat_duration_seconds_bucket[5m])) by (le))`, ""},
+	{"retrieval_p95", `histogram_quantile(0.95, sum(rate(rag_retrieval_duration_seconds_bucket[5m])) by (le))`, ""},
+	{"grpc_p95", `histogram_quantile(0.95, sum(rate(rag_grpc_client_duration_seconds_bucket[5m])) by (le))`, ""},
+	{"ingestion_throughput", `sum(rate(rag_ingestion_tasks_total[5m]))`, ""},
+	{"ingestion_results", `sum by (outcome) (rate(rag_ingestion_tasks_total[5m]))`, "outcome"},
+	{"outbox_results", `sum by (outcome) (rate(rag_outbox_publish_total[5m]))`, "outcome"},
+	{"ingestion_stage_p95", `histogram_quantile(0.95, sum by (stage, le) (rate(rag_ingestion_stage_duration_seconds_bucket[5m])))`, "ingestion_stage"},
+	{"retrieval_stage_p95", `histogram_quantile(0.95, sum by (stage, le) (rate(rag_retrieval_duration_seconds_bucket[5m])))`, "retrieval_stage"},
+	{"agent_model_calls", `sum by (phase) (rate(rag_agent_model_calls_total[5m]))`, "phase"},
 }
 
 func (c *Client) Metrics(ctx context.Context, window string) (MetricsResponse, error) {
@@ -224,11 +228,14 @@ func (c *Client) queryRange(ctx context.Context, window string, spec metricSpec)
 	series := make([]Series, 0, len(envelope.Data.Result))
 	for _, item := range envelope.Data.Result {
 		name := "value"
-		if spec.byResult {
-			name = item.Metric["outcome"]
-			if !allowedOutcome(name) {
-				continue
-			}
+		switch spec.label {
+		case "outcome", "job", "phase":
+			name = item.Metric[spec.label]
+		case "ingestion_stage", "retrieval_stage":
+			name = item.Metric["stage"]
+		}
+		if !allowedMetricLabel(spec.label, name) {
+			continue
 		}
 		if len(series) >= 8 {
 			break
@@ -463,6 +470,25 @@ func allowedOutcome(value string) bool {
 	switch value {
 	case "succeeded", "failed", "cancelled", "retry", "skipped":
 		return true
+	default:
+		return false
+	}
+}
+
+func allowedMetricLabel(label, value string) bool {
+	switch label {
+	case "":
+		return true
+	case "outcome":
+		return allowedOutcome(value)
+	case "job":
+		return value == "otel-collector" || value == "observability-retention" || value == "tempo"
+	case "phase":
+		return value == "route" || value == "model" || value == "tool" || value == "assess" || value == "rewrite" || value == "finalize" || value == "complete"
+	case "ingestion_stage":
+		return value == "object_read" || value == "parse" || value == "chunk" || value == "embedding" || value == "index"
+	case "retrieval_stage":
+		return value == "dense" || value == "sparse" || value == "visibility" || value == "rerank" || value == "evidence"
 	default:
 		return false
 	}
